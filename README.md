@@ -7,6 +7,7 @@ The `gai` CLI is a small npm-publishable helper that the managed agent can call 
 - `gai image`
 - `gai video`
 - `gai tts`
+- `gai transcribe`
 
 The current contract lives in `agents/system-prompt.md`, `agents/AGENTS.md`, `agents/skills/gemini-anything/SKILL.md`, and the `cli/` package itself.
 

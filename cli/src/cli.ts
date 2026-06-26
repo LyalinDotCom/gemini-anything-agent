@@ -6,6 +6,7 @@ import { printResult } from "./output.js";
 import { runDoctor } from "./subcommands/doctor.js";
 import { runImage } from "./subcommands/image.js";
 import { listModels } from "./subcommands/models.js";
+import { runTranscribe } from "./subcommands/transcribe.js";
 import { runTts } from "./subcommands/tts.js";
 import { runVideo } from "./subcommands/video.js";
 import type { CommandFailure } from "./types.js";
@@ -14,7 +15,7 @@ loadEnvironment();
 
 const program = new Command();
 
-const packageVersion = "0.1.3";
+const packageVersion = "0.1.4";
 
 const failureFromError = (error: unknown, capability?: string, model?: string): CommandFailure => ({
   ok: false,
@@ -61,6 +62,7 @@ Run a command help page before using a media capability:
   gai image --help
   gai video --help
   gai tts --help
+  gai transcribe --help
 
 Use --json for machine-readable output. Generated files are written to --out when provided.`
   );
@@ -124,6 +126,32 @@ Examples:
   gai tts --script-file /workspace/output/script.txt --voice Puck --out /workspace/output/podcast.wav --json`
   )
   .action((prompt: string | undefined, options) => runAction(options.json, () => runTts(prompt, options), "tts"));
+
+program
+  .command("transcribe")
+  .description("Transcribe an audio file")
+  .argument("<file>", "audio file path")
+  .option("--out <path>", "output transcript path")
+  .option("--model <model>", "override model")
+  .option("--prompt <text>", "additional transcription instructions")
+  .option("--language <language>", "expected language or locale")
+  .option("--format <format>", "markdown, text, srt, or json", "markdown")
+  .option("--no-speakers", "do not request speaker labels")
+  .option("--no-timestamps", "do not request timestamps")
+  .option("--mime <mime>", "input audio MIME type override")
+  .option("--dry-run", "show selected model and output path without calling the API")
+  .option("--json", "print machine-readable JSON")
+  .addHelpText(
+    "after",
+    `
+
+Examples:
+  gai transcribe /workspace/output/podcast.wav --out /workspace/output/podcast-transcript.md --json
+  gai transcribe meeting.mp3 --format srt --out captions.srt --json`
+  )
+  .action((file: string, options) =>
+    runAction(options.json, () => runTranscribe(file, options), "transcribe")
+  );
 
 program
   .command("video")

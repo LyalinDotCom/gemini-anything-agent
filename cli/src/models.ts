@@ -1,4 +1,4 @@
-export type Capability = "agy" | "image" | "video" | "tts";
+export type Capability = "agy" | "image" | "video" | "tts" | "transcribe";
 
 export type ApiSurface = "interactions" | "generateVideos" | "managed-agent";
 
@@ -71,6 +71,15 @@ export const MODEL_REGISTRY = [
     apiSurface: "interactions",
     isDefault: true,
     notes: "Gemini 3.1 Flash TTS preview for speech generation."
+  },
+  {
+    id: "gemini-3.5-flash",
+    capability: "transcribe",
+    label: "Transcription default",
+    status: "stable",
+    apiSurface: "interactions",
+    isDefault: true,
+    notes: "Gemini 3.5 Flash audio understanding route for transcription, timestamps, and speaker labels."
   }
 ] as const satisfies readonly ModelRegistryEntry[];
 
@@ -91,6 +100,9 @@ export const defaultImageModel = (): string =>
 export const defaultTtsModel = (): string =>
   process.env.GEMINI_ANYTHING_TTS_MODEL || "gemini-3.1-flash-tts-preview";
 
+export const defaultTranscribeModel = (): string =>
+  process.env.GEMINI_ANYTHING_TRANSCRIBE_MODEL || "gemini-3.5-flash";
+
 export type VideoQuality = "lite" | "premium" | "fast-premium";
 
 export const videoModelForQuality = (quality: VideoQuality): string => {
@@ -109,4 +121,3 @@ export const videoModelForQuality = (quality: VideoQuality): string => {
 
 export const isDeprecatedDefault = (model: string): boolean =>
   DEPRECATED_DEFAULT_DENYLIST.includes(model as (typeof DEPRECATED_DEFAULT_DENYLIST)[number]);
-

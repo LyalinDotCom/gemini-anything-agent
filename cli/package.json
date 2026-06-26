@@ -1,6 +1,6 @@
 {
   "name": "@lyalindotcom/gai",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": false,
   "description": "Media capability CLI for Gemini Anything managed agents.",
   "type": "module",

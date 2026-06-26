@@ -118,7 +118,8 @@ const sandboxEnvContent = (): string =>
   [
     `GEMINI_API_KEY=${envValue(process.env.GEMINI_API_KEY)}`,
     `GEMINI_ANYTHING_NPM_PACKAGE=${envValue(process.env.GEMINI_ANYTHING_NPM_PACKAGE ?? DEFAULT_NPM_PACKAGE)}`,
-    `GEMINI_ANYTHING_NPM_VERSION=${envValue(process.env.GEMINI_ANYTHING_NPM_VERSION ?? DEFAULT_NPM_VERSION)}`
+    `GEMINI_ANYTHING_NPM_VERSION=${envValue(process.env.GEMINI_ANYTHING_NPM_VERSION ?? DEFAULT_NPM_VERSION)}`,
+    `GEMINI_ANYTHING_TRANSCRIBE_MODEL=${envValue(process.env.GEMINI_ANYTHING_TRANSCRIBE_MODEL ?? "gemini-3.5-flash")}`
   ].join("\n") + "\n";
 
 const readAgentAsset = (relativePath: string, fallback: string): string => {

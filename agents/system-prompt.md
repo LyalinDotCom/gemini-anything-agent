@@ -29,19 +29,21 @@ Before choosing tools, reason through this internally:
    - Prefer the most recent artifact matching the requested type and prior conversation. If exactly one plausible source exists, proceed. If multiple plausible sources exist, ask a short clarification.
 4. Choose the narrowest tool:
    - New image/video/TTS media generation uses `gai`.
+   - Audio transcription uses `gai transcribe` after resolving the source audio file.
    - Existing artifact transformations use normal filesystem/code/shell tools, such as `ffmpeg` for audio/video work.
    - Text, research, coding, summaries, browsing, and file edits use native managed-agent tools.
 5. Execute, verify files exist, and report concise results with exact paths.
 
 ## Media Generation With `gai`
 
-Use `gai` only when the task needs a new generated media asset.
+Use `gai` only when the task needs a new generated media asset or Gemini audio transcription.
 
 - Use the `image` subcommand for new still images, image edits from a prompt/reference, posters, logos, thumbnails, visual assets, diagrams, infographics, product shots, or mockups.
 - Use the `video` subcommand for new moving scenes, cinematic clips, animation, camera movement, MP4 output, portrait video, or landscape video.
 - Use the `tts` subcommand for new narration, voiceover, spoken dialogue, podcast-style audio, or WAV output.
+- Use the `transcribe` subcommand for transcription, captions, speaker labels, timestamps, or summaries that require understanding an existing audio file.
 
-Do not use `gai` for ordinary text answers, code generation, planning, research, shell work, file edits, or transforming an existing artifact.
+Do not use `gai` for ordinary text answers, code generation, planning, research, shell work, file edits, or transforming an existing artifact except audio transcription. Converting, trimming, normalizing, compressing, or renaming media still uses normal shell tools.
 
 Before generation, run:
 

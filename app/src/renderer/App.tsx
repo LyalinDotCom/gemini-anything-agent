@@ -8,6 +8,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
+  RefreshCw,
   Settings,
   Sparkles,
   Trash2,
@@ -190,6 +191,52 @@ const promptForInput = (input: InteractionCreateRequest["input"]): string => {
     .trim();
 };
 
+const composeFromRequest = (request: InteractionCreateRequest): ComposeState => {
+  const input = typeof request.input === "string"
+    ? request.input
+    : request.input
+        .filter((part) => part.type === "text")
+        .map((part) => part.text)
+        .join("\n");
+  const parts = Array.isArray(request.input)
+    ? request.input.flatMap((part, index): ImagePartDraft[] =>
+        part.type === "image"
+          ? [
+              {
+                id: uid(),
+                kind: "image",
+                data: part.data,
+                mimeType: part.mime_type,
+                name: `attached-image-${index + 1}`,
+                bytes: Math.round((part.data.length * 3) / 4)
+              }
+            ]
+          : []
+      )
+    : [];
+  const environmentId =
+    typeof request.environment === "string" && request.environment !== "remote" ? request.environment : "";
+
+  return {
+    ...initialCompose,
+    inputMode: parts.length ? "parts" : "string",
+    input,
+    parts,
+    store: request.store ?? initialCompose.store,
+    autoContinue: !request.previous_interaction_id,
+    reuseEnvironment: request.environment === "remote",
+    background: request.background ?? initialCompose.background,
+    serviceTier: request.service_tier ?? initialCompose.serviceTier,
+    thinkingSummaries: request.agent_config?.thinking_summaries ?? initialCompose.thinkingSummaries,
+    previousInteractionId: request.previous_interaction_id ?? "",
+    overrideSystemInstruction: Boolean(request.system_instruction),
+    systemInstruction: request.system_instruction ?? "",
+    overrideTools: Boolean(request.tools?.length),
+    overrideEnvironment: Boolean(environmentId),
+    environmentId
+  };
+};
+
 const firstPromptLine = (input: InteractionCreateRequest["input"]): string => {
   const prompt = promptForInput(input).trim().replace(/\s+/g, " ");
   if (!prompt) {
@@ -212,11 +259,32 @@ const MEDIA_PATH_PATTERN =
 const cleanMediaPath = (value: string): string =>
   value.replace(/[),.;:!?]+$/g, "").replace(/[?#].*$/, "");
 
+const TRANSCRIPT_REQUEST_PATTERN = /\b(transcrib(?:e|ed|ing)?|transcript|captions?|subtitles?|srt)\b/i;
+const MEDIA_PRODUCING_REQUEST_PATTERN =
+  /\b(?:image|picture|photo|video|tts|voiceover|narration|convert|mp3|generate\s+(?:an?\s+)?(?:image|video|audio)|create\s+(?:an?\s+)?(?:image|video|audio|podcast)|make\s+(?:an?\s+)?(?:image|video|audio|podcast))\b/i;
+
 const extractMediaPaths = (text: string | undefined): string[] => {
   if (!text) {
     return [];
   }
   return [...new Set([...text.matchAll(MEDIA_PATH_PATTERN)].map((match) => cleanMediaPath(match[0])))];
+};
+
+const shouldAutoResolveMedia = (session: Session): boolean => {
+  const prompt = promptForInput(session.request.input);
+  const transcriptionOnly =
+    TRANSCRIPT_REQUEST_PATTERN.test(prompt) && !MEDIA_PRODUCING_REQUEST_PATTERN.test(prompt);
+  return !transcriptionOnly;
+};
+
+const textFileNameForLabel = (label: string): string => {
+  const stem = label
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "agent-output";
+  return stem.endsWith(".md") || stem.endsWith(".txt") ? stem : `${stem}.md`;
 };
 
 const SessionMedia = ({
@@ -332,6 +400,72 @@ const MediaLightbox = ({
           )}
         </div>
       </div>
+    </div>
+  );
+};
+
+const SessionControls = ({
+  session,
+  reconnecting,
+  canReconnect,
+  canRetry,
+  canCancel,
+  onReconnect,
+  onRetry,
+  onCancel
+}: {
+  session: Session;
+  reconnecting: boolean;
+  canReconnect: boolean;
+  canRetry: boolean;
+  canCancel: boolean;
+  onReconnect: () => void;
+  onRetry: () => void;
+  onCancel: () => void;
+}) => {
+  const interactionId = session.seed?.id;
+  const showReconnect = Boolean(interactionId && canReconnect);
+  if (reconnecting || session.streaming || (!showReconnect && !canRetry)) {
+    return null;
+  }
+
+  return (
+    <div className="session-controls">
+      {showReconnect && (
+        <button
+          type="button"
+          className="ghost-button sm"
+          disabled={reconnecting}
+          title="Reconnect to this interaction stream and refresh status"
+          onClick={onReconnect}
+        >
+          <RefreshCw size={12} className={reconnecting ? "spin" : undefined} />
+          {reconnecting ? "Reconnecting" : "Reconnect"}
+        </button>
+      )}
+      {canRetry && (
+        <button
+          type="button"
+          className="ghost-button sm"
+          title="Restore this turn's prompt and options in the composer"
+          onClick={onRetry}
+        >
+          <RefreshCw size={12} />
+          Retry prompt
+        </button>
+      )}
+      {session.streaming && (
+        <button
+          type="button"
+          className="ghost-button sm danger"
+          disabled={!canCancel}
+          title="Cancel this remote interaction"
+          onClick={onCancel}
+        >
+          <XCircle size={12} />
+          Cancel
+        </button>
+      )}
     </div>
   );
 };
@@ -504,6 +638,11 @@ const shouldResumeBackgroundSession = (session: Session): boolean =>
   !session.streaming &&
   !session.error &&
   !interactionIsTerminal(session.seed!);
+
+const sessionCanReconnect = (session: Session): boolean =>
+  Boolean(session.seed?.id) &&
+  !session.streaming &&
+  (Boolean(session.error) || !interactionIsTerminal(session.seed!));
 
 const fallbackAgent = (agentId: string): ManagedAgent => ({
   id: agentId,
@@ -927,7 +1066,7 @@ export const App = () => {
     setSessions((current) =>
       current.map((session) =>
         session.localId === sessionToResume.localId
-          ? { ...session, streaming: true, streamId }
+          ? { ...session, error: undefined, completedAt: undefined, streaming: true, streamId }
           : session
       )
     );
@@ -1033,6 +1172,45 @@ export const App = () => {
     } finally {
       activeResumeIds.current.delete(sessionToResume.localId);
     }
+  }
+
+  async function reconnectSessionStream(sessionToReconnect: Session) {
+    if (!window.managedAgents?.resumeInteractionStream) {
+      pushStatus({ level: "error", title: "Reconnect unavailable", detail: "Run the Electron app to reconnect streams." });
+      return;
+    }
+    const interactionId = sessionToReconnect.seed?.id;
+    if (!interactionId) {
+      pushStatus({ level: "error", title: "Reconnect unavailable", detail: "This turn has no interaction id yet." });
+      return;
+    }
+    if (activeResumeIds.current.has(sessionToReconnect.localId)) {
+      return;
+    }
+
+    const staleStreamId = sessionToReconnect.streamId;
+    if (staleStreamId && window.managedAgents.cancelInteractionStream) {
+      await window.managedAgents.cancelInteractionStream(staleStreamId);
+    }
+
+    pushStatus({ level: "info", title: "Reconnecting", detail: interactionId });
+    await resumeSessionStream({
+      ...sessionToReconnect,
+      error: undefined,
+      completedAt: undefined,
+      streamId: undefined,
+      streaming: false
+    });
+  }
+
+  function restoreSessionPromptForRetry(sessionToRetry: Session) {
+    setCompose(composeFromRequest(sessionToRetry.request));
+    setLatestRunId(null);
+    pushStatus({
+      level: "info",
+      title: "Prompt restored",
+      detail: "Press Run to retry this turn."
+    });
   }
 
   async function cancelSession(sessionToCancel: Session) {
@@ -1147,6 +1325,21 @@ export const App = () => {
     }
   }
 
+  async function saveText(text: string, label: string) {
+    if (!window.managedAgents?.saveText) {
+      pushStatus({ level: "error", title: "Save unavailable", detail: "Run the Electron app to save text." });
+      return;
+    }
+    const result = await window.managedAgents.saveText(text, textFileNameForLabel(label));
+    if (!result.ok) {
+      pushStatus({ level: "error", title: result.error.name, detail: result.error.message });
+      return;
+    }
+    if (result.value.saved) {
+      pushStatus({ level: "success", title: "Text saved", detail: result.value.path });
+    }
+  }
+
   async function saveMedia(item: ResolvedEnvironmentMedia) {
     if (!window.managedAgents?.saveResolvedMedia) {
       pushStatus({ level: "error", title: "Save unavailable", detail: "Run the Electron app to save media." });
@@ -1164,6 +1357,9 @@ export const App = () => {
 
   async function resolveMediaForSession(session: Session, force = false) {
     if (!window.managedAgents?.resolveEnvironmentMedia) {
+      return;
+    }
+    if (!force && !shouldAutoResolveMedia(session)) {
       return;
     }
     const environmentId = sessionEnvironmentId(session);
@@ -1410,6 +1606,27 @@ export const App = () => {
                     embedded
                     empty="Waiting for the agent..."
                     onCopy={copyText}
+                    onSaveText={saveText}
+                  />
+                  <SessionControls
+                    session={session}
+                    reconnecting={activeResumeIds.current.has(session.localId)}
+                    canReconnect={Boolean(
+                      hasBridge &&
+                        hasKey &&
+                        window.managedAgents?.resumeInteractionStream &&
+                        sessionCanReconnect(session) &&
+                        !activeResumeIds.current.has(session.localId)
+                    )}
+                    canRetry={Boolean(session.error && busy === null)}
+                    canCancel={Boolean(
+                      session.streaming &&
+                        busy !== "cancel" &&
+                        (session.seed?.id || session.streamId)
+                    )}
+                    onReconnect={() => void reconnectSessionStream(session)}
+                    onRetry={() => restoreSessionPromptForRetry(session)}
+                    onCancel={() => void cancelSession(session)}
                   />
                   <SessionMedia
                     state={mediaBySession[session.localId]}

@@ -9,6 +9,7 @@ import {
   ChevronRight,
   CircleDot,
   Copy,
+  Download,
   FilePen,
   Link2,
   Loader2,
@@ -23,6 +24,8 @@ import type { ActivityKind, TimelineItem } from "../lib/timeline";
 import { BufferedAudio } from "./BufferedAudio";
 
 type IconType = typeof Brain;
+const LONG_BODY_PREVIEW_CHARS = 24000;
+const MARKDOWN_RENDER_LIMIT_CHARS = 80000;
 
 const KIND_ICON: Record<ActivityKind, IconType> = {
   thinking: Brain,
@@ -52,21 +55,46 @@ const StatusGlyph = ({ status }: { status: TimelineItem["status"] }) => {
   return <CheckCircle2 size={13} />;
 };
 
-const renderBody = (body: string, markdown?: boolean, terminal?: boolean) => {
-  if (markdown) {
-    return (
-      <div className="md">
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-          {body}
-        </ReactMarkdown>
-      </div>
-    );
-  }
-  if (terminal) {
-    return <pre className="term">{body}</pre>;
-  }
-  return <div className="act-prose">{body}</div>;
+const BodyRenderer = ({
+  body,
+  markdown,
+  terminal
+}: {
+  body: string;
+  markdown?: boolean;
+  terminal?: boolean;
+}) => {
+  const [expanded, setExpanded] = useState(body.length <= LONG_BODY_PREVIEW_CHARS);
+  const isLong = body.length > LONG_BODY_PREVIEW_CHARS;
+  const renderedBody = expanded ? body : body.slice(0, LONG_BODY_PREVIEW_CHARS);
+  const renderMarkdown = Boolean(markdown && renderedBody.length <= MARKDOWN_RENDER_LIMIT_CHARS);
+  const content = renderMarkdown ? (
+    <div className="md">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+        {renderedBody}
+      </ReactMarkdown>
+    </div>
+  ) : terminal ? (
+    <pre className="term">{renderedBody}</pre>
+  ) : (
+    <div className="act-prose">{renderedBody}</div>
+  );
+
+  return (
+    <div className={isLong ? "long-body" : undefined}>
+      {content}
+      {isLong && (
+        <button type="button" className="long-body-toggle" onClick={() => setExpanded((value) => !value)}>
+          {expanded ? "Show less" : `Show full text (${body.length.toLocaleString()} chars)`}
+        </button>
+      )}
+    </div>
+  );
 };
+
+const renderBody = (body: string, markdown?: boolean, terminal?: boolean) => (
+  <BodyRenderer body={body} markdown={markdown} terminal={terminal} />
+);
 
 const MEDIA_EXTENSIONS: Record<string, "image" | "video" | "audio"> = {
   ".png": "image",
@@ -193,10 +221,12 @@ const detailHasContent = (detail: NonNullable<TimelineItem["details"]>[number]):
 
 const ActivityRow = ({
   item,
-  onCopy
+  onCopy,
+  onSaveText
 }: {
   item: TimelineItem;
   onCopy: (text: string, label: string) => void;
+  onSaveText?: (text: string, label: string) => void;
 }) => {
   // The answer is the payload of the turn — show it open. Steps stay folded.
   const startsOpen =
@@ -259,6 +289,16 @@ const ActivityRow = ({
           >
             <Copy size={12} />
           </button>
+          {onSaveText && copyText.trim() && (
+            <button
+              type="button"
+              className="act-save"
+              title="Save text"
+              onClick={() => onSaveText(copyText, item.title)}
+            >
+              <Download size={12} />
+            </button>
+          )}
           {item.details?.length ? (
             <div className="act-details">
               {item.details.map((detail, index) => (
@@ -291,7 +331,8 @@ export const Transcript = ({
   streaming,
   embedded = false,
   empty,
-  onCopy
+  onCopy,
+  onSaveText
 }: {
   prompt: string;
   startedAt: number;
@@ -301,6 +342,7 @@ export const Transcript = ({
   /** Shown when there is nothing to display yet (e.g. waiting on the stream). */
   empty?: string;
   onCopy: (text: string, label: string) => void;
+  onSaveText?: (text: string, label: string) => void;
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   // Follow the tail only while the run is still streaming; a finished run opens
@@ -368,7 +410,7 @@ export const Transcript = ({
                 {steps.length > 0 && (
                   <div className="act-group">
                     {steps.map((item) => (
-                      <ActivityRow key={item.id} item={item} onCopy={onCopy} />
+                      <ActivityRow key={item.id} item={item} onCopy={onCopy} onSaveText={onSaveText} />
                     ))}
                   </div>
                 )}
@@ -383,6 +425,16 @@ export const Transcript = ({
                     >
                       <Copy size={12} />
                     </button>
+                    {onSaveText && item.body?.trim() && (
+                      <button
+                        type="button"
+                        className="act-save"
+                        title="Save text"
+                        onClick={() => onSaveText(item.body ?? "", item.title)}
+                      >
+                        <Download size={12} />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>

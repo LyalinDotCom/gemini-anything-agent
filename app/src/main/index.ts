@@ -37,6 +37,7 @@ import {
   type IpcResult,
   type ResolvedEnvironmentMedia,
   type SaveResolvedMediaResult,
+  type SaveTextResult,
   type SetApiKeyResult,
   type SnapshotDownloadResult
 } from "../shared/electron-api";
@@ -977,6 +978,21 @@ handle<[string], SaveResolvedMediaResult>(ipcChannels.saveResolvedMedia, async (
   }
 
   copyFileSync(source, result.filePath);
+  return { saved: true, path: result.filePath, bytes: statSync(result.filePath).size };
+});
+
+handle<[string, string | undefined], SaveTextResult>(ipcChannels.saveText, async (content, defaultFileName) => {
+  const safeName =
+    basename((defaultFileName || "agent-output.md").replace(/[/\\:*?"<>|]+/g, "-")).trim() || "agent-output.md";
+  const result = await dialog.showSaveDialog({
+    title: "Save text",
+    defaultPath: safeName
+  });
+  if (result.canceled || !result.filePath) {
+    return { saved: false, canceled: true };
+  }
+
+  writeFileSync(result.filePath, content, "utf8");
   return { saved: true, path: result.filePath, bytes: statSync(result.filePath).size };
 });
 

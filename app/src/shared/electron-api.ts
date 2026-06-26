@@ -50,6 +50,10 @@ export type SaveResolvedMediaResult =
   | { saved: true; path: string; bytes: number }
   | { saved: false; canceled: true };
 
+export type SaveTextResult =
+  | { saved: true; path: string; bytes: number }
+  | { saved: false; canceled: true };
+
 export type InteractionStreamSnapshot = {
   events: InteractionStreamEvent[];
   latestInteraction?: Interaction;
@@ -121,6 +125,7 @@ export type ManagedAgentsBridge = {
     paths: string[]
   ) => Promise<IpcResult<ResolvedEnvironmentMedia[]>>;
   saveResolvedMedia: (path: string) => Promise<IpcResult<SaveResolvedMediaResult>>;
+  saveText: (content: string, defaultFileName?: string) => Promise<IpcResult<SaveTextResult>>;
   loadAgentProject: (agentId: string) => Promise<IpcResult<AgentProjectSnapshot>>;
   saveAgentProject: (
     agentId: string,
@@ -150,6 +155,7 @@ export const ipcChannels = {
   downloadSnapshot: "managed-agents:download-snapshot",
   resolveEnvironmentMedia: "managed-agents:resolve-environment-media",
   saveResolvedMedia: "managed-agents:save-resolved-media",
+  saveText: "managed-agents:save-text",
   loadAgentProject: "managed-agents:load-agent-project",
   saveAgentProject: "managed-agents:save-agent-project",
   openAgentProject: "managed-agents:open-agent-project",

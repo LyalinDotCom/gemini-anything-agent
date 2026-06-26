@@ -9,6 +9,7 @@ import type {
   ResolvedEnvironmentMedia,
   RuntimeConfig,
   SaveResolvedMediaResult,
+  SaveTextResult,
   SetApiKeyResult,
   SnapshotDownloadResult
 } from "../shared/electron-api";
@@ -65,6 +66,8 @@ const bridge: ManagedAgentsBridge = {
     invoke<ResolvedEnvironmentMedia[]>(ipcChannels.resolveEnvironmentMedia, environmentId, paths),
   saveResolvedMedia: (path: string) =>
     invoke<SaveResolvedMediaResult>(ipcChannels.saveResolvedMedia, path),
+  saveText: (content: string, defaultFileName?: string) =>
+    invoke<SaveTextResult>(ipcChannels.saveText, content, defaultFileName),
   loadAgentProject: (agentId: string) =>
     invoke<AgentProjectSnapshot>(ipcChannels.loadAgentProject, agentId),
   saveAgentProject: (agentId: string, files: AgentProjectFileSnapshot[]) =>

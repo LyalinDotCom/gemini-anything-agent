@@ -1,58 +1,56 @@
 # Gemini Anything Media Skill
 
-Use this skill when the user asks for generated media that the managed agent should create through Gemini specialized media models.
+Use this skill only when the user asks for a new generated media artifact through Gemini specialized media models.
 
 Do not use this skill for ordinary text answers, code generation, planning, research, shell work, or file edits. Do that work directly as the managed agent.
 
-## Install Or Invoke
+Do not use this skill for converting, renaming, moving, packaging, trimming, resizing, inspecting, or otherwise transforming an existing file. Existing artifact work belongs to native managed-agent tools.
 
-Prefer `npx` so the sandbox does not depend on global install state:
+Before using this skill, classify the action. If the user refers to an existing artifact with words like "this", "that", "the file", "the podcast", "the audio", "the image", "the video", or "the previous artifact", inspect `/workspace/output` first and resolve the source artifact. Only continue with this skill if the resolved action is new media generation.
 
-```bash
-export GAI_PACKAGE="${GEMINI_ANYTHING_NPM_PACKAGE:-@lyalindotcom/gai}"
-export GAI_VERSION="${GEMINI_ANYTHING_NPM_VERSION:-latest}"
-export GAI_NPX="npx -y ${GAI_PACKAGE}@${GAI_VERSION}"
-```
-
-Run a quick check before media work:
+## Use The CLI
 
 ```bash
-$GAI_NPX doctor --json
+export GAI="/.agents/bin/gai"
+test -f "$GAI" || { echo "gai wrapper is missing at $GAI; the app must redeploy the managed agent assets." >&2; exit 1; }
 ```
 
-## Routing Rules
+Run `bash "$GAI" --help` before using the CLI in a fresh environment. Then run the relevant subcommand help, such as `bash "$GAI" image --help`, `bash "$GAI" video --help`, or `bash "$GAI" tts --help`. Follow the current help output; it is the source of truth.
 
-Use `gai image` for still images, image edits, posters, logos, mockups, diagrams, infographics, thumbnails, product shots, or visual assets.
+Respect the help syntax exactly:
 
-Use `gai video` for moving scenes, cinematic clips, animations, camera movement, portrait or landscape video, or MP4 output.
+- `<name>` means the argument is required.
+- `[name]` means the argument is optional.
+- If `tts --help` shows `<prompt>`, include a positional prompt even when using `--script-file`.
+- If `tts --help` shows `[prompt]`, `--script-file` may be used without a positional prompt.
 
-Use `gai tts` for narration, voiceover, spoken dialogue, podcasts, or WAV output.
+Use `--json` for generation commands so results are machine-readable.
 
-Ask the user before starting video generation when the request is ambiguous or likely expensive.
+## Routing
 
-## Commands
+Use the CLI only for:
 
-```bash
-mkdir -p /workspace/output
-$GAI_NPX image "$PROMPT" --aspect 16:9 --image-size 2K --out /workspace/output/image.jpg --json
-$GAI_NPX video "$PROMPT" --quality lite --out /workspace/output/video.mp4 --json
-$GAI_NPX tts "$SCRIPT" --voice Puck --out /workspace/output/narration.wav --json
-```
+- Images: still images, edits, posters, logos, mockups, diagrams, thumbnails, product shots, or visual assets.
+- Video: moving scenes, cinematic clips, animations, camera movement, portrait or landscape video, or MP4 output.
+- TTS: narration, voiceover, spoken dialogue, podcasts, or WAV output.
 
-## Expected JSON
+For clear simple video requests, proceed with the lite/default route shown by `video --help`. Ask the user before starting video generation only when the request is ambiguous, asks for premium/long/high-resolution output, or could be expensive.
 
-```json
-{
-  "ok": true,
-  "capability": "image",
-  "model": "gemini-3.1-flash-image",
-  "outputs": [
-    {
-      "path": "/workspace/output/image.jpg",
-      "mimeType": "image/jpeg"
-    }
-  ]
-}
-```
+For podcast or long narration requests, write the script to `/workspace/output/<name>.txt`, inspect `bash "$GAI" tts --help`, then use the CLI's script-file option if available while respecting whether the prompt argument is required.
 
-After generation, verify the file exists and report the exact sandbox path.
+## Guardrails
+
+Never run bare `gai ...`.
+Never create your own wrapper, install script, Python helper, or alternate executable path.
+Never execute `dist/cli.js`, `cli.js`, or files inside the npm cache directly.
+Never run `npm install`, `npm info`, `npm view`, `curl`, `printenv`, `find /`, package-file inspection, or Node one-off diagnostics yourself.
+Never use `--dry-run` unless the user explicitly asks for a dry run.
+Do not inline or print `GEMINI_API_KEY`; rely on the existing environment.
+
+For an explicit image, video, or TTS request, run the generation command directly after checking help. Do not run `doctor` first unless the generation command fails for an unclear local readiness reason.
+
+If generation fails with `API_KEY_INVALID`, `BadRequestError`, `APIConnectionError`, `fetch failed`, permission errors, or package install errors, stop and report the generation error plainly. Do not run extra diagnostics unless the user explicitly asks.
+
+If a generation command returns JSON with `"ok": false`, treat that as the final result for that media request. Do not retry the same request with different flags, voices, models, diagnostics, or shorter text unless the user explicitly asks.
+
+After generation, verify the output file exists and report the exact sandbox path. Keep failure responses short: name the failed command type, the error message, and whether any artifact was created.

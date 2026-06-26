@@ -44,9 +44,12 @@ const writeWavFromPcm = async (
   return header.length + pcm.length;
 };
 
-export const runTts = async (prompt: string, options: TtsOptions): Promise<CommandResult> => {
+export const runTts = async (prompt: string | undefined, options: TtsOptions): Promise<CommandResult> => {
   const model = options.model || defaultTtsModel();
-  const script = options.scriptFile ? await readFile(options.scriptFile, "utf8") : prompt;
+  const script = options.scriptFile ? await readFile(options.scriptFile, "utf8") : (prompt ?? "");
+  if (!script.trim()) {
+    throw new Error("TTS requires a prompt argument or --script-file <path>.");
+  }
   const mimeType = options.mime || "audio/wav";
   const outputPath = resolveOutputPath(options.out, "narration", ".wav");
 

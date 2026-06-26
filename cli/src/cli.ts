@@ -14,7 +14,7 @@ loadEnvironment();
 
 const program = new Command();
 
-const packageVersion = "0.1.0";
+const packageVersion = "0.1.3";
 
 const failureFromError = (error: unknown, capability?: string, model?: string): CommandFailure => ({
   ok: false,
@@ -52,7 +52,18 @@ const runAction = async (
 program
   .name("gai")
   .description("Gemini Anything media capability CLI for managed agents")
-  .version(packageVersion);
+  .version(packageVersion)
+  .addHelpText(
+    "after",
+    `
+
+Run a command help page before using a media capability:
+  gai image --help
+  gai video --help
+  gai tts --help
+
+Use --json for machine-readable output. Generated files are written to --out when provided.`
+  );
 
 program
   .command("models")
@@ -81,12 +92,20 @@ program
   .option("--file <path...>", "reference image file(s)")
   .option("--dry-run", "show selected model and output path without calling the API")
   .option("--json", "print machine-readable JSON")
+  .addHelpText(
+    "after",
+    `
+
+Examples:
+  gai image "a crisp app icon" --out /workspace/output/icon.jpg --json
+  gai image "turn this into a watercolor" --file input.jpg --out /workspace/output/edit.jpg --json`
+  )
   .action((prompt: string, options) => runAction(options.json, () => runImage(prompt, options), "image"));
 
 program
   .command("tts")
   .description("Generate text-to-speech audio")
-  .argument("<prompt>", "speech prompt or script")
+  .argument("[prompt]", "speech prompt or script. Optional when --script-file is provided")
   .option("--out <path>", "output file path")
   .option("--voice <voice>", "prebuilt voice name", "Kore")
   .option("--speaker <speaker>", "speaker name for multi-speaker prompts")
@@ -96,7 +115,15 @@ program
   .option("--model <model>", "override model")
   .option("--dry-run", "show selected model and output path without calling the API")
   .option("--json", "print machine-readable JSON")
-  .action((prompt: string, options) => runAction(options.json, () => runTts(prompt, options), "tts"));
+  .addHelpText(
+    "after",
+    `
+
+Examples:
+  gai tts "Say cheerfully: hello" --voice Puck --out /workspace/output/hello.wav --json
+  gai tts --script-file /workspace/output/script.txt --voice Puck --out /workspace/output/podcast.wav --json`
+  )
+  .action((prompt: string | undefined, options) => runAction(options.json, () => runTts(prompt, options), "tts"));
 
 program
   .command("video")
@@ -111,6 +138,14 @@ program
   .option("--timeout <seconds>", "timeout in seconds", "900")
   .option("--dry-run", "show selected model and output path without calling the API")
   .option("--json", "print machine-readable JSON")
+  .addHelpText(
+    "after",
+    `
+
+Examples:
+  gai video "a cute cat playing with string in a cozy home" --quality lite --out /workspace/output/cat.mp4 --json
+  gai video "slow camera move over a product" --aspect 9:16 --duration 8 --out /workspace/output/clip.mp4 --json`
+  )
   .action((prompt: string, options) => runAction(options.json, () => runVideo(prompt, options), "video"));
 
 await program.parseAsync(process.argv);

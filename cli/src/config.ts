@@ -5,6 +5,25 @@ import { config as loadDotenv } from "dotenv";
 let loaded = false;
 let loadedEnvFiles: string[] = [];
 
+const PLACEHOLDER_VALUES = new Set(["PLACEHOLDER", "YOUR_API_KEY", "YOUR_API_KEY_HERE"]);
+
+const normalizeApiKey = (value: string | undefined): string | undefined => {
+  const trimmed = value?.trim();
+  if (!trimmed || PLACEHOLDER_VALUES.has(trimmed.toUpperCase())) {
+    return undefined;
+  }
+  return trimmed;
+};
+
+const clearPlaceholderApiKeys = (): void => {
+  if (process.env.GEMINI_API_KEY && !normalizeApiKey(process.env.GEMINI_API_KEY)) {
+    delete process.env.GEMINI_API_KEY;
+  }
+  if (process.env.GOOGLE_API_KEY && !normalizeApiKey(process.env.GOOGLE_API_KEY)) {
+    delete process.env.GOOGLE_API_KEY;
+  }
+};
+
 const envCandidates = (startDir: string): string[] => {
   const files: string[] = [];
   let current = resolve(startDir);
@@ -28,6 +47,7 @@ export const loadEnvironment = (startDir = process.cwd()): string[] => {
   }
   loaded = true;
   loadedEnvFiles = [];
+  clearPlaceholderApiKeys();
 
   for (const file of envCandidates(startDir)) {
     if (existsSync(file)) {
@@ -35,13 +55,14 @@ export const loadEnvironment = (startDir = process.cwd()): string[] => {
       loadedEnvFiles.push(file);
     }
   }
+  clearPlaceholderApiKeys();
 
   return loadedEnvFiles;
 };
 
 export const getApiKey = (): string | undefined => {
   loadEnvironment();
-  return process.env.GEMINI_API_KEY;
+  return normalizeApiKey(process.env.GOOGLE_API_KEY) || normalizeApiKey(process.env.GEMINI_API_KEY);
 };
 
 export const requireApiKey = (): string => {
@@ -61,7 +82,6 @@ export const envLoadReport = (): { loadedEnvFiles: string[]; hasApiKey: boolean 
   const files = loadEnvironment();
   return {
     loadedEnvFiles: files,
-    hasApiKey: Boolean(process.env.GEMINI_API_KEY)
+    hasApiKey: Boolean(getApiKey())
   };
 };
-

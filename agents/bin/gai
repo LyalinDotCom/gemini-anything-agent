@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "${GEMINI_API_KEY:-}" = "PLACEHOLDER" ]; then
+  unset GEMINI_API_KEY
+fi
+if [ -f /.env ]; then
+  set -a
+  . /.env
+  set +a
+fi
+if [ "${GEMINI_API_KEY:-}" = "PLACEHOLDER" ]; then
+  unset GEMINI_API_KEY
+fi
+
+export GAI_PACKAGE="${GEMINI_ANYTHING_NPM_PACKAGE:-@lyalindotcom/gai}"
+export GAI_VERSION="${GEMINI_ANYTHING_NPM_VERSION:-latest}"
+export NODE_USE_ENV_PROXY="${NODE_USE_ENV_PROXY:-1}"
+export NODE_NO_WARNINGS="${NODE_NO_WARNINGS:-1}"
+export WORKSPACE_ROOT="${WORKSPACE_ROOT:-/workspace}"
+export NPM_CONFIG_CACHE="${NPM_CONFIG_CACHE:-$WORKSPACE_ROOT/.npm-cache}"
+export npm_config_cache="${npm_config_cache:-$NPM_CONFIG_CACHE}"
+export npm_config_loglevel="${npm_config_loglevel:-error}"
+export npm_config_update_notifier="${npm_config_update_notifier:-false}"
+export npm_config_fund="${npm_config_fund:-false}"
+export npm_config_audit="${npm_config_audit:-false}"
+export NO_UPDATE_NOTIFIER="${NO_UPDATE_NOTIFIER:-1}"
+
+mkdir -p "$NPM_CONFIG_CACHE" "$WORKSPACE_ROOT/output"
+
+exec npx -y "${GAI_PACKAGE}@${GAI_VERSION}" "$@"

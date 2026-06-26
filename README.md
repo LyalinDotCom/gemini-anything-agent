@@ -8,7 +8,7 @@ The `gai` CLI is a small npm-publishable helper that the managed agent can call 
 - `gai video`
 - `gai tts`
 
-See [plan.md](./plan.md) for the current MVP plan.
+The current contract lives in `agents/system-prompt.md`, `agents/AGENTS.md`, `agents/skills/gemini-anything/SKILL.md`, and the `cli/` package itself.
 
 ## App Harness
 

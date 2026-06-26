@@ -27,7 +27,26 @@ export type SetApiKeyResult = {
   envPath: string;
 };
 
+export type EnsureAnythingAgentResult = {
+  agent: ManagedAgent;
+  created: boolean;
+  recreated?: boolean;
+  sourceTargets: string[];
+};
+
 export type SnapshotDownloadResult =
+  | { saved: true; path: string; bytes: number }
+  | { saved: false; canceled: true };
+
+export type ResolvedEnvironmentMedia = {
+  requestedPath: string;
+  path: string;
+  savedPath?: string;
+  url: string;
+  mediaType: "image" | "video" | "audio";
+};
+
+export type SaveResolvedMediaResult =
   | { saved: true; path: string; bytes: number }
   | { saved: false; canceled: true };
 
@@ -70,6 +89,7 @@ export type IpcResult<T> =
 export type ManagedAgentsBridge = {
   getRuntimeConfig: () => Promise<IpcResult<RuntimeConfig>>;
   setApiKey: (key: string) => Promise<IpcResult<SetApiKeyResult>>;
+  ensureAnythingAgent: (agentId?: string) => Promise<IpcResult<EnsureAnythingAgentResult>>;
   createAgent: (agent: AgentDefinition) => Promise<IpcResult<ManagedAgent>>;
   listAgents: () => Promise<IpcResult<AgentListResponse>>;
   getAgent: (id: string) => Promise<IpcResult<ManagedAgent>>;
@@ -96,6 +116,11 @@ export type ManagedAgentsBridge = {
   cancelInteraction: (id: string) => Promise<IpcResult<Interaction>>;
   deleteInteraction: (id: string) => Promise<IpcResult<boolean>>;
   downloadEnvironmentSnapshot: (environmentId: string) => Promise<IpcResult<SnapshotDownloadResult>>;
+  resolveEnvironmentMedia: (
+    environmentId: string,
+    paths: string[]
+  ) => Promise<IpcResult<ResolvedEnvironmentMedia[]>>;
+  saveResolvedMedia: (path: string) => Promise<IpcResult<SaveResolvedMediaResult>>;
   loadAgentProject: (agentId: string) => Promise<IpcResult<AgentProjectSnapshot>>;
   saveAgentProject: (
     agentId: string,
@@ -108,6 +133,7 @@ export type ManagedAgentsBridge = {
 export const ipcChannels = {
   runtimeConfig: "managed-agents:runtime-config",
   setApiKey: "managed-agents:set-api-key",
+  ensureAnythingAgent: "managed-agents:ensure-anything-agent",
   createAgent: "managed-agents:create-agent",
   listAgents: "managed-agents:list-agents",
   getAgent: "managed-agents:get-agent",
@@ -122,6 +148,8 @@ export const ipcChannels = {
   cancelInteraction: "managed-agents:cancel-interaction",
   deleteInteraction: "managed-agents:delete-interaction",
   downloadSnapshot: "managed-agents:download-snapshot",
+  resolveEnvironmentMedia: "managed-agents:resolve-environment-media",
+  saveResolvedMedia: "managed-agents:save-resolved-media",
   loadAgentProject: "managed-agents:load-agent-project",
   saveAgentProject: "managed-agents:save-agent-project",
   openAgentProject: "managed-agents:open-agent-project",

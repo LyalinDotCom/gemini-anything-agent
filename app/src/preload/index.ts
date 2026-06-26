@@ -3,9 +3,12 @@ import type {
   IpcResult,
   AgentProjectSnapshot,
   AgentProjectFileSnapshot,
+  EnsureAnythingAgentResult,
   InteractionStreamSnapshot,
   ManagedAgentsBridge,
+  ResolvedEnvironmentMedia,
   RuntimeConfig,
+  SaveResolvedMediaResult,
   SetApiKeyResult,
   SnapshotDownloadResult
 } from "../shared/electron-api";
@@ -25,6 +28,8 @@ const invoke = <T>(channel: string, ...args: unknown[]): Promise<IpcResult<T>> =
 const bridge: ManagedAgentsBridge = {
   getRuntimeConfig: () => invoke<RuntimeConfig>(ipcChannels.runtimeConfig),
   setApiKey: (key: string) => invoke<SetApiKeyResult>(ipcChannels.setApiKey, key),
+  ensureAnythingAgent: (agentId?: string) =>
+    invoke<EnsureAnythingAgentResult>(ipcChannels.ensureAnythingAgent, agentId),
   createAgent: (agent: AgentDefinition) => invoke<ManagedAgent>(ipcChannels.createAgent, agent),
   listAgents: () => invoke<AgentListResponse>(ipcChannels.listAgents),
   getAgent: (id: string) => invoke<ManagedAgent>(ipcChannels.getAgent, id),
@@ -56,6 +61,10 @@ const bridge: ManagedAgentsBridge = {
   deleteInteraction: (id: string) => invoke<boolean>(ipcChannels.deleteInteraction, id),
   downloadEnvironmentSnapshot: (environmentId: string) =>
     invoke<SnapshotDownloadResult>(ipcChannels.downloadSnapshot, environmentId),
+  resolveEnvironmentMedia: (environmentId: string, paths: string[]) =>
+    invoke<ResolvedEnvironmentMedia[]>(ipcChannels.resolveEnvironmentMedia, environmentId, paths),
+  saveResolvedMedia: (path: string) =>
+    invoke<SaveResolvedMediaResult>(ipcChannels.saveResolvedMedia, path),
   loadAgentProject: (agentId: string) =>
     invoke<AgentProjectSnapshot>(ipcChannels.loadAgentProject, agentId),
   saveAgentProject: (agentId: string, files: AgentProjectFileSnapshot[]) =>

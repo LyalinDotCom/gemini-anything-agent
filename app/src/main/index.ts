@@ -1,7 +1,9 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "electron";
 import { config as loadEnv } from "dotenv";
+import { createHash } from "node:crypto";
 import {
   existsSync,
+  copyFileSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -9,33 +11,55 @@ import {
   statSync,
   writeFileSync
 } from "node:fs";
-import { dirname, isAbsolute, join, normalize } from "node:path";
-import { fileURLToPath } from "node:url";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { basename, dirname, extname, isAbsolute, join, normalize, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  ANTIGRAVITY_BASE_AGENT,
   GEMINI_API_BASE_URL,
   GEMINI_API_REVISION,
+  GeminiApiError,
   GeminiManagedAgentsClient,
+  normalizeAgentDefinition,
   type AgentDefinition,
-  type GeminiApiError,
   type Interaction,
   type InteractionCreateRequest,
-  type InteractionStreamEvent
+  type InteractionStreamEvent,
+  type ManagedAgent
 } from "../sdk";
 import {
   ipcChannels,
   type AgentProjectFileSnapshot,
   type AgentProjectSnapshot,
+  type EnsureAnythingAgentResult,
   type IpcError,
   type IpcResult,
+  type ResolvedEnvironmentMedia,
+  type SaveResolvedMediaResult,
   type SetApiKeyResult,
   type SnapshotDownloadResult
 } from "../shared/electron-api";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const execFileAsync = promisify(execFile);
+const MEDIA_PROTOCOL = "gemini-media";
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: MEDIA_PROTOCOL,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      stream: true
+    }
+  }
+]);
 
 const DEFAULT_AGENT_ID = "gemini-anything-agent";
 const DEFAULT_NPM_PACKAGE = "@lyalindotcom/gai";
-const DEFAULT_NPM_VERSION = "0.1.0";
+const DEFAULT_NPM_VERSION = "latest";
 
 const CWD = process.cwd();
 const REPO_ROOT = existsSync(join(CWD, "app", "package.json"))
@@ -51,6 +75,9 @@ const ROOT_ENV_LOCAL_PATH = join(REPO_ROOT, ".env.local");
 const ENV_PATH = join(APP_ROOT, ".env");
 const ENV_LOCAL_PATH = join(APP_ROOT, ".env.local");
 const PROJECTS_ROOT = join(APP_ROOT, "agent-projects");
+const AGENT_ASSETS_ROOT = join(REPO_ROOT, "agents");
+const LOCAL_OUTPUT_ROOT = join(REPO_ROOT, "outputs", "managed-agent");
+const mediaCacheRoot = (): string => join(app.getPath("userData"), "environment-media");
 
 const loadEnvIfPresent = (path: string, override = false): void => {
   if (existsSync(path)) {
@@ -65,7 +92,7 @@ loadEnvIfPresent(ENV_LOCAL_PATH, true);
 
 const createClient = (): GeminiManagedAgentsClient =>
   new GeminiManagedAgentsClient({
-    apiKey: process.env.GEMINI_API_KEY,
+    apiKey: envValue(process.env.GEMINI_API_KEY),
     baseUrl: process.env.GEMINI_API_BASE_URL ?? GEMINI_API_BASE_URL,
     apiRevision: process.env.GEMINI_API_REVISION ?? GEMINI_API_REVISION
   });
@@ -79,6 +106,280 @@ const maskKey = (key?: string): string | undefined => {
   }
   const middle = "•".repeat(Math.min(key.length - 8, 12));
   return `${key.slice(0, 4)}${middle}${key.slice(-4)}`;
+};
+
+const envValue = (value: string | undefined): string =>
+  (value ?? "")
+    .trim()
+    .replace(/^(['"])(.*)\1$/, "$2")
+    .replace(/[\r\n]/g, "");
+
+const sandboxEnvContent = (): string =>
+  [
+    `GEMINI_API_KEY=${envValue(process.env.GEMINI_API_KEY)}`,
+    `GEMINI_ANYTHING_NPM_PACKAGE=${envValue(process.env.GEMINI_ANYTHING_NPM_PACKAGE ?? DEFAULT_NPM_PACKAGE)}`,
+    `GEMINI_ANYTHING_NPM_VERSION=${envValue(process.env.GEMINI_ANYTHING_NPM_VERSION ?? DEFAULT_NPM_VERSION)}`
+  ].join("\n") + "\n";
+
+const readAgentAsset = (relativePath: string, fallback: string): string => {
+  const path = join(AGENT_ASSETS_ROOT, relativePath);
+  return existsSync(path) ? readFileSync(path, "utf8") : fallback;
+};
+
+const defaultAnythingSystemInstruction =
+  "You are Gemini Anything Agent. Use native tools for text, coding, planning, research, file work, and artifact transformations. Use gai only for new image, video, and text-to-speech generation.";
+
+const anythingAgentId = (): string => process.env.GEMINI_ANYTHING_AGENT_ID?.trim() || DEFAULT_AGENT_ID;
+
+const isAnythingAgentRequest = (request: InteractionCreateRequest): boolean =>
+  request.agent.trim() === anythingAgentId();
+
+const currentInvocationContext = (): string => {
+  const now = new Date();
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "unknown";
+  return [
+    "## Current Invocation Context",
+    "",
+    `- Host current date/time: ${now.toLocaleString()} (${timeZone})`,
+    `- UTC date/time: ${now.toISOString()}`,
+    "- You are running as a remote Gemini Managed Agent in a Google-hosted Linux sandbox.",
+    "- Workspace root in the sandbox: `/workspace`.",
+    "- Durable artifact folder in the sandbox: `/workspace/output`.",
+    "- Mounted agent instruction files: `/.agents/AGENTS.md` and `/.agents/skills/gemini-anything/SKILL.md`.",
+    "- Mounted media CLI wrapper: `/.agents/bin/gai`.",
+    "- Follow-up turns may include two independent continuity pointers: `previous_interaction_id` for conversation context and `environment` for sandbox/filesystem state.",
+    "- If a request depends on existing artifacts, inspect `/workspace/output` before choosing tools.",
+    "- If exact current date/time or live facts matter, verify with `date`, `date -u`, and web/search as appropriate.",
+    ""
+  ].join("\n");
+};
+
+const anythingSystemInstructionForRequest = (request: InteractionCreateRequest): string => {
+  const base = readAgentAsset("system-prompt.md", defaultAnythingSystemInstruction);
+  const override = request.system_instruction?.trim();
+  return [
+    base,
+    currentInvocationContext(),
+    override
+      ? [
+          "## Additional Per-Interaction Instruction",
+          "",
+          "The following instruction was explicitly supplied for this interaction. Apply it unless it conflicts with higher-priority safety, runtime, artifact, or tool-routing rules above.",
+          "",
+          override
+        ].join("\n")
+      : ""
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+};
+
+const augmentInteractionRequest = (request: InteractionCreateRequest): InteractionCreateRequest =>
+  isAnythingAgentRequest(request)
+    ? {
+        ...request,
+        system_instruction: anythingSystemInstructionForRequest(request)
+      }
+    : request;
+
+const comparableAgentDefinition = (agent: ManagedAgent | AgentDefinition): AgentDefinition =>
+  normalizeAgentDefinition({
+    id: agent.id,
+    description: agent.description,
+    base_agent: agent.base_agent,
+    system_instruction: agent.system_instruction,
+    tools: agent.tools,
+    base_environment: agent.base_environment
+  });
+
+const redactDefinitionSecrets = (agent: AgentDefinition): AgentDefinition => {
+  const comparable = comparableAgentDefinition(agent);
+  if (typeof comparable.base_environment === "object" && comparable.base_environment?.sources) {
+    comparable.base_environment = {
+      ...comparable.base_environment,
+      sources: comparable.base_environment.sources.map((source) =>
+        source.type === "inline" && source.target === ".env"
+          ? {
+              ...source,
+              content: source.content.replace(/^GEMINI_API_KEY=.*$/m, "GEMINI_API_KEY=<configured>")
+            }
+          : source
+      )
+    };
+  }
+  delete comparable.description;
+  return comparable;
+};
+
+const agentConfigHash = (agent: AgentDefinition): string =>
+  createHash("sha256").update(JSON.stringify(redactDefinitionSecrets(agent))).digest("hex").slice(0, 12);
+
+const buildAnythingAgentDefinition = (agentId: string): AgentDefinition => {
+  const definition: AgentDefinition = {
+    id: agentId,
+    base_agent: ANTIGRAVITY_BASE_AGENT,
+    system_instruction: readAgentAsset("system-prompt.md", defaultAnythingSystemInstruction),
+    tools: [
+      { type: "code_execution" },
+      { type: "google_search" },
+      { type: "url_context" }
+    ],
+    base_environment: {
+      type: "remote",
+      sources: [
+        {
+          type: "inline",
+          target: ".agents/bin/gai",
+          content: readAgentAsset(
+            "bin/gai",
+            [
+              "#!/usr/bin/env bash",
+              "set -euo pipefail",
+              "if [ \"${GEMINI_API_KEY:-}\" = \"PLACEHOLDER\" ]; then unset GEMINI_API_KEY; fi",
+              "if [ -f /.env ]; then set -a; . /.env; set +a; fi",
+              "if [ \"${GEMINI_API_KEY:-}\" = \"PLACEHOLDER\" ]; then unset GEMINI_API_KEY; fi",
+              "export NODE_USE_ENV_PROXY=\"${NODE_USE_ENV_PROXY:-1}\"",
+              "exec npx -y \"${GEMINI_ANYTHING_NPM_PACKAGE:-@lyalindotcom/gai}@${GEMINI_ANYTHING_NPM_VERSION:-latest}\" \"$@\"",
+              ""
+            ].join("\n")
+          )
+        },
+        {
+          type: "inline",
+          target: ".agents/AGENTS.md",
+          content: readAgentAsset(
+            "AGENTS.md",
+            "# Gemini Anything Agent\n\nUse native managed-agent tools for normal work. Use gai only for image, video, and text-to-speech.\n"
+          )
+        },
+        {
+          type: "inline",
+          target: ".agents/skills/gemini-anything/SKILL.md",
+          content: readAgentAsset(
+          "skills/gemini-anything/SKILL.md",
+            "# Gemini Anything Media Skill\n\nUse bash /.agents/bin/gai for image, video, and tts generation.\n"
+          )
+        },
+        {
+          type: "inline",
+          target: ".env",
+          content: sandboxEnvContent()
+        }
+      ]
+    }
+  };
+
+  return {
+    ...definition,
+    description: `Gemini Anything managed agent with media generation routed through gai. config:${agentConfigHash(definition)}`
+  };
+};
+
+const agentDefinitionsMatch = (actual: ManagedAgent, desired: AgentDefinition): boolean =>
+  actual.description?.includes(`config:${agentConfigHash(desired)}`) ||
+  JSON.stringify(comparableAgentDefinition(actual)) === JSON.stringify(comparableAgentDefinition(desired));
+
+const isMissingAgentError = (error: unknown): boolean =>
+  error instanceof GeminiApiError
+    ? error.status === 404 || /unknown agent name|not found/i.test(error.message)
+    : error instanceof Error && /unknown agent name|not found/i.test(error.message);
+
+const MEDIA_EXTENSIONS = new Map<string, ResolvedEnvironmentMedia["mediaType"]>([
+  [".png", "image"],
+  [".jpg", "image"],
+  [".jpeg", "image"],
+  [".webp", "image"],
+  [".gif", "image"],
+  [".avif", "image"],
+  [".svg", "image"],
+  [".mp4", "video"],
+  [".webm", "video"],
+  [".mov", "video"],
+  [".m4v", "video"],
+  [".wav", "audio"],
+  [".mp3", "audio"],
+  [".m4a", "audio"],
+  [".aac", "audio"],
+  [".ogg", "audio"],
+  [".flac", "audio"]
+]);
+
+const mediaTypeForPath = (path: string): ResolvedEnvironmentMedia["mediaType"] | undefined =>
+  MEDIA_EXTENSIONS.get(extname(path).toLowerCase());
+
+const safeCacheSegment = (value: string): string =>
+  value
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120) || "environment";
+
+const normalizedRelativeTarPath = (value: string): string | undefined => {
+  const normalized = normalize(value).replace(/^(\.\.[/\\])+/, "").replace(/^[/\\]+/, "");
+  if (!normalized || normalized === "." || isAbsolute(normalized) || normalized.split(/[\\/]/).includes("..")) {
+    return undefined;
+  }
+  return normalized.replace(/\\/g, "/");
+};
+
+const requestedPathMatchesTarEntry = (requestedPath: string, tarEntry: string): boolean => {
+  const requested = requestedPath.replace(/^[/\\]+/, "").replace(/\\/g, "/");
+  const requestedWithoutWorkspace = requested.replace(/^workspace\//, "");
+  const entry = tarEntry.replace(/^\.?\//, "").replace(/\\/g, "/");
+  const entryWithoutWorkspace = entry.replace(/^workspace\//, "");
+  return (
+    entry === requested ||
+    entryWithoutWorkspace === requestedWithoutWorkspace ||
+    entry.endsWith(`/${requested}`) ||
+    entry.endsWith(`/${requestedWithoutWorkspace}`)
+  );
+};
+
+const unique = <T,>(values: T[]): T[] => [...new Set(values)];
+
+const uniqueOutputPath = (directory: string, fileName: string): string => {
+  const extension = extname(fileName);
+  const stem = extension ? fileName.slice(0, -extension.length) : fileName;
+  let candidate = join(directory, fileName);
+  for (let index = 2; existsSync(candidate); index += 1) {
+    candidate = join(directory, `${stem}-${index}${extension}`);
+  }
+  return candidate;
+};
+
+const autoSaveMedia = (environmentId: string, sourcePath: string): string => {
+  const directory = join(LOCAL_OUTPUT_ROOT, safeCacheSegment(environmentId));
+  mkdirSync(directory, { recursive: true });
+  const target = uniqueOutputPath(directory, basename(sourcePath));
+  copyFileSync(sourcePath, target);
+  return target;
+};
+
+const mediaUrl = (environmentId: string, relativeEntry: string): string => {
+  const encodedPath = relativeEntry
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  return `${MEDIA_PROTOCOL}://${safeCacheSegment(environmentId)}/${encodedPath}`;
+};
+
+const registerMediaProtocol = (): void => {
+  protocol.handle(MEDIA_PROTOCOL, (request) => {
+    const url = new URL(request.url);
+    const environmentSegment = safeCacheSegment(url.hostname);
+    const relativeEntry = normalizedRelativeTarPath(decodeURIComponent(url.pathname.slice(1)));
+    if (!relativeEntry || !mediaTypeForPath(relativeEntry)) {
+      return new Response("Not found", { status: 404 });
+    }
+
+    const root = resolve(mediaCacheRoot(), environmentSegment, "files");
+    const path = resolve(root, relativeEntry);
+    if (!path.startsWith(root) || !existsSync(path) || !statSync(path).isFile()) {
+      return new Response("Not found", { status: 404 });
+    }
+
+    return net.fetch(pathToFileURL(path).toString());
+  });
 };
 
 /** Strip surrounding whitespace and any control chars so a pasted key can't inject extra .env lines. */
@@ -301,8 +602,12 @@ const createWindow = (): void => {
     height: 980,
     minWidth: 1080,
     minHeight: 720,
-    title: "Gemini Managed Agent Lab",
-    backgroundColor: "#f4f3ee",
+    title: "Gemini Anything Agent",
+    // Direction B (Sequoia inset): let the native traffic lights float over our
+    // own slim, draggable titlebar so the chrome reads as one native surface.
+    titleBarStyle: "hiddenInset",
+    trafficLightPosition: { x: 18, y: 15 },
+    backgroundColor: "#e8eaef",
     webPreferences: {
       preload: join(__dirname, "../preload/index.mjs"),
       contextIsolation: true,
@@ -353,6 +658,59 @@ handle<[string], SetApiKeyResult>(ipcChannels.setApiKey, async (key) => {
   };
 });
 
+handle<[string | undefined], EnsureAnythingAgentResult>(
+  ipcChannels.ensureAnythingAgent,
+  async (requestedAgentId) => {
+    const agentId = requestedAgentId?.trim() || process.env.GEMINI_ANYTHING_AGENT_ID || DEFAULT_AGENT_ID;
+    const client = createClient();
+    const definition = buildAnythingAgentDefinition(agentId);
+    const sourceTargets =
+      typeof definition.base_environment === "object"
+        ? definition.base_environment.sources?.map((source) => source.target) ?? []
+        : [];
+
+    try {
+      const existing = await client.getAgent(agentId);
+      if (agentDefinitionsMatch(existing, definition)) {
+        return {
+          agent: existing,
+          created: false,
+          sourceTargets
+        };
+      }
+
+      await client.deleteAgent(agentId);
+      return {
+        agent: await client.createAgent(definition),
+        created: true,
+        recreated: true,
+        sourceTargets
+      };
+    } catch (error) {
+      if (!isMissingAgentError(error)) {
+        throw error;
+      }
+    }
+
+    try {
+      return {
+        agent: await client.createAgent(definition),
+        created: true,
+        sourceTargets
+      };
+    } catch (error) {
+      if (!isMissingAgentError(error) && !(error instanceof GeminiApiError && error.status === 409)) {
+        throw error;
+      }
+      return {
+        agent: await client.getAgent(agentId),
+        created: false,
+        sourceTargets
+      };
+    }
+  }
+);
+
 handle<[AgentDefinition], Awaited<ReturnType<GeminiManagedAgentsClient["createAgent"]>>>(
   ipcChannels.createAgent,
   async (agent) => createClient().createAgent(agent)
@@ -369,7 +727,7 @@ handle<[string], boolean>(ipcChannels.deleteAgent, async (id) => {
 });
 handle<[InteractionCreateRequest], Awaited<ReturnType<GeminiManagedAgentsClient["createInteraction"]>>>(
   ipcChannels.createInteraction,
-  async (request) => createClient().createInteraction(request)
+  async (request) => createClient().createInteraction(augmentInteractionRequest(request))
 );
 ipcMain.handle(
   ipcChannels.createInteractionStream,
@@ -388,7 +746,7 @@ ipcMain.handle(
     let latestInteraction: Interaction | undefined;
 
     try {
-      for await (const streamEvent of client.createInteractionStream(request, { signal: controller.signal })) {
+      for await (const streamEvent of client.createInteractionStream(augmentInteractionRequest(request), { signal: controller.signal })) {
         latestInteraction = rememberStreamEvent(buffer, streamEvent);
         event.sender.send(ipcChannels.interactionStreamEvent, {
           streamId,
@@ -521,6 +879,106 @@ handle<[string], SnapshotDownloadResult>(ipcChannels.downloadSnapshot, async (en
   writeFileSync(result.filePath, Buffer.from(buffer));
   return { saved: true, path: result.filePath, bytes: buffer.byteLength };
 });
+
+handle<[string, string[]], ResolvedEnvironmentMedia[]>(
+  ipcChannels.resolveEnvironmentMedia,
+  async (environmentId, paths) => {
+    const requestedPaths = unique(
+      paths
+        .map((path) => path.trim())
+        .filter((path) => path.length > 0 && mediaTypeForPath(path))
+    );
+    if (requestedPaths.length === 0) {
+      return [];
+    }
+
+    const cacheRoot = join(mediaCacheRoot(), safeCacheSegment(environmentId));
+    const extractRoot = join(cacheRoot, "files");
+    const tarPath = join(cacheRoot, "snapshot.tar");
+    rmSync(cacheRoot, { recursive: true, force: true });
+    mkdirSync(extractRoot, { recursive: true });
+
+    const buffer = await createClient().downloadEnvironmentSnapshot(environmentId);
+    writeFileSync(tarPath, Buffer.from(buffer));
+
+    try {
+      const listed = await execFileAsync("tar", ["-tf", tarPath], { maxBuffer: 5 * 1024 * 1024 });
+      const tarEntries = listed.stdout
+        .split("\n")
+        .map((entry) => entry.trim())
+        .map(normalizedRelativeTarPath)
+        .filter((entry): entry is string => {
+          if (!entry) {
+            return false;
+          }
+          return Boolean(mediaTypeForPath(entry));
+        });
+      const selectedEntries = unique(
+        tarEntries.filter((entry) =>
+          requestedPaths.some((requestedPath) => requestedPathMatchesTarEntry(requestedPath, entry))
+        )
+      );
+
+      if (selectedEntries.length === 0) {
+        return [];
+      }
+
+      await execFileAsync("tar", ["-xf", tarPath, "-C", extractRoot, ...selectedEntries], {
+        maxBuffer: 5 * 1024 * 1024
+      });
+
+      return requestedPaths.flatMap((requestedPath) => {
+        const entry = selectedEntries.find((candidate) => requestedPathMatchesTarEntry(requestedPath, candidate));
+        const relativeEntry = entry ? normalizedRelativeTarPath(entry) : undefined;
+        if (!relativeEntry) {
+          return [];
+        }
+        const path = resolve(extractRoot, relativeEntry);
+        if (!path.startsWith(resolve(extractRoot))) {
+          return [];
+        }
+        if (!existsSync(path) || !statSync(path).isFile()) {
+          return [];
+        }
+        const mediaType = mediaTypeForPath(path);
+        const savedPath = mediaType ? autoSaveMedia(environmentId, path) : undefined;
+        return mediaType
+          ? [
+              {
+                requestedPath,
+                path,
+                savedPath,
+                url: mediaUrl(environmentId, relativeEntry),
+                mediaType
+              }
+            ]
+          : [];
+      });
+    } finally {
+      rmSync(tarPath, { force: true });
+    }
+  }
+);
+
+handle<[string], SaveResolvedMediaResult>(ipcChannels.saveResolvedMedia, async (sourcePath) => {
+  const source = resolve(sourcePath);
+  const root = resolve(mediaCacheRoot());
+  if (!source.startsWith(root) || !existsSync(source) || !statSync(source).isFile() || !mediaTypeForPath(source)) {
+    throw new Error("Media file is not available in the app cache.");
+  }
+
+  const result = await dialog.showSaveDialog({
+    title: "Save generated media",
+    defaultPath: basename(source)
+  });
+  if (result.canceled || !result.filePath) {
+    return { saved: false, canceled: true };
+  }
+
+  copyFileSync(source, result.filePath);
+  return { saved: true, path: result.filePath, bytes: statSync(result.filePath).size };
+});
+
 handle<[string], AgentProjectSnapshot>(ipcChannels.loadAgentProject, async (agentId) =>
   loadAgentProjectSnapshot(agentId)
 );
@@ -557,6 +1015,7 @@ handle<[string], boolean>(ipcChannels.openExternal, async (url) => {
 });
 
 app.whenReady().then(() => {
+  registerMediaProtocol();
   createWindow();
 
   app.on("activate", () => {

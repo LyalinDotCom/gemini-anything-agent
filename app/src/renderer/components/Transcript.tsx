@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   ArrowDown,
@@ -19,6 +20,7 @@ import {
   XCircle
 } from "lucide-react";
 import type { ActivityKind, TimelineItem } from "../lib/timeline";
+import { BufferedAudio } from "./BufferedAudio";
 
 type IconType = typeof Brain;
 
@@ -54,7 +56,9 @@ const renderBody = (body: string, markdown?: boolean, terminal?: boolean) => {
   if (markdown) {
     return (
       <div className="md">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+          {body}
+        </ReactMarkdown>
       </div>
     );
   }
@@ -62,6 +66,114 @@ const renderBody = (body: string, markdown?: boolean, terminal?: boolean) => {
     return <pre className="term">{body}</pre>;
   }
   return <div className="act-prose">{body}</div>;
+};
+
+const MEDIA_EXTENSIONS: Record<string, "image" | "video" | "audio"> = {
+  ".png": "image",
+  ".jpg": "image",
+  ".jpeg": "image",
+  ".webp": "image",
+  ".gif": "image",
+  ".avif": "image",
+  ".svg": "image",
+  ".mp4": "video",
+  ".webm": "video",
+  ".mov": "video",
+  ".m4v": "video",
+  ".wav": "audio",
+  ".mp3": "audio",
+  ".m4a": "audio",
+  ".aac": "audio",
+  ".ogg": "audio",
+  ".flac": "audio"
+};
+
+const mediaKindForUrl = (value: string | undefined): "image" | "video" | "audio" | undefined => {
+  if (!value) {
+    return undefined;
+  }
+  if (value.startsWith("data:image/")) {
+    return "image";
+  }
+  if (value.startsWith("data:video/")) {
+    return "video";
+  }
+  if (value.startsWith("data:audio/")) {
+    return "audio";
+  }
+  const withoutQuery = value.split(/[?#]/)[0]?.toLowerCase() ?? "";
+  const extension = Object.keys(MEDIA_EXTENSIONS).find((candidate) => withoutQuery.endsWith(candidate));
+  return extension ? MEDIA_EXTENSIONS[extension] : undefined;
+};
+
+const isWebUrl = (value: string | undefined): boolean => /^https?:\/\//i.test(value ?? "");
+
+const openExternal = (href: string | undefined): void => {
+  if (!href || !isWebUrl(href)) {
+    return;
+  }
+  void window.managedAgents?.openExternal(href);
+};
+
+const MediaEmbed = ({
+  src,
+  alt,
+  kind
+}: {
+  src: string;
+  alt?: string;
+  kind: "image" | "video" | "audio";
+}) => (
+  <span className={`media-embed media-${kind}`}>
+    {kind === "image" ? (
+      <img src={src} alt={alt ?? ""} loading="lazy" />
+    ) : kind === "video" ? (
+      <video src={src} controls preload="metadata" />
+    ) : (
+      <BufferedAudio src={src} />
+    )}
+    {alt && <span className="media-caption">{alt}</span>}
+  </span>
+);
+
+const markdownComponents: Components = {
+  a: ({ href, children }) => {
+    const kind = mediaKindForUrl(href);
+    if (href && kind) {
+      return (
+        <span className="media-link">
+          <MediaEmbed src={href} kind={kind} alt={typeof children === "string" ? children : undefined} />
+          {isWebUrl(href) && (
+            <a
+              href={href}
+              onClick={(event) => {
+                event.preventDefault();
+                openExternal(href);
+              }}
+            >
+              Open in browser
+            </a>
+          )}
+        </span>
+      );
+    }
+
+    return (
+      <a
+        href={href}
+        onClick={(event) => {
+          event.preventDefault();
+          openExternal(href);
+        }}
+      >
+        {children}
+      </a>
+    );
+  },
+  img: ({ src, alt }) => {
+    const kind = mediaKindForUrl(src);
+    return src && kind ? <MediaEmbed src={src} kind={kind} alt={alt} /> : <img src={src} alt={alt ?? ""} />;
+  }
 };
 
 const itemCopyText = (item: TimelineItem): string => {
@@ -229,19 +341,20 @@ export const Transcript = ({
     }
   };
 
+  // Direction B groups tool/thinking steps inside a single Sequoia inset card,
+  // then renders the agent's answer as its own clean message bubble below it.
+  const steps = items.filter((item) => item.kind !== "message");
+  const messages = items.filter((item) => item.kind === "message");
+
   return (
     <div className={`transcript-wrap ${embedded ? "embedded" : ""}`}>
       <div className={`transcript ${embedded ? "embedded" : ""}`} ref={scrollRef} onScroll={onScroll}>
         <div className="turn turn-user">
-          <span className="turn-avatar user">
+          <span className="turn-avatar user" title={formatClock(startedAt)}>
             <User size={13} />
           </span>
           <div className="turn-main">
-            <div className="turn-meta">
-              <strong>You</strong>
-              <span>{formatClock(startedAt)}</span>
-            </div>
-            <div className="turn-prompt">{prompt}</div>
+            <div className="turn-bubble">{prompt}</div>
           </div>
         </div>
 
@@ -250,25 +363,40 @@ export const Transcript = ({
             <Sparkles size={13} />
           </span>
           <div className="turn-main">
-            <div className="turn-meta">
-              <strong>Agent</strong>
-              {streaming && <span className="live-dot">working…</span>}
-            </div>
-            <div className="act-list">
-              {items.length > 0 ? (
-                items.map((item) => <ActivityRow key={item.id} item={item} onCopy={onCopy} />)
-              ) : (
-                <div className="act-waiting">
-                  {streaming ? (
-                    <>
-                      <Loader2 size={13} className="spin" /> {empty ?? "Waiting for the first event…"}
-                    </>
-                  ) : (
-                    (empty ?? "No activity recorded for this run.")
-                  )}
-                </div>
-              )}
-            </div>
+            {items.length > 0 ? (
+              <div className="act-list">
+                {steps.length > 0 && (
+                  <div className="act-group">
+                    {steps.map((item) => (
+                      <ActivityRow key={item.id} item={item} onCopy={onCopy} />
+                    ))}
+                  </div>
+                )}
+                {messages.map((item) => (
+                  <div className="agent-answer" key={item.id}>
+                    {renderBody(item.body ?? "", item.markdown, item.terminal)}
+                    <button
+                      type="button"
+                      className="act-copy"
+                      title="Copy"
+                      onClick={() => onCopy(item.body ?? "", item.title)}
+                    >
+                      <Copy size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="act-waiting">
+                {streaming ? (
+                  <>
+                    <Loader2 size={13} className="spin" /> {empty ?? "Waiting for the first event…"}
+                  </>
+                ) : (
+                  (empty ?? "No activity recorded for this run.")
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>

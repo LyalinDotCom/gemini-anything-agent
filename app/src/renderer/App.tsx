@@ -3,9 +3,15 @@ import {
   Bot,
   CheckCircle2,
   Download,
-  RotateCcw,
+  Maximize2,
+  MessageSquare,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
   Settings,
   Sparkles,
+  Trash2,
+  X,
   XCircle
 } from "lucide-react";
 import {
@@ -20,7 +26,13 @@ import {
   type ManagedAgent,
   type ToolType
 } from "@sdk";
-import type { InteractionStreamSnapshot, IpcError, RuntimeConfig } from "../shared/electron-api";
+import type {
+  EnsureAnythingAgentResult,
+  InteractionStreamSnapshot,
+  IpcError,
+  ResolvedEnvironmentMedia,
+  RuntimeConfig
+} from "../shared/electron-api";
 import {
   initialCompose,
   uid,
@@ -42,6 +54,7 @@ import {
 import { buildTimeline, type TimelineItem } from "./lib/timeline";
 import { Composer } from "./components/Composer";
 import { Transcript } from "./components/Transcript";
+import { BufferedAudio } from "./components/BufferedAudio";
 import { SettingsModal } from "./components/Overlays";
 
 type StatusEvent = {
@@ -53,6 +66,22 @@ type StatusEvent = {
 
 type PendingComposeInput = Pick<ComposeState, "inputMode" | "input" | "parts">;
 
+type ConversationSummary = {
+  id: string;
+  title: string;
+  sessions: Session[];
+  latestAt: number;
+  environmentId?: string;
+};
+
+type SessionMediaState = {
+  loading: boolean;
+  items: ResolvedEnvironmentMedia[];
+  error?: string;
+  progress?: number;
+  stage?: string;
+};
+
 const FALLBACK_RUNTIME: RuntimeConfig = {
   hasApiKey: false,
   apiRevision: managedAgentManifest.api.apiRevision,
@@ -61,10 +90,11 @@ const FALLBACK_RUNTIME: RuntimeConfig = {
   docsLastChecked: "2026-06-22",
   agentId: "gemini-anything-agent",
   npmPackage: "@lyalindotcom/gai",
-  npmVersion: "0.1.0"
+  npmVersion: "latest"
 };
 
 const ALL_AGENT_TOOLS: ToolType[] = ["code_execution", "google_search", "url_context"];
+const NEW_CONVERSATION_ID = "new";
 
 const bridgeUnavailable: IpcError = {
   name: "BridgeUnavailable",
@@ -160,6 +190,188 @@ const promptForInput = (input: InteractionCreateRequest["input"]): string => {
     .trim();
 };
 
+const firstPromptLine = (input: InteractionCreateRequest["input"]): string => {
+  const prompt = promptForInput(input).trim().replace(/\s+/g, " ");
+  if (!prompt) {
+    return "Untitled conversation";
+  }
+  return prompt.length > 54 ? `${prompt.slice(0, 53)}...` : prompt;
+};
+
+const formatConversationTime = (value: number): string =>
+  new Date(value).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  });
+
+const MEDIA_PATH_PATTERN =
+  /(?:\/workspace\/|workspace\/|\/tmp\/|outputs\/)[^\s`"'()[\]{}<>]+\.(?:png|jpe?g|webp|gif|avif|svg|mp4|webm|mov|m4v|wav|mp3|m4a|aac|ogg|flac)(?:[?#][^\s`"'()[\]{}<>]+)?/gi;
+
+const cleanMediaPath = (value: string): string =>
+  value.replace(/[),.;:!?]+$/g, "").replace(/[?#].*$/, "");
+
+const extractMediaPaths = (text: string | undefined): string[] => {
+  if (!text) {
+    return [];
+  }
+  return [...new Set([...text.matchAll(MEDIA_PATH_PATTERN)].map((match) => cleanMediaPath(match[0])))];
+};
+
+const SessionMedia = ({
+  state,
+  onSave,
+  onRetry,
+  onOpen
+}: {
+  state: SessionMediaState | undefined;
+  onSave: (item: ResolvedEnvironmentMedia) => void;
+  onRetry: () => void;
+  onOpen: (item: ResolvedEnvironmentMedia) => void;
+}) => {
+  if (!state || (!state.loading && state.items.length === 0 && !state.error)) {
+    return null;
+  }
+
+  return (
+    <div className="session-media">
+      {state.loading && (
+        <div className="media-progress">
+          <span>{state.stage ?? "Downloading generated media..."}</span>
+          <div className="media-progress-track" aria-hidden="true">
+            <span style={{ width: `${state.progress ?? 35}%` }} />
+          </div>
+        </div>
+      )}
+      {state.error && (
+        <div className="media-error-row">
+          <span className="media-error">{state.error}</span>
+          <button type="button" className="ghost-button sm" onClick={onRetry}>
+            Retry download
+          </button>
+        </div>
+      )}
+      {state.items.map((item) => (
+        <figure
+          className={`media-card media-${item.mediaType}`}
+          key={`${item.requestedPath}:${item.url}`}
+          onClick={(event) => {
+            const tag = event.target instanceof HTMLElement ? event.target.tagName.toLowerCase() : "";
+            if (tag !== "video" && tag !== "audio" && tag !== "button") {
+              onOpen(item);
+            }
+          }}
+        >
+          {item.mediaType === "image" ? (
+            <img src={item.url} alt={item.requestedPath} loading="lazy" onClick={() => onOpen(item)} />
+          ) : item.mediaType === "video" ? (
+            <video src={item.url} controls preload="metadata" />
+          ) : (
+            <BufferedAudio src={item.url} />
+          )}
+          <figcaption>
+            <span>
+              {item.requestedPath}
+              {item.savedPath && (
+                <>
+                  <br />
+                  Saved locally: <code>{item.savedPath}</code>
+                </>
+              )}
+            </span>
+            <button type="button" className="ghost-button sm" onClick={() => onSave(item)}>
+              <Download size={12} />
+              Save As
+            </button>
+            <button type="button" className="ghost-button sm" onClick={() => onOpen(item)}>
+              <Maximize2 size={12} />
+              Open
+            </button>
+            <button type="button" className="ghost-button sm" onClick={onRetry}>
+              Redownload
+            </button>
+          </figcaption>
+        </figure>
+      ))}
+    </div>
+  );
+};
+
+const MediaLightbox = ({
+  item,
+  onClose
+}: {
+  item: ResolvedEnvironmentMedia | null;
+  onClose: () => void;
+}) => {
+  if (!item) {
+    return null;
+  }
+
+  return (
+    <div className="media-lightbox-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className={`media-lightbox media-${item.mediaType}`} onClick={(event) => event.stopPropagation()}>
+        <header>
+          <div>
+            <strong>{item.requestedPath}</strong>
+            {item.savedPath && <code>{item.savedPath}</code>}
+          </div>
+          <button type="button" className="ghost-button sm" onClick={onClose}>
+            <X size={14} />
+            Close
+          </button>
+        </header>
+        <div className="media-lightbox-body">
+          {item.mediaType === "image" ? (
+            <img src={item.url} alt={item.requestedPath} />
+          ) : item.mediaType === "video" ? (
+            <video src={item.url} controls autoPlay />
+          ) : (
+            <BufferedAudio src={item.url} autoPlay />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const conversationRootId = (
+  session: Session,
+  byId: Map<string, Session>
+): string => {
+  let current = session;
+  const seen = new Set<string>();
+  while (current.parentLocalId && byId.has(current.parentLocalId) && !seen.has(current.localId)) {
+    seen.add(current.localId);
+    current = byId.get(current.parentLocalId)!;
+  }
+  return current.localId;
+};
+
+const buildConversations = (agentSessions: Session[]): ConversationSummary[] => {
+  const byId = new Map(agentSessions.map((session) => [session.localId, session]));
+  const grouped = new Map<string, Session[]>();
+  for (const session of agentSessions) {
+    const rootId = conversationRootId(session, byId);
+    grouped.set(rootId, [...(grouped.get(rootId) ?? []), session]);
+  }
+
+  return [...grouped.entries()]
+    .map(([id, group]) => {
+      const sorted = [...group].sort((left, right) => left.startedAt - right.startedAt);
+      const latestAt = sorted.reduce((max, session) => Math.max(max, session.startedAt), 0);
+      return {
+        id,
+        title: firstPromptLine(sorted[0]?.request.input ?? ""),
+        sessions: sorted,
+        latestAt,
+        environmentId: [...sorted].reverse().map(sessionEnvironmentId).find((value): value is string => Boolean(value))
+      };
+    })
+    .sort((left, right) => right.latestAt - left.latestAt);
+};
+
 const timelineItemsForSession = (session: Session): TimelineItem[] => {
   const items = buildTimeline(session.seed, session.events);
   if (!session.error) {
@@ -177,6 +389,18 @@ const timelineItemsForSession = (session: Session): TimelineItem[] => {
     }
   ];
 };
+
+const mediaSearchTextForSession = (session: Session): string =>
+  [
+    extractInteractionOutputText(session.seed),
+    ...timelineItemsForSession(session).flatMap((item) => [
+      item.summary,
+      item.body,
+      ...(item.details?.flatMap((detail) => [detail.summary, detail.body]) ?? [])
+    ])
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join("\n");
 
 const patchSeedFromStreamEvent = (
   seed: Interaction | undefined,
@@ -310,18 +534,32 @@ export const App = () => {
   const [busy, setBusy] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [latestRunId, setLatestRunId] = useState<string | null>(null);
+  const [activeConversationId, setActiveConversationId] = useState<string>(NEW_CONVERSATION_ID);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mediaBySession, setMediaBySession] = useState<Record<string, SessionMediaState>>({});
+  const [activeMedia, setActiveMedia] = useState<ResolvedEnvironmentMedia | null>(null);
   const activeResumeIds = useRef<Set<string>>(new Set());
   const pendingRunInputs = useRef<Map<string, PendingComposeInput>>(new Map());
+  const requestedMediaKeys = useRef<Set<string>>(new Set());
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
   const config = runtime ?? FALLBACK_RUNTIME;
   const agentId = config.agentId.trim() || FALLBACK_RUNTIME.agentId;
   const hasBridge = Boolean(window.managedAgents);
   const hasKey = Boolean(runtime?.hasApiKey);
-  const selectedSessions = useMemo(
+  const agentSessions = useMemo(
     () => sessions.filter((session) => session.agentId === agentId),
     [agentId, sessions]
   );
+  const conversations = useMemo(
+    () => buildConversations(agentSessions),
+    [agentSessions]
+  );
+  const selectedConversation = useMemo(
+    () => conversations.find((conversation) => conversation.id === activeConversationId),
+    [activeConversationId, conversations]
+  );
+  const selectedSessions = selectedConversation?.sessions ?? [];
   const chatSessions = useMemo(
     () => [...selectedSessions].sort((left, right) => left.startedAt - right.startedAt),
     [selectedSessions]
@@ -367,11 +605,22 @@ export const App = () => {
     () => selectedSessions.find((session) => session.streaming),
     [selectedSessions]
   );
-  const latestEnvironmentId = useMemo(
-    () => selectedSessions.map(sessionEnvironmentId).find((id): id is string => Boolean(id)),
-    [selectedSessions]
-  );
+  const latestEnvironmentId = selectedConversation?.environmentId;
   const canRun = hasBridge && hasKey && busy === null && hasComposeInput(compose);
+
+  const scrollChatToBottom = () => {
+    const scroll = () => {
+      const node = chatScrollRef.current;
+      if (node) {
+        node.scrollTop = node.scrollHeight;
+      }
+    };
+    scroll();
+    requestAnimationFrame(() => {
+      scroll();
+      requestAnimationFrame(scroll);
+    });
+  };
 
   useEffect(() => {
     void loadRuntime();
@@ -382,22 +631,44 @@ export const App = () => {
   }, [sessions]);
 
   useEffect(() => {
-    const node = chatScrollRef.current;
-    if (node) {
-      node.scrollTop = node.scrollHeight;
-    }
+    scrollChatToBottom();
   }, [chatSessions, latestRunId]);
+
+  useEffect(() => {
+    scrollChatToBottom();
+  }, [mediaBySession]);
+
+  useEffect(() => {
+    if (activeConversationId === NEW_CONVERSATION_ID) {
+      return;
+    }
+    if (activeConversationId === latestRunId) {
+      return;
+    }
+    if (!conversations.some((conversation) => conversation.id === activeConversationId)) {
+      setActiveConversationId(conversations[0]?.id ?? NEW_CONVERSATION_ID);
+    }
+  }, [activeConversationId, conversations, latestRunId]);
+
+  useEffect(() => {
+    if (!window.managedAgents?.resolveEnvironmentMedia) {
+      return;
+    }
+    for (const session of chatSessions) {
+      void resolveMediaForSession(session);
+    }
+  }, [chatSessions]);
 
   useEffect(() => {
     if (!hasBridge || !runtime?.hasApiKey || !window.managedAgents?.resumeInteractionStream) {
       return;
     }
-    for (const session of selectedSessions) {
+    for (const session of agentSessions) {
       if (shouldResumeBackgroundSession(session) && !activeResumeIds.current.has(session.localId)) {
         void resumeSessionStream(session);
       }
     }
-  }, [hasBridge, runtime?.hasApiKey, selectedSessions]);
+  }, [agentSessions, hasBridge, runtime?.hasApiKey]);
 
   const pushStatus = (event: Omit<StatusEvent, "id">) => {
     setStatus({ ...event, id: uid() });
@@ -427,6 +698,28 @@ export const App = () => {
     setRuntime(result.ok ? result.value : FALLBACK_RUNTIME);
   }
 
+  async function ensureAgentBeforeRun(
+    bridge: NonNullable<typeof window.managedAgents>,
+    targetAgentId: string
+  ): Promise<EnsureAnythingAgentResult | undefined> {
+    setBusy("deploy");
+    try {
+      const result = await bridge.ensureAnythingAgent(targetAgentId);
+      if (!result.ok) {
+        pushStatus({ level: "error", title: result.error.name, detail: result.error.message });
+        return undefined;
+      }
+      pushStatus({
+        level: "success",
+        title: result.value.recreated ? "Agent refreshed" : result.value.created ? "Agent deployed" : "Agent ready",
+        detail: `${result.value.agent.id} (${result.value.sourceTargets.length} sandbox files)`
+      });
+      return result.value;
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function runInteraction() {
     if (!hasComposeInput(compose)) {
       pushStatus({ level: "error", title: "Prompt required", detail: "Type a message or attach an image." });
@@ -447,6 +740,11 @@ export const App = () => {
       return;
     }
 
+    const ensuredAgent = await ensureAgentBeforeRun(bridge, agentId);
+    if (!ensuredAgent) {
+      return;
+    }
+
     const check = validateInteractionCreate(interaction);
     if (!check.ok) {
       pushStatus({ level: "error", title: "Interaction invalid", detail: check.errors.join("\n") });
@@ -454,9 +752,13 @@ export const App = () => {
     }
 
     const request = check.value;
+    if (ensuredAgent.created || ensuredAgent.recreated) {
+      request.environment = "remote";
+    }
     const localId = uid();
     const streamId = uid();
     const parent = selectedSessions.find((session) => session.seed?.id === request.previous_interaction_id);
+    const startsNewConversation = !parent;
     pendingRunInputs.current.set(localId, composeInputSnapshot(compose));
     setCompose((current) => clearComposeInput(current));
     setBusy("run");
@@ -492,6 +794,9 @@ export const App = () => {
         }) ?? (() => undefined);
 
         setSessions((current) => [{ ...base, events: [], streaming: true, streamId }, ...current]);
+        if (startsNewConversation) {
+          setActiveConversationId(localId);
+        }
         let snapshotTimer: ReturnType<typeof setInterval> | undefined;
         const syncStreamSnapshot = async () => {
           if (!getInteractionStreamSnapshot) {
@@ -588,12 +893,18 @@ export const App = () => {
           { ...base, seed: result.value, completedAt: interactionIsTerminal(result.value) ? Date.now() : undefined },
           ...current
         ]);
+        if (startsNewConversation) {
+          setActiveConversationId(localId);
+        }
         if (request.store === true) {
           setCompose((current) => ({ ...current, previousInteractionId: "", autoContinue: true }));
         }
       } else {
         restorePendingRunInput(localId);
         setSessions((current) => [{ ...base, error: result.error, completedAt: Date.now() }, ...current]);
+        if (startsNewConversation) {
+          setActiveConversationId(localId);
+        }
         pushStatus({ level: "error", title: result.error.name, detail: result.error.message });
       }
     } finally {
@@ -836,17 +1147,114 @@ export const App = () => {
     }
   }
 
+  async function saveMedia(item: ResolvedEnvironmentMedia) {
+    if (!window.managedAgents?.saveResolvedMedia) {
+      pushStatus({ level: "error", title: "Save unavailable", detail: "Run the Electron app to save media." });
+      return;
+    }
+    const result = await window.managedAgents.saveResolvedMedia(item.path);
+    if (!result.ok) {
+      pushStatus({ level: "error", title: result.error.name, detail: result.error.message });
+      return;
+    }
+    if (result.value.saved) {
+      pushStatus({ level: "success", title: "Media saved", detail: result.value.path });
+    }
+  }
+
+  async function resolveMediaForSession(session: Session, force = false) {
+    if (!window.managedAgents?.resolveEnvironmentMedia) {
+      return;
+    }
+    const environmentId = sessionEnvironmentId(session);
+    const paths = extractMediaPaths(mediaSearchTextForSession(session));
+    if (!environmentId || paths.length === 0 || session.streaming) {
+      return;
+    }
+    const requestKey = `${session.localId}:${environmentId}:${paths.join("|")}`;
+    if (force) {
+      requestedMediaKeys.current.delete(requestKey);
+    }
+    if (requestedMediaKeys.current.has(requestKey)) {
+      return;
+    }
+
+    requestedMediaKeys.current.add(requestKey);
+    setMediaBySession((current) => ({
+      ...current,
+      [session.localId]: {
+        loading: true,
+        items: force ? [] : (current[session.localId]?.items ?? []),
+        progress: 35,
+        stage: "Downloading generated media from the managed workspace..."
+      }
+    }));
+
+    const result = await window.managedAgents.resolveEnvironmentMedia(environmentId, paths);
+    setMediaBySession((current) => ({
+      ...current,
+      [session.localId]: result.ok
+        ? {
+            loading: false,
+            items: result.value,
+            progress: 100,
+            error: result.value.length ? undefined : "No generated media file was found in the downloaded workspace."
+          }
+        : {
+            loading: false,
+            items: current[session.localId]?.items ?? [],
+            progress: 0,
+            error: result.error.message
+          }
+    }));
+  }
+
   function resetConversation() {
-    if (selectedSessions.length === 0) {
+    if (!selectedConversation) {
       return;
     }
-    if (!window.confirm("Clear local chat history for this agent?")) {
+    if (!window.confirm(`Delete "${selectedConversation.title}" locally?`)) {
       return;
     }
-    setSessions((current) => current.filter((session) => session.agentId !== agentId));
+    const ids = new Set(selectedConversation.sessions.map((session) => session.localId));
+    setSessions((current) => current.filter((session) => !ids.has(session.localId)));
     setCompose(initialCompose);
     setLatestRunId(null);
-    pushStatus({ level: "success", title: "Conversation reset", detail: agentId });
+    setActiveConversationId(NEW_CONVERSATION_ID);
+    pushStatus({ level: "success", title: "Conversation deleted locally", detail: selectedConversation.title });
+  }
+
+  function startNewConversation() {
+    setActiveConversationId(NEW_CONVERSATION_ID);
+    setCompose(initialCompose);
+    setLatestRunId(null);
+    pushStatus({ level: "info", title: "New conversation", detail: "Next message starts fresh." });
+  }
+
+  function selectConversation(conversationId: string) {
+    setActiveConversationId(conversationId);
+    setCompose((current) => ({
+      ...current,
+      previousInteractionId: "",
+      autoContinue: true,
+      overrideEnvironment: false,
+      environmentId: ""
+    }));
+    setLatestRunId(null);
+  }
+
+  function deleteConversation(conversation: ConversationSummary) {
+    if (!window.confirm(`Delete "${conversation.title}" locally?`)) {
+      return;
+    }
+    const ids = new Set(conversation.sessions.map((session) => session.localId));
+    setSessions((current) => current.filter((session) => !ids.has(session.localId)));
+    if (activeConversationId === conversation.id) {
+      setActiveConversationId(NEW_CONVERSATION_ID);
+      setCompose(initialCompose);
+      setLatestRunId(null);
+    }
+    pushStatus({ level: "success", title: "Conversation deleted locally", detail: conversation.title });
   }
 
   return (
@@ -854,14 +1262,9 @@ export const App = () => {
       <header className="topbar">
         <div className="brand">
           <span className="brand-mark">
-            <Bot size={18} />
+            <Bot size={16} />
           </span>
-          <div>
-            <h1>Gemini Anything Agent</h1>
-            <div className="brand-subline">
-              <code>{agentId}</code>
-            </div>
-          </div>
+          <h1>Gemini Anything Agent</h1>
         </div>
 
         <div className="topbar-actions">
@@ -869,59 +1272,152 @@ export const App = () => {
             <span className="status-dot" />
             {hasKey ? "Key ready" : "No key"}
           </span>
-          <span className="agent-status">
-            <Sparkles size={13} />
+          <span className="agent-status gai-pill">
+            <Sparkles size={12} />
             <code>{config.npmPackage}@{config.npmVersion}</code>
           </span>
-          <button type="button" className="ghost-button" onClick={() => setSettingsOpen(true)}>
-            <Settings size={14} />
-            Settings
-          </button>
-          <button
-            type="button"
-            className="ghost-button"
-            disabled={!latestEnvironmentId || busy !== null}
-            title={latestEnvironmentId ? `Download ${latestEnvironmentId}` : "No environment yet"}
-            onClick={() => latestEnvironmentId && void snapshotEnvironment(latestEnvironmentId)}
-          >
-            <Download size={14} />
-            Snapshot
-          </button>
-          <button
-            type="button"
-            className="ghost-button danger"
-            disabled={selectedSessions.length === 0 || busy !== null}
-            onClick={resetConversation}
-          >
-            <RotateCcw size={14} />
-            Reset
-          </button>
         </div>
       </header>
 
-      <main className="shell chat-shell">
+      <main className={`shell chat-shell ${sidebarCollapsed ? "conversation-collapsed" : ""}`}>
+        <aside
+          className={`conversation-sidebar ${sidebarCollapsed ? "collapsed" : ""}`}
+          aria-label="Conversations"
+        >
+          <div className="conversation-head">
+            <h2>Conversations</h2>
+            <button
+              type="button"
+              className="head-icon sidebar-collapse"
+              title={sidebarCollapsed ? "Expand conversations" : "Collapse conversations"}
+              onClick={() => setSidebarCollapsed((value) => !value)}
+            >
+              {sidebarCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
+            </button>
+            <button
+              type="button"
+              className="sidebar-new"
+              title="New conversation"
+              aria-label="New conversation"
+              disabled={busy === "run" || busy === "cancel"}
+              onClick={startNewConversation}
+            >
+              <Plus size={15} />
+            </button>
+          </div>
+
+          <div className="conversation-list">
+            {conversations.length === 0 ? (
+              <div className="conversation-empty">No saved local conversations yet.</div>
+            ) : (
+              conversations.map((conversation) => (
+                <div
+                  className={`conversation-row ${
+                    conversation.id === activeConversationId ? "active" : ""
+                  }`}
+                  key={conversation.id}
+                >
+                  <button
+                    type="button"
+                    className="conversation-select"
+                    aria-current={conversation.id === activeConversationId ? "true" : undefined}
+                    onClick={() => selectConversation(conversation.id)}
+                  >
+                    <MessageSquare size={14} />
+                    <span>
+                      <strong>{conversation.title}</strong>
+                      <em>
+                        {conversation.sessions.length} turn{conversation.sessions.length === 1 ? "" : "s"} ·{" "}
+                        {formatConversationTime(conversation.latestAt)}
+                      </em>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="conversation-delete"
+                    disabled={busy === "run" || busy === "cancel"}
+                    title="Delete local conversation"
+                    onClick={() => deleteConversation(conversation)}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </aside>
+
         <section className="chat-main" aria-label="Managed agent chat">
+          <div className="chat-main-head">
+            <span className="chat-main-title">
+              {selectedConversation ? selectedConversation.title : "New conversation"}
+            </span>
+            {runningSession && <span className="live-dot">working…</span>}
+            <span className="chat-main-head-spacer" />
+            <button
+              type="button"
+              className="head-icon"
+              title="Settings"
+              aria-label="Settings"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <Settings size={15} />
+            </button>
+            <button
+              type="button"
+              className="head-icon"
+              title={latestEnvironmentId ? `Snapshot ${latestEnvironmentId}` : "No environment yet"}
+              aria-label="Download environment snapshot"
+              disabled={!latestEnvironmentId || busy !== null}
+              onClick={() => latestEnvironmentId && void snapshotEnvironment(latestEnvironmentId)}
+            >
+              <Download size={15} />
+            </button>
+            <button
+              type="button"
+              className="head-icon danger"
+              title="Delete this conversation locally"
+              aria-label="Delete this conversation"
+              disabled={!selectedConversation || busy !== null}
+              onClick={resetConversation}
+            >
+              <Trash2 size={15} />
+            </button>
+          </div>
           <div className="chat-scroll" ref={chatScrollRef}>
             {chatSessions.length === 0 ? (
               <div className="chat-empty">
-                <Bot size={24} />
-                <strong>Ready for the managed agent.</strong>
+                <span className="chat-empty-mark">
+                  <Bot size={28} />
+                </span>
+                <strong>
+                  {activeConversationId === NEW_CONVERSATION_ID
+                    ? "Start a new conversation"
+                    : "No local turns in this conversation"}
+                </strong>
                 <span>
                   Session and environment continuity are on by default.
                 </span>
               </div>
             ) : (
               chatSessions.map((session) => (
-                <Transcript
-                  key={session.localId}
-                  prompt={promptForInput(session.request.input)}
-                  startedAt={session.startedAt}
-                  items={timelineItemsForSession(session)}
-                  streaming={Boolean(session.streaming)}
-                  embedded
-                  empty="Waiting for the agent..."
-                  onCopy={copyText}
-                />
+                <div className="conversation-turn" key={session.localId}>
+                  <Transcript
+                    prompt={promptForInput(session.request.input)}
+                    startedAt={session.startedAt}
+                    items={timelineItemsForSession(session)}
+                    streaming={Boolean(session.streaming)}
+                    embedded
+                    empty="Waiting for the agent..."
+                    onCopy={copyText}
+                  />
+                  <SessionMedia
+                    state={mediaBySession[session.localId]}
+                    onSave={saveMedia}
+                    onRetry={() => void resolveMediaForSession(session, true)}
+                    onOpen={setActiveMedia}
+                  />
+                </div>
               ))
             )}
           </div>
@@ -955,6 +1451,8 @@ export const App = () => {
           onClear={clearApiKey}
         />
       )}
+
+      <MediaLightbox item={activeMedia} onClose={() => setActiveMedia(null)} />
 
       <footer className={`status-bar ${status?.level ?? ""}`} aria-live="polite">
         {status ? (

@@ -1,0 +1,38 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Builds and package output
+dist/
+**/dist/
+coverage/
+**/coverage/
+*.tsbuildinfo
+*.tgz
+
+# Generated artifacts
+outputs/
+**/outputs/
+workspace-output/
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.mp4
+*.wav
+*.mp3
+*.tar
+*.tar.gz
+
+# Logs and local state
+*.log
+.DS_Store
+.gemini-anything-agent/
+agent-projects/
+

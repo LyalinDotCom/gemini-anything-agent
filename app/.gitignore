@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+out/
+release/
+*.tsbuildinfo
+
+# Test and coverage output
+coverage/
+.vitest/
+.nyc_output/
+
+# Vite / Electron caches
+.vite/
+.vite-temp/
+node_modules/.vite/
+node_modules/.vite-temp/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Managed-agent snapshots and downloaded sandboxes
+agent-projects/
+snapshot_env.tar
+snapshot*.tar
+snapshot*.tar.gz
+environment-*.tar
+environment-*.tar.gz
+extracted_env_snapshot/
+extracted_*snapshot/
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

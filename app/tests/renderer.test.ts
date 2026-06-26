@@ -1,0 +1,532 @@
+import { describe, expect, it } from "vitest";
+import { buildAgent, buildInteraction } from "../src/renderer/lib/payload";
+import { computeCardState, type CapabilityKey } from "../src/renderer/lib/badges";
+import { agentToDraft } from "../src/renderer/lib/agentToDraft";
+import { nextAgentVersionId } from "../src/renderer/lib/versioning";
+import {
+  initialCompose,
+  minimalBuilder,
+  newAssetFile,
+  newEnvFile,
+  uniqueEnvName,
+  type Session,
+  type BuilderDraft
+} from "../src/renderer/lib/builderState";
+import {
+  localProjectPath,
+  projectFileIssues,
+  projectFilesForSave
+} from "../src/renderer/lib/projectFiles";
+import { skillLibrary, skillTemplateToProjectFile } from "../src/renderer/lib/skillLibrary";
+import {
+  SESSION_HISTORY_KEY,
+  readStoredSessions,
+  renameSessionsForAgent,
+  removeSessionsForAgent,
+  sanitizeSessionHistory,
+  writeStoredSessions
+} from "../src/renderer/lib/sessionStore";
+import {
+  latestContinuableSession,
+  latestReusableEnvironmentSession,
+  sessionEnvironmentId,
+  withAutoContinuation,
+  withAutoEnvironment
+} from "../src/renderer/lib/continuity";
+
+const KEY_FOR: Partial<Record<CapabilityKey, string>> = {
+  brain: "system_instruction",
+  tools: "tools",
+  environment: "base_environment"
+};
+
+describe("renderer payload compiler", () => {
+  it("a starter agent emits AGENTS.md as a project source", () => {
+    const agent = buildAgent(minimalBuilder());
+    expect(Object.keys(agent).sort()).toEqual(["base_agent", "base_environment", "id"]);
+    expect(
+      typeof agent.base_environment === "object" &&
+        agent.base_environment.sources?.some(
+          (source) => source.type === "inline" && source.target === ".agents/AGENTS.md"
+        )
+    ).toBe(true);
+  });
+
+  it("a bare draft with no project files emits only the required keys", () => {
+    const agent = buildAgent({ ...minimalBuilder(), projectFiles: [] });
+    expect(Object.keys(agent).sort()).toEqual(["base_agent", "id"]);
+  });
+
+  it("bakes the active .env into the sandbox root and treats it as plain text", () => {
+    const envFile = { ...newEnvFile(), content: "GITHUB_TOKEN=secret\n# free-form text is fine" };
+    const agent = buildAgent({
+      ...minimalBuilder(),
+      projectFiles: [envFile],
+      activeEnvFileId: envFile.id
+    });
+
+    expect(localProjectPath(envFile, envFile.id)).toBe(".env");
+    expect(
+      typeof agent.base_environment === "object" &&
+        agent.base_environment.sources?.some(
+          (source) =>
+            source.type === "inline" &&
+            source.target === ".env" &&
+            source.content === "GITHUB_TOKEN=secret\n# free-form text is fine"
+        )
+    ).toBe(true);
+  });
+
+  it("only sends the active .env; inactive named .env files stay a local library", () => {
+    const active = { ...newEnvFile(".env"), content: "ACTIVE=1" };
+    const staging = { ...newEnvFile(".env.staging"), content: "STAGING=1" };
+    const draft = {
+      ...minimalBuilder(),
+      projectFiles: [active, staging],
+      activeEnvFileId: active.id
+    };
+
+    // Inactive .env persists locally under env/, active maps to the sandbox root.
+    expect(localProjectPath(active, active.id)).toBe(".env");
+    expect(localProjectPath(staging, active.id)).toBe("env/.env.staging");
+
+    const saved = projectFilesForSave(draft.projectFiles, active.id).map((file) => file.path);
+    expect(saved).toContain(".env");
+    expect(saved).toContain("env/.env.staging");
+
+    const agent = buildAgent(draft);
+    const envTargets =
+      typeof agent.base_environment === "object"
+        ? (agent.base_environment.sources ?? [])
+            .filter((source) => source.target === ".env")
+            .map((source) => source.type === "inline" && source.content)
+        : [];
+    // Exactly one .env source, and it is the active one.
+    expect(envTargets).toEqual(["ACTIVE=1"]);
+  });
+
+  it("names new .env files uniquely", () => {
+    const first = newEnvFile(uniqueEnvName([]));
+    expect(first.name).toBe(".env");
+    expect(uniqueEnvName([first])).toBe(".env.2");
+    expect(uniqueEnvName([first, { ...newEnvFile(".env.2") }])).toBe(".env.3");
+  });
+
+  it("installs the GitHub repo sync skill from the library", () => {
+    const skill = skillLibrary.find((item) => item.id === "github-repo-sync");
+    expect(skill).toBeDefined();
+
+    const file = skillTemplateToProjectFile(skill!);
+    expect(file.name).toBe("github-repo-sync");
+    expect(file.target).toBe(".agents/github-repo-sync/SKILL.md");
+    expect(file.content).toContain("GITHUB_TOKEN");
+    expect(file.content).toContain("git push -u origin HEAD");
+  });
+
+  it("allows temporarily empty editable file names but reports them as invalid", () => {
+    const clearedAsset = {
+      ...newAssetFile("notes.md"),
+      name: "",
+      target: "assets/",
+      content: "data"
+    };
+
+    expect(projectFileIssues([clearedAsset])).toEqual(["Asset file name is required."]);
+    expect(projectFilesForSave([clearedAsset])).toEqual([]);
+  });
+
+  it("enforces the Badge==Key invariant across capabilities", () => {
+    const drafts: BuilderDraft[] = [
+      minimalBuilder(),
+      { ...minimalBuilder(), systemInstruction: "Be careful." },
+      { ...minimalBuilder(), toolMode: "custom" },
+      { ...minimalBuilder(), environmentMode: "environment_id", environmentId: "env-123" },
+      {
+        ...minimalBuilder(),
+        environmentMode: "config",
+        sources: [
+          { id: "a", type: "inline", source: "", target: ".agents/AGENTS.md", content: "hi" }
+        ]
+      }
+    ];
+
+    for (const draft of drafts) {
+      const agent = buildAgent(draft) as Record<string, unknown>;
+      for (const key of ["brain", "tools", "environment"] as CapabilityKey[]) {
+        const descriptor = computeCardState(draft, key);
+        const present = Boolean(KEY_FOR[key] && KEY_FOR[key]! in agent);
+        expect(present).toBe(descriptor.emitsKey);
+        expect(descriptor.state === "custom").toBe(present);
+      }
+    }
+  });
+
+  it("omits base_environment for a bare fresh-remote sandbox", () => {
+    const agent = buildAgent({ ...minimalBuilder(), projectFiles: [] }) as Record<string, unknown>;
+    expect("base_environment" in agent).toBe(false);
+  });
+
+  it("treats custom tools with nothing selected as Default (no tools key emitted)", () => {
+    const draft: BuilderDraft = {
+      ...minimalBuilder(),
+      toolMode: "custom",
+      selectedTools: { code_execution: false, google_search: false, url_context: false }
+    };
+    const agent = buildAgent(draft) as Record<string, unknown>;
+    expect("tools" in agent).toBe(false);
+    expect(computeCardState(draft, "tools").state).toBe("default");
+    expect(computeCardState(draft, "tools").emitsKey).toBe(false);
+  });
+
+  it("treats an allowlist with no valid rules as Default (no network key emitted)", () => {
+    const draft: BuilderDraft = {
+      ...minimalBuilder(),
+      environmentMode: "config",
+      networkMode: "allowlist",
+      networkRules: []
+    };
+    const env = (buildAgent(draft) as Record<string, unknown>).base_environment as
+      | Record<string, unknown>
+      | undefined;
+    expect(env && "network" in env).toBeFalsy();
+    expect(computeCardState(draft, "network").emitsKey).toBe(false);
+  });
+
+  it("sends normal text as a plain interaction input", () => {
+    const request = buildInteraction(minimalBuilder(), {
+      ...initialCompose,
+      input: "hello",
+      parts: []
+    });
+    expect(request.input).toBe("hello");
+  });
+
+  it("sends a fresh remote environment for default interactions", () => {
+    const request = buildInteraction(minimalBuilder(), initialCompose);
+    expect(request.environment).toBe("remote");
+    expect(request.input).toBe("");
+    expect(request.store).toBe(true);
+    expect(request.background).toBe(true);
+  });
+
+  it("only sends background execution when stored history is on", () => {
+    const stored = buildInteraction(minimalBuilder(), {
+      ...initialCompose,
+      store: true,
+      background: true
+    });
+    const unstored = buildInteraction(minimalBuilder(), {
+      ...initialCompose,
+      store: false,
+      background: true
+    });
+
+    expect(stored.background).toBe(true);
+    expect(unstored.background).toBeUndefined();
+  });
+
+  it("emits optional run quality controls when changed", () => {
+    const request = buildInteraction(minimalBuilder(), {
+      ...initialCompose,
+      serviceTier: "priority",
+      thinkingSummaries: "auto"
+    });
+
+    expect(request.service_tier).toBe("priority");
+    expect(request.agent_config).toEqual({
+      type: "dynamic",
+      thinking_summaries: "auto"
+    });
+  });
+
+  it("round-trips a built agent back into an editable draft", () => {
+    const draft: BuilderDraft = {
+      ...minimalBuilder(),
+      id: "round-trip",
+      systemInstruction: "Stay concise.",
+      toolMode: "custom",
+      selectedTools: { code_execution: true, google_search: false, url_context: true },
+      environmentMode: "environment_id",
+      environmentId: "env-xyz"
+    };
+    const back = agentToDraft(buildAgent(draft));
+    expect(back.id).toBe("round-trip");
+    expect(back.systemInstruction).toBe("Stay concise.");
+    expect(back.toolMode).toBe("custom");
+    expect(back.selectedTools).toEqual({
+      code_execution: true,
+      google_search: false,
+      url_context: true
+    });
+    expect(back.environmentMode).toBe("environment_id");
+    expect(back.environmentId).toBe("env-xyz");
+  });
+
+  it("round-trips inline project files back into the project editor", () => {
+    const back = agentToDraft({
+      id: "project-agent",
+      base_agent: "antigravity-preview-05-2026",
+      base_environment: {
+        type: "remote",
+        sources: [
+          { type: "inline", target: ".agents/AGENTS.md", content: "agent rules" },
+          { type: "inline", target: ".env", content: "GITHUB_TOKEN=secret" },
+          { type: "inline", target: ".agents/github-repo-sync/SKILL.md", content: "# GitHub Repo Sync" },
+          { type: "repository", source: "https://github.com/example/repo.git", target: "repo" }
+        ]
+      }
+    });
+
+    expect(back.projectFiles.map((file) => [file.kind, file.target])).toEqual([
+      ["instructions", ".agents/AGENTS.md"],
+      ["env", ".env"],
+      ["skill", ".agents/github-repo-sync/SKILL.md"]
+    ]);
+    expect(back.sources).toHaveLength(1);
+    expect(back.sources[0].type).toBe("repository");
+  });
+
+  it("builds a multimodal interaction request with attached images", () => {
+    const draft = minimalBuilder();
+    const request = buildInteraction(draft, {
+      ...initialCompose,
+      input: "Describe this",
+      parts: [
+        { id: "i", kind: "image", data: "AAAA", mimeType: "image/png", name: "x.png", bytes: 3 }
+      ]
+    });
+    expect(request.agent).toBe(draft.id);
+    expect(Array.isArray(request.input)).toBe(true);
+    expect(request.input).toEqual([
+      { type: "text", text: "Describe this" },
+      { type: "image", data: "AAAA", mime_type: "image/png" }
+    ]);
+  });
+
+  it("chooses the next available agent version id", () => {
+    expect(
+      nextAgentVersionId("my-first-agent", [
+        { id: "my-first-agent" },
+        { id: "my-first-agent-v2" }
+      ])
+    ).toBe("my-first-agent-v3");
+    expect(nextAgentVersionId("my-first-agent-v2", [{ id: "my-first-agent" }])).toBe("my-first-agent-v2");
+    expect(nextAgentVersionId("  ", [])).toBe("my-first-agent");
+  });
+});
+
+describe("session history storage", () => {
+  const session = (agentId: string, startedAt: number, localId = `${agentId}-${startedAt}`): Session => ({
+    localId,
+    agentId,
+    agentSnapshot: {
+      id: agentId,
+      base_agent: "antigravity-preview-05-2026",
+      system_instruction: "Historic saved instruction",
+      tools: [{ type: "code_execution" }]
+    },
+    request: {
+      agent: agentId,
+      environment: "remote",
+      input: "Inspect the workspace"
+    },
+    seed: {
+      id: `int-${localId}`,
+      status: "completed"
+    },
+    startedAt
+  });
+
+  it("loads valid stored runs newest first", () => {
+    expect(sanitizeSessionHistory([session("agent-a", 1), session("agent-a", 3), session("agent-a", 2)])
+      .map((item) => item.startedAt)).toEqual([3, 2, 1]);
+  });
+
+  it("drops malformed stored run records", () => {
+    expect(
+      sanitizeSessionHistory([
+        session("agent-a", 1),
+        { localId: "bad", agentId: "agent-a", startedAt: 2 },
+        { localId: "bad-date", agentId: "agent-a", request: session("agent-a", 3).request, startedAt: Number.NaN },
+        null
+      ])
+    ).toHaveLength(1);
+  });
+
+  it("round-trips run history through storage", () => {
+    const backing = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => backing.get(key) ?? null,
+      setItem: (key: string, value: string) => backing.set(key, value),
+      removeItem: (key: string) => backing.delete(key)
+    };
+
+    writeStoredSessions([{ ...session("agent-a", 1), completedAt: 1201 }], storage);
+    expect(backing.has(SESSION_HISTORY_KEY)).toBe(true);
+    const [stored] = readStoredSessions(storage);
+    expect(stored.agentId).toBe("agent-a");
+    expect(stored.agentSnapshot?.system_instruction).toBe("Historic saved instruction");
+    expect(stored.completedAt).toBe(1201);
+  });
+
+  it("drops stored runs without an agent snapshot", () => {
+    const [stored] = sanitizeSessionHistory([{ ...session("agent-a", 1), agentSnapshot: undefined }]);
+    expect(stored).toBeUndefined();
+  });
+
+  it("preserves streamed events in stored run history", () => {
+    const backing = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => backing.get(key) ?? null,
+      setItem: (key: string, value: string) => backing.set(key, value),
+      removeItem: (key: string) => backing.delete(key)
+    };
+
+    writeStoredSessions([
+      {
+        ...session("agent-a", 1),
+        events: [
+          { event_type: "interaction.created", event_id: "evt-1", interaction: { id: "int-a", status: "in_progress" } },
+          { event_type: "step.delta", index: 0, delta: { type: "text", text: "ready" } }
+        ],
+        streaming: true,
+        streamId: "local-stream"
+      }
+    ], storage);
+
+    const [stored] = readStoredSessions(storage);
+    expect(stored.streaming).toBe(false);
+    expect(stored.streamId).toBeUndefined();
+    expect(stored.events?.map((event) => event.event_type)).toEqual([
+      "interaction.created",
+      "step.delta"
+    ]);
+    expect(stored.events?.[0].event_id).toBe("evt-1");
+  });
+
+  it("removes all run history for a deleted agent", () => {
+    expect(removeSessionsForAgent([session("agent-a", 1), session("agent-b", 2)], "agent-a")
+      .map((item) => item.agentId)).toEqual(["agent-b"]);
+  });
+
+  it("moves local run history when an agent is renamed", () => {
+    const renamed = renameSessionsForAgent(
+      [session("agent-a", 1), session("agent-b", 2)],
+      "agent-a",
+      "agent-c"
+    );
+
+    expect(renamed.map((item) => item.agentId)).toEqual(["agent-c", "agent-b"]);
+    expect(renamed[0].request.agent).toBe("agent-a");
+  });
+});
+
+describe("stored interaction continuity", () => {
+  const session = (
+    agentId: string,
+    startedAt: number,
+    interactionId: string,
+    options: Partial<Session> = {}
+  ): Session => ({
+    localId: `${agentId}-${startedAt}`,
+    agentId,
+    agentSnapshot: {
+      id: agentId,
+      base_agent: "antigravity-preview-05-2026"
+    },
+    request: {
+      agent: agentId,
+      environment: "remote",
+      input: "Inspect the workspace",
+      store: true
+    },
+    seed: {
+      id: interactionId,
+      environment_id: `env-${interactionId}`,
+      status: "completed"
+    },
+    startedAt,
+    ...options
+  });
+
+  it("continues from the newest stored interaction for the same agent", () => {
+    const sessions = [
+      session("agent-a", 1, "old"),
+      session("agent-b", 3, "wrong-agent"),
+      session("agent-a", 2, "newest")
+    ];
+    const request = withAutoContinuation(
+      { agent: "agent-a", environment: "remote", input: "Again", store: true },
+      sessions,
+      true
+    );
+
+    expect(latestContinuableSession(sessions, "agent-a")?.seed?.id).toBe("newest");
+    expect(request.previous_interaction_id).toBe("newest");
+  });
+
+  it("does not auto-continue explicit, fresh, failed, or unstored runs", () => {
+    const sessions = [
+      session("agent-a", 4, "failed", { error: { name: "Error", message: "Nope" } }),
+      session("agent-a", 3, "unstored", {
+        request: { agent: "agent-a", environment: "remote", input: "Fresh", store: false }
+      }),
+      session("agent-a", 2, "usable")
+    ];
+
+    expect(
+      withAutoContinuation(
+        { agent: "agent-a", environment: "remote", input: "Again", store: true, previous_interaction_id: "manual" },
+        sessions,
+        true
+      ).previous_interaction_id
+    ).toBe("manual");
+    expect(
+      withAutoContinuation(
+        { agent: "agent-a", environment: "remote", input: "Again", store: false },
+        sessions,
+        true
+      ).previous_interaction_id
+    ).toBeUndefined();
+    expect(
+      withAutoContinuation(
+        { agent: "agent-a", environment: "remote", input: "Again", store: true },
+        sessions,
+        false
+      ).previous_interaction_id
+    ).toBeUndefined();
+    expect(latestContinuableSession(sessions, "agent-a")?.seed?.id).toBe("usable");
+  });
+
+  it("reuses the newest finished environment only when the switch is on", () => {
+    const sessions = [
+      session("agent-a", 1, "old"),
+      session("agent-b", 3, "wrong-agent"),
+      session("agent-a", 4, "failed", { error: { name: "Error", message: "Nope" } }),
+      session("agent-a", 2, "newest")
+    ];
+
+    expect(sessionEnvironmentId(latestReusableEnvironmentSession(sessions, "agent-a")!)).toBe("env-newest");
+    expect(
+      withAutoEnvironment(
+        { agent: "agent-a", environment: "remote", input: "Again", store: true },
+        sessions,
+        true
+      ).environment
+    ).toBe("env-newest");
+    expect(
+      withAutoEnvironment(
+        { agent: "agent-a", environment: "remote", input: "Again", store: true },
+        sessions,
+        false
+      ).environment
+    ).toBe("remote");
+    expect(
+      withAutoEnvironment(
+        { agent: "agent-a", environment: "env-manual", input: "Again", store: true },
+        sessions,
+        true
+      ).environment
+    ).toBe("env-manual");
+  });
+});

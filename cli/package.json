@@ -1,0 +1,40 @@
+{
+  "name": "@lyalindotcom/gai",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Media capability CLI for Gemini Anything managed agents.",
+  "type": "module",
+  "bin": {
+    "gai": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "package.json"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/cli.ts",
+    "gai": "tsx src/cli.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@google/genai": "^2.10.0",
+    "commander": "^14.0.2",
+    "dotenv": "^17.2.3",
+    "mime-types": "^3.0.1",
+    "ora": "^9.0.0",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@types/mime-types": "^3.0.1",
+    "@types/node": "^24.10.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.13"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

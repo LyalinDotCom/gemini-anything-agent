@@ -1,0 +1,48 @@
+{
+  "name": "gemini-anything-agent-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Single-agent chat harness for the Gemini Anything managed agent.",
+  "type": "module",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "postinstall": "node scripts/ensure-electron.mjs",
+    "predev": "node scripts/ensure-electron.mjs",
+    "electron:install": "node scripts/ensure-electron.mjs --force",
+    "dev": "electron-vite dev",
+    "dev:web": "vite --config vite.renderer.config.ts --host 127.0.0.1",
+    "build": "npm run typecheck && electron-vite build",
+    "build:web": "vite build --config vite.renderer.config.ts",
+    "preview": "vite preview --config vite.renderer.config.ts --host 127.0.0.1",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "lucide-react": "^1.20.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@swc/core": "^1.15.41",
+    "@types/node": "^25.9.3",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^42.4.1",
+    "electron-vite": "^5.0.0",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "vite": "^7.3.5",
+    "vitest": "^4.1.9"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "overrides": {
+    "esbuild": "0.28.1"
+  }
+}

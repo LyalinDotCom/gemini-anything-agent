@@ -1,0 +1,112 @@
+export type Capability = "agy" | "image" | "video" | "tts";
+
+export type ApiSurface = "interactions" | "generateVideos" | "managed-agent";
+
+export type ModelRegistryEntry = {
+  id: string;
+  capability: Capability;
+  label: string;
+  status: "stable" | "preview";
+  apiSurface: ApiSurface;
+  isDefault?: boolean;
+  notes: string;
+};
+
+export const MODEL_REGISTRY = [
+  {
+    id: "antigravity-preview-05-2026",
+    capability: "agy",
+    label: "AGY runtime",
+    status: "preview",
+    apiSurface: "managed-agent",
+    notes: "Preconfigured managed-agent brain; documented here but not wrapped by media commands."
+  },
+  {
+    id: "gemini-3.1-flash-image",
+    capability: "image",
+    label: "Image default",
+    status: "stable",
+    apiSurface: "interactions",
+    isDefault: true,
+    notes: "Default Gemini 3.x image generation and editing model."
+  },
+  {
+    id: "gemini-3-pro-image",
+    capability: "image",
+    label: "Image pro",
+    status: "stable",
+    apiSurface: "interactions",
+    notes: "Higher-end Gemini 3.x image model for professional layouts and precise text."
+  },
+  {
+    id: "veo-3.1-lite-generate-preview",
+    capability: "video",
+    label: "Video default",
+    status: "preview",
+    apiSurface: "generateVideos",
+    isDefault: true,
+    notes: "Default lower-cost Veo 3.1 video route."
+  },
+  {
+    id: "veo-3.1-generate-preview",
+    capability: "video",
+    label: "Video premium",
+    status: "preview",
+    apiSurface: "generateVideos",
+    notes: "Premium Veo 3.1 route."
+  },
+  {
+    id: "veo-3.1-fast-generate-preview",
+    capability: "video",
+    label: "Video fast premium",
+    status: "preview",
+    apiSurface: "generateVideos",
+    notes: "Faster premium Veo 3.1 route."
+  },
+  {
+    id: "gemini-3.1-flash-tts-preview",
+    capability: "tts",
+    label: "TTS default",
+    status: "preview",
+    apiSurface: "interactions",
+    isDefault: true,
+    notes: "Gemini 3.1 Flash TTS preview for speech generation."
+  }
+] as const satisfies readonly ModelRegistryEntry[];
+
+export const DEPRECATED_DEFAULT_DENYLIST = [
+  "imagen-4.0-generate-001",
+  "imagen-4.0-ultra-generate-001",
+  "imagen-4.0-fast-generate-001",
+  "veo-2.0-generate-001",
+  "gemini-2.0-flash",
+  "gemini-2.0-flash-lite",
+  "gemini-3.1-flash-lite-preview",
+  "gemini-3-pro-preview"
+] as const;
+
+export const defaultImageModel = (): string =>
+  process.env.GEMINI_ANYTHING_IMAGE_MODEL || "gemini-3.1-flash-image";
+
+export const defaultTtsModel = (): string =>
+  process.env.GEMINI_ANYTHING_TTS_MODEL || "gemini-3.1-flash-tts-preview";
+
+export type VideoQuality = "lite" | "premium" | "fast-premium";
+
+export const videoModelForQuality = (quality: VideoQuality): string => {
+  const override = process.env.GEMINI_ANYTHING_VIDEO_MODEL;
+  if (override) {
+    return override;
+  }
+  if (quality === "premium") {
+    return "veo-3.1-generate-preview";
+  }
+  if (quality === "fast-premium") {
+    return "veo-3.1-fast-generate-preview";
+  }
+  return "veo-3.1-lite-generate-preview";
+};
+
+export const isDeprecatedDefault = (model: string): boolean =>
+  DEPRECATED_DEFAULT_DENYLIST.includes(model as (typeof DEPRECATED_DEFAULT_DENYLIST)[number]);
+

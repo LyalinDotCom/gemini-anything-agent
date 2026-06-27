@@ -1,8 +1,10 @@
 # gai
 
-`gai` is the media capability CLI for Gemini Anything managed agents.
+Media capability CLI for the Gemini Anything Agent sample.
 
 Live npm package: [`@lyalindotcom/gai`](https://www.npmjs.com/package/@lyalindotcom/gai)
+
+## Commands
 
 ```bash
 npx -y @lyalindotcom/gai@latest --help
@@ -10,16 +12,26 @@ npx -y @lyalindotcom/gai@latest image --help
 npx -y @lyalindotcom/gai@latest video --help
 npx -y @lyalindotcom/gai@latest tts --help
 npx -y @lyalindotcom/gai@latest transcribe --help
+```
+
+Examples:
+
+```bash
 npx -y @lyalindotcom/gai@latest tts --script-file script.txt --out outputs/podcast.wav --json
 npx -y @lyalindotcom/gai@latest transcribe podcast.wav --out outputs/podcast-transcript.md --json
 ```
 
-`GEMINI_API_KEY` is required for live generation.
-
-When the CLI is used through the managed-agent sample, the app provides this key by mounting a plaintext `.env` file into the remote sandbox. That is proof-of-concept wiring, not encrypted production secret handling.
-
-Published package:
+## Development
 
 ```bash
-npx -y @lyalindotcom/gai@latest doctor --json
+npm install
+npm test
+npm run build
+npm run gai -- models
 ```
+
+## Key Warning
+
+Live calls require `GEMINI_API_KEY`.
+
+In the managed-agent sample, the app passes the key by mounting a plaintext sandbox `.env`, and `/.agents/bin/gai` sources it. This is proof-of-concept wiring, not production secret handling.

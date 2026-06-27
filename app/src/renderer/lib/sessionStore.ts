@@ -1,5 +1,5 @@
 import type { Interaction, InteractionCreateRequest, InteractionStreamEvent, ManagedAgent } from "@sdk";
-import type { IpcError } from "../../shared/electron-api";
+import type { IpcError, ResolvedEnvironmentMedia } from "../../shared/electron-api";
 import type { Session } from "./builderState";
 
 export const SESSION_HISTORY_KEY = "gemini-anything-agent:sessions:v1";
@@ -84,6 +84,28 @@ const sanitizeError = (value: unknown): IpcError | undefined => {
   };
 };
 
+const isMediaType = (value: unknown): value is ResolvedEnvironmentMedia["mediaType"] =>
+  value === "image" || value === "video" || value === "audio";
+
+const sanitizeResolvedMedia = (value: unknown): ResolvedEnvironmentMedia[] | undefined => {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const media = value.filter((item): item is ResolvedEnvironmentMedia => {
+    if (!isRecord(item)) {
+      return false;
+    }
+    return (
+      typeof item.requestedPath === "string" &&
+      typeof item.path === "string" &&
+      typeof item.url === "string" &&
+      (typeof item.savedPath === "undefined" || typeof item.savedPath === "string") &&
+      isMediaType(item.mediaType)
+    );
+  });
+  return media.length ? media : undefined;
+};
+
 export const sanitizeSessionHistory = (value: unknown): Session[] => {
   if (!Array.isArray(value)) {
     return [];
@@ -125,6 +147,7 @@ export const sanitizeSessionHistory = (value: unknown): Session[] => {
           ? item.completedAt
           : undefined,
       error: sanitizeError(item.error),
+      resolvedMedia: sanitizeResolvedMedia(item.resolvedMedia),
       parentLocalId: typeof item.parentLocalId === "string" ? item.parentLocalId : undefined
     });
   }

@@ -7,18 +7,16 @@ type BufferedAudioProps = {
   className?: string;
 };
 
-type AudioState = "loading" | "metadata" | "ready";
-
 export const BufferedAudio = ({ src, autoPlay = false, className }: BufferedAudioProps) => {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [objectUrl, setObjectUrl] = useState<string>();
-  const [state, setState] = useState<AudioState>("loading");
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let canceled = false;
     let nextObjectUrl: string | undefined;
     setObjectUrl(undefined);
-    setState("loading");
+    setLoading(true);
 
     fetch(src)
       .then((response) => {
@@ -33,12 +31,12 @@ export const BufferedAudio = ({ src, autoPlay = false, className }: BufferedAudi
         }
         nextObjectUrl = URL.createObjectURL(blob);
         setObjectUrl(nextObjectUrl);
-        setState("metadata");
+        setLoading(false);
       })
       .catch(() => {
         if (!canceled) {
           setObjectUrl(src);
-          setState("metadata");
+          setLoading(false);
         }
       });
 
@@ -50,39 +48,27 @@ export const BufferedAudio = ({ src, autoPlay = false, className }: BufferedAudi
     };
   }, [src]);
 
-  const markReady = () => {
-    const duration = audioRef.current?.duration;
-    if (typeof duration === "number" && Number.isFinite(duration) && duration > 0) {
-      setState("ready");
-    }
-  };
-
   useEffect(() => {
-    if (state === "ready" && autoPlay) {
+    if (!loading && autoPlay) {
       void audioRef.current?.play().catch(() => undefined);
     }
-  }, [autoPlay, objectUrl, state]);
-
-  const ready = state === "ready";
+  }, [autoPlay, loading, objectUrl]);
 
   return (
-    <span className={`audio-buffer ${ready ? "is-ready" : ""} ${className ?? ""}`}>
-      {!ready && (
+    <span className={`audio-buffer ${!loading ? "is-ready" : ""} ${className ?? ""}`}>
+      {loading && (
         <span className="audio-loading" role="status">
           <Loader2 size={14} className="spin" />
-          <span>{state === "loading" ? "Loading audio..." : "Preparing audio..."}</span>
+          <span>Loading audio...</span>
         </span>
       )}
       {objectUrl && (
         <audio
           ref={audioRef}
           src={objectUrl}
-          controls={ready}
+          controls={!loading}
           preload="auto"
-          className={ready ? undefined : "audio-buffer-hidden"}
-          onLoadedMetadata={markReady}
-          onDurationChange={markReady}
-          onCanPlayThrough={markReady}
+          className={loading ? "audio-buffer-hidden" : undefined}
         />
       )}
     </span>

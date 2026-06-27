@@ -3317,6 +3317,10 @@ button:disabled {
   color: var(--teal-dark);
 }
 
+.conversation-row.running:not(.active) .conversation-select svg {
+  color: var(--teal);
+}
+
 .conversation-select span {
   display: flex;
   flex-direction: column;
@@ -3426,6 +3430,9 @@ button:disabled {
   display: grid;
   gap: 7px;
   margin: 0;
+}
+
+.media-card.can-open {
   cursor: zoom-in;
 }
 
@@ -3867,6 +3874,10 @@ button:disabled {
   width: 14px;
   height: 14px;
   color: var(--b-faint);
+}
+
+.chat-app .conversation-row.running:not(.active) .conversation-select svg {
+  color: var(--b-blue);
 }
 
 .chat-app .conversation-row.active .conversation-select svg,

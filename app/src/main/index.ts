@@ -340,20 +340,10 @@ const requestedPathMatchesTarEntry = (requestedPath: string, tarEntry: string): 
 
 const unique = <T,>(values: T[]): T[] => [...new Set(values)];
 
-const uniqueOutputPath = (directory: string, fileName: string): string => {
-  const extension = extname(fileName);
-  const stem = extension ? fileName.slice(0, -extension.length) : fileName;
-  let candidate = join(directory, fileName);
-  for (let index = 2; existsSync(candidate); index += 1) {
-    candidate = join(directory, `${stem}-${index}${extension}`);
-  }
-  return candidate;
-};
-
 const autoSaveMedia = (environmentId: string, sourcePath: string): string => {
   const directory = join(LOCAL_OUTPUT_ROOT, safeCacheSegment(environmentId));
   mkdirSync(directory, { recursive: true });
-  const target = uniqueOutputPath(directory, basename(sourcePath));
+  const target = join(directory, basename(sourcePath));
   copyFileSync(sourcePath, target);
   return target;
 };
@@ -364,6 +354,58 @@ const mediaUrl = (environmentId: string, relativeEntry: string): string => {
     .map((part) => encodeURIComponent(part))
     .join("/");
   return `${MEDIA_PROTOCOL}://${safeCacheSegment(environmentId)}/${encodedPath}`;
+};
+
+const cachedMediaEntries = (root: string, current = root): string[] => {
+  if (!existsSync(current)) {
+    return [];
+  }
+  return readdirSync(current, { withFileTypes: true }).flatMap((entry) => {
+    const fullPath = join(current, entry.name);
+    if (entry.isDirectory()) {
+      return cachedMediaEntries(root, fullPath);
+    }
+    if (!entry.isFile() || !mediaTypeForPath(fullPath)) {
+      return [];
+    }
+    return [normalize(fullPath.slice(root.length)).replace(/^[/\\]+/, "").replace(/\\/g, "/")];
+  });
+};
+
+const resolveCachedEnvironmentMedia = (
+  environmentId: string,
+  extractRoot: string,
+  requestedPaths: string[]
+): ResolvedEnvironmentMedia[] | undefined => {
+  const entries = cachedMediaEntries(resolve(extractRoot));
+  if (!entries.length) {
+    return undefined;
+  }
+
+  const resolvedItems = requestedPaths.flatMap((requestedPath) => {
+    const relativeEntry = entries.find((candidate) => requestedPathMatchesTarEntry(requestedPath, candidate));
+    if (!relativeEntry) {
+      return [];
+    }
+    const path = resolve(extractRoot, relativeEntry);
+    if (!path.startsWith(resolve(extractRoot)) || !existsSync(path) || !statSync(path).isFile()) {
+      return [];
+    }
+    const mediaType = mediaTypeForPath(path);
+    return mediaType
+      ? [
+          {
+            requestedPath,
+            path,
+            savedPath: autoSaveMedia(environmentId, path),
+            url: mediaUrl(environmentId, relativeEntry),
+            mediaType
+          }
+        ]
+      : [];
+  });
+
+  return resolvedItems.length === requestedPaths.length ? resolvedItems : undefined;
 };
 
 const registerMediaProtocol = (): void => {
@@ -899,6 +941,11 @@ handle<[string, string[]], ResolvedEnvironmentMedia[]>(
     const cacheRoot = join(mediaCacheRoot(), safeCacheSegment(environmentId));
     const extractRoot = join(cacheRoot, "files");
     const tarPath = join(cacheRoot, "snapshot.tar");
+    const cached = resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
+    if (cached) {
+      return cached;
+    }
+
     rmSync(cacheRoot, { recursive: true, force: true });
     mkdirSync(extractRoot, { recursive: true });
 

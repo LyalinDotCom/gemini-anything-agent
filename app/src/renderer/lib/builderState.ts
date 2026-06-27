@@ -8,7 +8,7 @@ import type {
   ThinkingSummaries,
   ToolType
 } from "@sdk";
-import type { IpcError } from "../../shared/electron-api";
+import type { IpcError, ResolvedEnvironmentMedia } from "../../shared/electron-api";
 
 export type EnvironmentMode = "remote" | "environment_id" | "config";
 export type NetworkMode = "unrestricted" | "allowlist" | "disabled";
@@ -122,6 +122,8 @@ export type Session = {
   /** Set when the run reaches a terminal state so the UI can show true turn duration. */
   completedAt?: number;
   error?: IpcError;
+  /** Media already resolved and auto-saved locally for this run. */
+  resolvedMedia?: ResolvedEnvironmentMedia[];
   /** Set when this run was started via "Continue" from another session. */
   parentLocalId?: string;
 };

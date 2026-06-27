@@ -4,6 +4,8 @@ Gemini Anything Agent is an unofficial sample that explores a simple idea: a man
 
 The goal is not to make the user choose a model or API surface. The app sends the request to one preconfigured Gemini Managed Agent. The agent decides whether it can answer directly with its normal tools, whether it needs to inspect existing artifacts, or whether it should call the `gai` CLI to create a new image, video, speech file, or transcript.
 
+Optional richer overview: open [readme.html](readme.html) locally for a standalone HTML version with embedded styling, app icon, and architecture diagram.
+
 ## Status
 
 This is an experimental, unofficial sample.

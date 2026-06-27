@@ -26,6 +26,8 @@ Respect the help syntax exactly:
 
 Use `--json` for generation commands so results are machine-readable.
 
+For every generated or transcribed artifact, create `/workspace/output` if needed, write the final user-facing files there, and report the exact `/workspace/output/...` paths. The user does not need to ask for that folder; it is part of this managed agent's artifact contract.
+
 ## Routing
 
 Use the CLI only for:

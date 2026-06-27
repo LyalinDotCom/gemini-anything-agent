@@ -46,6 +46,18 @@ export type ResolvedEnvironmentMedia = {
   mediaType: "image" | "video" | "audio";
 };
 
+export type EnvironmentOutputFile = {
+  sandboxPath: string;
+  relativePath: string;
+  name: string;
+  path: string;
+  bytes: number;
+  modifiedAt: number;
+  fileType: "image" | "video" | "audio" | "html" | "text" | "document" | "archive" | "other";
+  mediaType?: ResolvedEnvironmentMedia["mediaType"];
+  url?: string;
+};
+
 export type SaveResolvedMediaResult =
   | { saved: true; path: string; bytes: number }
   | { saved: false; canceled: true };
@@ -125,6 +137,12 @@ export type ManagedAgentsBridge = {
     paths: string[]
   ) => Promise<IpcResult<ResolvedEnvironmentMedia[]>>;
   saveResolvedMedia: (path: string) => Promise<IpcResult<SaveResolvedMediaResult>>;
+  listEnvironmentOutputFiles?: (
+    environmentId: string,
+    force?: boolean
+  ) => Promise<IpcResult<EnvironmentOutputFile[]>>;
+  saveEnvironmentOutputFile?: (path: string) => Promise<IpcResult<SaveResolvedMediaResult>>;
+  openEnvironmentOutputFile?: (path: string) => Promise<IpcResult<boolean>>;
   saveText: (content: string, defaultFileName?: string) => Promise<IpcResult<SaveTextResult>>;
   loadAgentProject: (agentId: string) => Promise<IpcResult<AgentProjectSnapshot>>;
   saveAgentProject: (
@@ -155,6 +173,9 @@ export const ipcChannels = {
   downloadSnapshot: "managed-agents:download-snapshot",
   resolveEnvironmentMedia: "managed-agents:resolve-environment-media",
   saveResolvedMedia: "managed-agents:save-resolved-media",
+  listEnvironmentOutputFiles: "managed-agents:list-environment-output-files",
+  saveEnvironmentOutputFile: "managed-agents:save-environment-output-file",
+  openEnvironmentOutputFile: "managed-agents:open-environment-output-file",
   saveText: "managed-agents:save-text",
   loadAgentProject: "managed-agents:load-agent-project",
   saveAgentProject: "managed-agents:save-agent-project",

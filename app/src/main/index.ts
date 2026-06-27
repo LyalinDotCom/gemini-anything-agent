@@ -7,13 +7,14 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync
 } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { basename, dirname, extname, isAbsolute, join, normalize, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   ANTIGRAVITY_BASE_AGENT,
@@ -32,6 +33,7 @@ import {
   ipcChannels,
   type AgentProjectFileSnapshot,
   type AgentProjectSnapshot,
+  type EnvironmentOutputFile,
   type EnsureAnythingAgentResult,
   type IpcError,
   type IpcResult,
@@ -313,6 +315,56 @@ const MEDIA_EXTENSIONS = new Map<string, ResolvedEnvironmentMedia["mediaType"]>(
 const mediaTypeForPath = (path: string): ResolvedEnvironmentMedia["mediaType"] | undefined =>
   MEDIA_EXTENSIONS.get(extname(path).toLowerCase());
 
+const TEXT_EXTENSIONS = new Set([
+  ".txt",
+  ".md",
+  ".markdown",
+  ".json",
+  ".jsonl",
+  ".csv",
+  ".tsv",
+  ".srt",
+  ".vtt",
+  ".log",
+  ".html",
+  ".htm",
+  ".css",
+  ".js",
+  ".mjs",
+  ".ts",
+  ".tsx",
+  ".jsx",
+  ".xml",
+  ".yaml",
+  ".yml",
+  ".py",
+  ".sh"
+]);
+
+const DOCUMENT_EXTENSIONS = new Set([".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx"]);
+const ARCHIVE_EXTENSIONS = new Set([".zip", ".tar", ".gz", ".tgz", ".bz2", ".xz", ".7z"]);
+
+const outputFileTypeForPath = (path: string): EnvironmentOutputFile["fileType"] => {
+  const mediaType = mediaTypeForPath(path);
+  if (mediaType) {
+    return mediaType;
+  }
+  const extension = extname(path).toLowerCase();
+  if (extension === ".html" || extension === ".htm") {
+    return "html";
+  }
+  if (TEXT_EXTENSIONS.has(extension)) {
+    return "text";
+  }
+  if (DOCUMENT_EXTENSIONS.has(extension)) {
+    return "document";
+  }
+  if (ARCHIVE_EXTENSIONS.has(extension)) {
+    return "archive";
+  }
+  return "other";
+};
+
 const safeCacheSegment = (value: string): string =>
   value
     .trim()
@@ -326,6 +378,27 @@ const normalizedRelativeTarPath = (value: string): string | undefined => {
     return undefined;
   }
   return normalized.replace(/\\/g, "/");
+};
+
+const pathIsInside = (candidate: string, root: string): boolean => {
+  const relativePath = relative(root, candidate);
+  return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
+};
+
+const outputRelativePathForEntry = (value: string): string | undefined => {
+  const normalized = normalizedRelativeTarPath(value);
+  if (!normalized) {
+    return undefined;
+  }
+  const withoutWorkspace = normalized.replace(/^workspace\//, "");
+  if (!withoutWorkspace.startsWith("output/")) {
+    return undefined;
+  }
+  const relativeOutputPath = normalizedRelativeTarPath(withoutWorkspace.slice("output/".length));
+  if (!relativeOutputPath) {
+    return undefined;
+  }
+  return relativeOutputPath;
 };
 
 const requestedPathMatchesTarEntry = (requestedPath: string, tarEntry: string): boolean => {
@@ -375,6 +448,52 @@ const cachedMediaEntries = (root: string, current = root): string[] => {
   });
 };
 
+const cachedEnvironmentOutputFiles = (
+  environmentId: string,
+  root: string,
+  current = root
+): EnvironmentOutputFile[] => {
+  const resolvedRoot = resolve(root);
+  if (!existsSync(current)) {
+    return [];
+  }
+
+  return readdirSync(current, { withFileTypes: true })
+    .flatMap((entry) => {
+      const fullPath = join(current, entry.name);
+      if (entry.isDirectory()) {
+        return cachedEnvironmentOutputFiles(environmentId, root, fullPath);
+      }
+      if (!entry.isFile()) {
+        return [];
+      }
+
+      const relativeEntry = normalize(fullPath.slice(resolvedRoot.length))
+        .replace(/^[/\\]+/, "")
+        .replace(/\\/g, "/");
+      const outputRelativePath = outputRelativePathForEntry(relativeEntry);
+      if (!outputRelativePath) {
+        return [];
+      }
+
+      const stats = statSync(fullPath);
+      const mediaType = mediaTypeForPath(fullPath);
+      const file: EnvironmentOutputFile = {
+        sandboxPath: `/workspace/output/${outputRelativePath}`,
+        relativePath: outputRelativePath,
+        name: basename(outputRelativePath),
+        path: fullPath,
+        bytes: stats.size,
+        modifiedAt: stats.mtimeMs,
+        fileType: outputFileTypeForPath(fullPath),
+        mediaType,
+        url: mediaType ? mediaUrl(environmentId, relativeEntry) : undefined
+      };
+      return [file];
+    })
+    .sort((left, right) => right.modifiedAt - left.modifiedAt || left.relativePath.localeCompare(right.relativePath));
+};
+
 const resolveCachedEnvironmentMedia = (
   environmentId: string,
   extractRoot: string,
@@ -391,7 +510,7 @@ const resolveCachedEnvironmentMedia = (
       return [];
     }
     const path = resolve(extractRoot, relativeEntry);
-    if (!path.startsWith(resolve(extractRoot)) || !existsSync(path) || !statSync(path).isFile()) {
+    if (!pathIsInside(path, resolve(extractRoot)) || !existsSync(path) || !statSync(path).isFile()) {
       return [];
     }
     const mediaType = mediaTypeForPath(path);
@@ -411,6 +530,65 @@ const resolveCachedEnvironmentMedia = (
   return resolvedItems.length === requestedPaths.length ? resolvedItems : undefined;
 };
 
+const listEnvironmentOutputFilesFromSnapshot = async (
+  environmentId: string,
+  force = false
+): Promise<EnvironmentOutputFile[]> => {
+  const cacheRoot = join(mediaCacheRoot(), safeCacheSegment(environmentId));
+  const extractRoot = join(cacheRoot, "files");
+  const nextExtractRoot = join(cacheRoot, "files-next");
+  const targetExtractRoot = force ? nextExtractRoot : extractRoot;
+  const tarPath = join(cacheRoot, "snapshot.tar");
+
+  const cached = cachedEnvironmentOutputFiles(environmentId, extractRoot);
+  if (!force && cached.length > 0) {
+    return cached;
+  }
+
+  if (force) {
+    rmSync(nextExtractRoot, { recursive: true, force: true });
+  }
+  mkdirSync(targetExtractRoot, { recursive: true });
+  rmSync(tarPath, { force: true });
+
+  const buffer = await createClient().downloadEnvironmentSnapshot(environmentId);
+  writeFileSync(tarPath, Buffer.from(buffer));
+
+  try {
+    const listed = await execFileAsync("tar", ["-tf", tarPath], { maxBuffer: 5 * 1024 * 1024 });
+    const selectedEntries = unique(
+      listed.stdout
+        .split("\n")
+        .map((entry) => entry.trim())
+        .map(normalizedRelativeTarPath)
+        .filter((entry): entry is string => Boolean(entry && outputRelativePathForEntry(entry)))
+    );
+
+    if (selectedEntries.length === 0) {
+      if (force) {
+        rmSync(extractRoot, { recursive: true, force: true });
+      }
+      return [];
+    }
+
+    await execFileAsync("tar", ["-xf", tarPath, "-C", targetExtractRoot, ...selectedEntries], {
+      maxBuffer: 5 * 1024 * 1024
+    });
+
+    if (force) {
+      rmSync(extractRoot, { recursive: true, force: true });
+      renameSync(nextExtractRoot, extractRoot);
+    }
+
+    return cachedEnvironmentOutputFiles(environmentId, extractRoot);
+  } finally {
+    rmSync(tarPath, { force: true });
+    if (force) {
+      rmSync(nextExtractRoot, { recursive: true, force: true });
+    }
+  }
+};
+
 const registerMediaProtocol = (): void => {
   protocol.handle(MEDIA_PROTOCOL, (request) => {
     const url = new URL(request.url);
@@ -422,7 +600,7 @@ const registerMediaProtocol = (): void => {
 
     const root = resolve(mediaCacheRoot(), environmentSegment, "files");
     const path = resolve(root, relativeEntry);
-    if (!path.startsWith(root) || !existsSync(path) || !statSync(path).isFile()) {
+    if (!pathIsInside(path, root) || !existsSync(path) || !statSync(path).isFile()) {
       return new Response("Not found", { status: 404 });
     }
 
@@ -949,7 +1127,7 @@ handle<[string, string[]], ResolvedEnvironmentMedia[]>(
       return cached;
     }
 
-    rmSync(cacheRoot, { recursive: true, force: true });
+    rmSync(tarPath, { force: true });
     mkdirSync(extractRoot, { recursive: true });
 
     const buffer = await createClient().downloadEnvironmentSnapshot(environmentId);
@@ -988,7 +1166,7 @@ handle<[string, string[]], ResolvedEnvironmentMedia[]>(
           return [];
         }
         const path = resolve(extractRoot, relativeEntry);
-        if (!path.startsWith(resolve(extractRoot))) {
+        if (!pathIsInside(path, resolve(extractRoot))) {
           return [];
         }
         if (!existsSync(path) || !statSync(path).isFile()) {
@@ -1014,10 +1192,15 @@ handle<[string, string[]], ResolvedEnvironmentMedia[]>(
   }
 );
 
+handle<[string, boolean | undefined], EnvironmentOutputFile[]>(
+  ipcChannels.listEnvironmentOutputFiles,
+  async (environmentId, force) => listEnvironmentOutputFilesFromSnapshot(environmentId, Boolean(force))
+);
+
 handle<[string], SaveResolvedMediaResult>(ipcChannels.saveResolvedMedia, async (sourcePath) => {
   const source = resolve(sourcePath);
   const root = resolve(mediaCacheRoot());
-  if (!source.startsWith(root) || !existsSync(source) || !statSync(source).isFile() || !mediaTypeForPath(source)) {
+  if (!pathIsInside(source, root) || !existsSync(source) || !statSync(source).isFile() || !mediaTypeForPath(source)) {
     throw new Error("Media file is not available in the app cache.");
   }
 
@@ -1031,6 +1214,39 @@ handle<[string], SaveResolvedMediaResult>(ipcChannels.saveResolvedMedia, async (
 
   copyFileSync(source, result.filePath);
   return { saved: true, path: result.filePath, bytes: statSync(result.filePath).size };
+});
+
+handle<[string], SaveResolvedMediaResult>(ipcChannels.saveEnvironmentOutputFile, async (sourcePath) => {
+  const source = resolve(sourcePath);
+  const root = resolve(mediaCacheRoot());
+  if (!pathIsInside(source, root) || !existsSync(source) || !statSync(source).isFile()) {
+    throw new Error("Output file is not available in the app cache.");
+  }
+
+  const result = await dialog.showSaveDialog({
+    title: "Save output file",
+    defaultPath: basename(source)
+  });
+  if (result.canceled || !result.filePath) {
+    return { saved: false, canceled: true };
+  }
+
+  copyFileSync(source, result.filePath);
+  return { saved: true, path: result.filePath, bytes: statSync(result.filePath).size };
+});
+
+handle<[string], boolean>(ipcChannels.openEnvironmentOutputFile, async (sourcePath) => {
+  const source = resolve(sourcePath);
+  const root = resolve(mediaCacheRoot());
+  if (!pathIsInside(source, root) || !existsSync(source) || !statSync(source).isFile()) {
+    throw new Error("Output file is not available in the app cache.");
+  }
+
+  const message = await shell.openPath(source);
+  if (message) {
+    throw new Error(message);
+  }
+  return true;
 });
 
 handle<[string, string | undefined], SaveTextResult>(ipcChannels.saveText, async (content, defaultFileName) => {

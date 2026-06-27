@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
   IpcResult,
+  EnvironmentOutputFile,
   AgentProjectSnapshot,
   AgentProjectFileSnapshot,
   EnsureAnythingAgentResult,
@@ -66,6 +67,12 @@ const bridge: ManagedAgentsBridge = {
     invoke<ResolvedEnvironmentMedia[]>(ipcChannels.resolveEnvironmentMedia, environmentId, paths),
   saveResolvedMedia: (path: string) =>
     invoke<SaveResolvedMediaResult>(ipcChannels.saveResolvedMedia, path),
+  listEnvironmentOutputFiles: (environmentId: string, force?: boolean) =>
+    invoke<EnvironmentOutputFile[]>(ipcChannels.listEnvironmentOutputFiles, environmentId, force),
+  saveEnvironmentOutputFile: (path: string) =>
+    invoke<SaveResolvedMediaResult>(ipcChannels.saveEnvironmentOutputFile, path),
+  openEnvironmentOutputFile: (path: string) =>
+    invoke<boolean>(ipcChannels.openEnvironmentOutputFile, path),
   saveText: (content: string, defaultFileName?: string) =>
     invoke<SaveTextResult>(ipcChannels.saveText, content, defaultFileName),
   loadAgentProject: (agentId: string) =>

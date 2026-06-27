@@ -1,19 +1,29 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Archive,
   AudioLines,
   Bot,
   CheckCircle2,
   Download,
+  ExternalLink,
+  File,
+  FileText,
+  FolderOpen,
+  ImageIcon,
   Loader2,
   Maximize2,
   MessageSquare,
+  Music2,
   PanelLeftClose,
   PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Plus,
   RefreshCw,
   Settings,
   Sparkles,
   Trash2,
+  Video,
   X,
   XCircle
 } from "lucide-react";
@@ -30,6 +40,7 @@ import {
   type ToolType
 } from "@sdk";
 import type {
+  EnvironmentOutputFile,
   EnsureAnythingAgentResult,
   InteractionStreamSnapshot,
   IpcError,
@@ -59,7 +70,6 @@ import { Composer } from "./components/Composer";
 import { Transcript } from "./components/Transcript";
 import { BufferedAudio } from "./components/BufferedAudio";
 import { SettingsModal } from "./components/Overlays";
-import appIconUrl from "./assets/app-icon.png";
 import sampleCatImageUrl from "./assets/sample-prompts/cat-image.png";
 import sampleCatVideoUrl from "./assets/sample-prompts/cat-video.png";
 import sampleHackerNewsUrl from "./assets/sample-prompts/hacker-news-podcast.png";
@@ -92,6 +102,13 @@ type SessionMediaState = {
   error?: string;
   progress?: number;
   stage?: string;
+};
+
+type EnvironmentOutputState = {
+  loading: boolean;
+  items: EnvironmentOutputFile[];
+  error?: string;
+  checked?: boolean;
 };
 
 type SamplePrompt = {
@@ -159,11 +176,11 @@ const SAMPLE_PROMPTS: SamplePrompt[] = [
       "Create a short two-speaker audio conversation about building with managed agents, then transcribe it with timestamps and speaker labels. Save the transcript as a Markdown file and link to it."
   },
   {
-    title: "HTML App",
-    detail: "Build a self-contained artifact.",
+    title: "Solar HTML",
+    detail: "Build one openable file.",
     thumbnail: sampleHtmlAppUrl,
     prompt:
-      "Make one self-contained HTML file I can open locally to show kids a basic solar system simulation with all planets, realistic positions for the current date and time, and motion sped up for demonstration."
+      "Create a kid-friendly animated solar system as one self-contained HTML file. Include the Sun, all eight planets, labels, pause/play, and a speed slider."
   }
 ];
 
@@ -322,6 +339,47 @@ const formatConversationTime = (value: number): string =>
     hour: "numeric",
     minute: "2-digit"
   });
+
+const formatFileSize = (bytes: number): string => {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 B";
+  }
+  const units = ["B", "KB", "MB", "GB"];
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / 1024 ** index;
+  return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`;
+};
+
+const outputFileLabel = (file: EnvironmentOutputFile): string => {
+  switch (file.fileType) {
+    case "html":
+      return "HTML";
+    case "text":
+      return "Text";
+    case "document":
+      return "Document";
+    case "archive":
+      return "Archive";
+    case "image":
+      return "Image";
+    case "video":
+      return "Video";
+    case "audio":
+      return "Audio";
+    default:
+      return "File";
+  }
+};
+
+const outputMediaItem = (file: EnvironmentOutputFile): ResolvedEnvironmentMedia | undefined =>
+  file.mediaType && file.url
+    ? {
+        requestedPath: file.sandboxPath,
+        path: file.path,
+        url: file.url,
+        mediaType: file.mediaType
+      }
+    : undefined;
 
 const MEDIA_PATH_PATTERN =
   /(?:\/workspace\/|workspace\/|\/tmp\/|outputs\/)[^\s`"'()[\]{}<>]+\.(?:png|jpe?g|webp|gif|avif|svg|mp4|webm|mov|m4v|wav|mp3|m4a|aac|ogg|flac)(?:[?#][^\s`"'()[\]{}<>]+)?/gi;
@@ -526,6 +584,123 @@ const MediaLightbox = ({
         </div>
       </div>
     </div>
+  );
+};
+
+const OutputFileIcon = ({ file }: { file: EnvironmentOutputFile }) => {
+  switch (file.fileType) {
+    case "image":
+      return <ImageIcon size={15} />;
+    case "video":
+      return <Video size={15} />;
+    case "audio":
+      return <Music2 size={15} />;
+    case "html":
+    case "text":
+    case "document":
+      return <FileText size={15} />;
+    case "archive":
+      return <Archive size={15} />;
+    default:
+      return <File size={15} />;
+  }
+};
+
+const OutputFilesPanel = ({
+  state,
+  environmentId,
+  onRefresh,
+  onSave,
+  onOpen
+}: {
+  state: EnvironmentOutputState | undefined;
+  environmentId: string | undefined;
+  onRefresh: () => void;
+  onSave: (file: EnvironmentOutputFile) => void;
+  onOpen: (file: EnvironmentOutputFile) => void;
+}) => {
+  const panelState = state ?? { loading: false, items: [] };
+  const canRefresh = Boolean(environmentId && !panelState.loading);
+
+  return (
+    <aside className="output-panel" aria-label="Workspace output files">
+      <header className="output-panel-head">
+        <span className="output-panel-title">
+          <FolderOpen size={15} />
+          Output
+        </span>
+        <button
+          type="button"
+          className="head-icon"
+          title="Refresh output files"
+          aria-label="Refresh output files"
+          disabled={!canRefresh}
+          onClick={onRefresh}
+        >
+          <RefreshCw size={14} className={panelState.loading ? "spin" : undefined} />
+        </button>
+      </header>
+      <div className="output-panel-subtitle">/workspace/output</div>
+      {panelState.error && (
+        <div className="output-panel-error">
+          <span>{panelState.error}</span>
+          <button type="button" className="ghost-button sm" disabled={!canRefresh} onClick={onRefresh}>
+            Retry
+          </button>
+        </div>
+      )}
+      {panelState.loading && (
+        <div className="output-panel-loading">
+          <Loader2 size={14} className="spin" />
+          <span>{panelState.items.length > 0 ? "Refreshing files..." : "Checking output files..."}</span>
+        </div>
+      )}
+      <div className="output-file-list">
+        {!panelState.loading && panelState.items.length === 0 && !panelState.error && (
+          <div className="output-panel-empty">
+            <FolderOpen size={22} />
+            <strong>{environmentId ? "No output files yet" : "No workspace yet"}</strong>
+            <span>{environmentId ? "Generated artifacts will appear here." : "Start a chat to create one."}</span>
+          </div>
+        )}
+        {panelState.items.map((file) => {
+          const media = outputMediaItem(file);
+          return (
+            <div className="output-file-row" key={`${file.path}:${file.modifiedAt}`}>
+              <span className={`output-file-icon file-${file.fileType}`}>
+                <OutputFileIcon file={file} />
+              </span>
+              <div className="output-file-main">
+                <strong title={file.sandboxPath}>{file.relativePath}</strong>
+                <span>
+                  {outputFileLabel(file)} · {formatFileSize(file.bytes)}
+                </span>
+              </div>
+              <div className="output-file-actions">
+                <button
+                  type="button"
+                  className="icon-action"
+                  title={media ? "Open player" : "Open file"}
+                  aria-label={media ? "Open player" : "Open file"}
+                  onClick={() => onOpen(file)}
+                >
+                  {media ? <Maximize2 size={13} /> : <ExternalLink size={13} />}
+                </button>
+                <button
+                  type="button"
+                  className="icon-action"
+                  title="Save As"
+                  aria-label="Save As"
+                  onClick={() => onSave(file)}
+                >
+                  <Download size={13} />
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </aside>
   );
 };
 
@@ -831,13 +1006,17 @@ export const App = () => {
   const [latestRunId, setLatestRunId] = useState<string | null>(null);
   const [activeConversationId, setActiveConversationId] = useState<string>(NEW_CONVERSATION_ID);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [outputPanelOpen, setOutputPanelOpen] = useState(false);
   const [mediaBySession, setMediaBySession] = useState<Record<string, SessionMediaState>>({});
   const [activeMedia, setActiveMedia] = useState<ResolvedEnvironmentMedia | null>(null);
+  const [outputFilesByEnvironment, setOutputFilesByEnvironment] = useState<Record<string, EnvironmentOutputState>>({});
   const [startingConversationIds, setStartingConversationIds] = useState<Record<string, boolean>>({});
   const [cancelingSessionIds, setCancelingSessionIds] = useState<Record<string, boolean>>({});
   const activeResumeIds = useRef<Set<string>>(new Set());
   const pendingRunInputs = useRef<Map<string, PendingComposeInput>>(new Map());
   const requestedMediaKeys = useRef<Set<string>>(new Set());
+  const outputRefreshSignatures = useRef<Record<string, string>>({});
+  const autoOpenedOutputEnvironments = useRef<Set<string>>(new Set());
   const ensureAgentPromise = useRef<Promise<EnsureAnythingAgentResult | undefined> | null>(null);
   const activeConversationIdRef = useRef(activeConversationId);
   const shouldStickToBottom = useRef(true);
@@ -932,6 +1111,23 @@ export const App = () => {
   const selectedConversationStarting = Boolean(startingConversationIds[activeConversationId]);
   const selectedConversationRunning = Boolean(runningSession || selectedConversationStarting);
   const latestEnvironmentId = selectedConversation?.environmentId;
+  const activeOutputState = latestEnvironmentId ? outputFilesByEnvironment[latestEnvironmentId] : undefined;
+  const activeOutputFileCount = activeOutputState?.items.length ?? 0;
+  const outputPanelVisible = outputPanelOpen;
+  const outputRefreshSignature = useMemo(
+    () =>
+      chatSessions
+        .map((session) =>
+          [
+            session.localId,
+            session.completedAt ?? "",
+            session.streaming ? "streaming" : "done",
+            sessionEnvironmentId(session) ?? ""
+          ].join(":")
+        )
+        .join("|"),
+    [chatSessions]
+  );
   const canRun = appReady && !selectedConversationRunning && hasComposeInput(compose);
 
   const isChatNearBottom = () => {
@@ -995,6 +1191,7 @@ export const App = () => {
     setLatestRunId(null);
     setStartingConversationIds({});
     setCancelingSessionIds({});
+    setOutputPanelOpen(false);
     pendingRunInputs.current.clear();
     activeResumeIds.current.clear();
     requestedMediaKeys.current.clear();
@@ -1020,6 +1217,36 @@ export const App = () => {
       void resolveMediaForSession(session);
     }
   }, [chatSessions]);
+
+  useEffect(() => {
+    if (!latestEnvironmentId || selectedConversationRunning || !window.managedAgents?.listEnvironmentOutputFiles) {
+      return;
+    }
+    const previousSignature = outputRefreshSignatures.current[latestEnvironmentId];
+    const force = previousSignature !== outputRefreshSignature;
+    const state = outputFilesByEnvironment[latestEnvironmentId];
+    if (!force && (state?.checked || state?.loading)) {
+      return;
+    }
+    outputRefreshSignatures.current[latestEnvironmentId] = outputRefreshSignature;
+    void loadOutputFiles(latestEnvironmentId, force);
+  }, [
+    latestEnvironmentId,
+    outputFilesByEnvironment,
+    outputRefreshSignature,
+    selectedConversationRunning
+  ]);
+
+  useEffect(() => {
+    if (!latestEnvironmentId || activeOutputFileCount === 0) {
+      return;
+    }
+    if (autoOpenedOutputEnvironments.current.has(latestEnvironmentId)) {
+      return;
+    }
+    autoOpenedOutputEnvironments.current.add(latestEnvironmentId);
+    setOutputPanelOpen(true);
+  }, [activeOutputFileCount, latestEnvironmentId]);
 
   useEffect(() => {
     if (!hasBridge || !runtime?.hasApiKey || !window.managedAgents?.resumeInteractionStream) {
@@ -1626,6 +1853,69 @@ export const App = () => {
     }
   }
 
+  async function loadOutputFiles(environmentId: string, force = false) {
+    if (!window.managedAgents?.listEnvironmentOutputFiles) {
+      return;
+    }
+    setOutputFilesByEnvironment((current) => ({
+      ...current,
+      [environmentId]: {
+        loading: true,
+        items: current[environmentId]?.items ?? [],
+        checked: current[environmentId]?.checked,
+        error: undefined
+      }
+    }));
+
+    const result = await window.managedAgents.listEnvironmentOutputFiles(environmentId, force);
+    setOutputFilesByEnvironment((current) => ({
+      ...current,
+      [environmentId]: result.ok
+        ? {
+            loading: false,
+            items: result.value,
+            checked: true
+          }
+        : {
+            loading: false,
+            items: current[environmentId]?.items ?? [],
+            checked: true,
+            error: result.error.message
+          }
+    }));
+  }
+
+  async function saveOutputFile(file: EnvironmentOutputFile) {
+    if (!window.managedAgents?.saveEnvironmentOutputFile) {
+      pushStatus({ level: "error", title: "Save unavailable", detail: "Run the Electron app to save output files." });
+      return;
+    }
+    const result = await window.managedAgents.saveEnvironmentOutputFile(file.path);
+    if (!result.ok) {
+      pushStatus({ level: "error", title: result.error.name, detail: result.error.message });
+      return;
+    }
+    if (result.value.saved) {
+      pushStatus({ level: "success", title: "File saved", detail: result.value.path });
+    }
+  }
+
+  async function openOutputFile(file: EnvironmentOutputFile) {
+    const media = outputMediaItem(file);
+    if (media) {
+      setActiveMedia(media);
+      return;
+    }
+    if (!window.managedAgents?.openEnvironmentOutputFile) {
+      pushStatus({ level: "error", title: "Open unavailable", detail: "Run the Electron app to open output files." });
+      return;
+    }
+    const result = await window.managedAgents.openEnvironmentOutputFile(file.path);
+    if (!result.ok) {
+      pushStatus({ level: "error", title: result.error.name, detail: result.error.message });
+    }
+  }
+
   async function resolveMediaForSession(session: Session, force = false) {
     if (!window.managedAgents?.resolveEnvironmentMedia) {
       return;
@@ -1769,13 +2059,24 @@ export const App = () => {
     });
   }
 
+  function toggleOutputPanel() {
+    const opening = !outputPanelOpen;
+    setOutputPanelOpen(opening);
+    if (
+      opening &&
+      latestEnvironmentId &&
+      !activeOutputState?.checked &&
+      !activeOutputState?.loading &&
+      window.managedAgents?.listEnvironmentOutputFiles
+    ) {
+      void loadOutputFiles(latestEnvironmentId);
+    }
+  }
+
   return (
     <div className="app chat-app">
       <header className="topbar">
         <div className="brand">
-          <span className="brand-mark">
-            <img src={appIconUrl} alt="" aria-hidden="true" />
-          </span>
           <h1>Gemini Anything Agent</h1>
         </div>
 
@@ -1791,7 +2092,11 @@ export const App = () => {
         </div>
       </header>
 
-      <main className={`shell chat-shell ${sidebarCollapsed ? "conversation-collapsed" : ""}`}>
+      <main
+        className={`shell chat-shell ${sidebarCollapsed ? "conversation-collapsed" : ""} ${
+          outputPanelVisible ? "has-output-panel" : ""
+        }`}
+      >
         <aside
           className={`conversation-sidebar ${sidebarCollapsed ? "collapsed" : ""}`}
           aria-label="Conversations"
@@ -1989,6 +2294,29 @@ export const App = () => {
             />
           </div>
         </section>
+
+        <button
+          type="button"
+          className={`output-panel-toggle ${outputPanelOpen ? "open" : ""}`}
+          title={outputPanelOpen ? "Hide output files" : "Show output files"}
+          aria-label={outputPanelOpen ? "Hide output files" : "Show output files"}
+          aria-pressed={outputPanelOpen}
+          disabled={!appReady}
+          onClick={toggleOutputPanel}
+        >
+          {outputPanelOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+          {activeOutputFileCount > 0 && <span>{activeOutputFileCount}</span>}
+        </button>
+
+        {outputPanelOpen && (
+          <OutputFilesPanel
+            state={activeOutputState}
+            environmentId={latestEnvironmentId}
+            onRefresh={() => latestEnvironmentId && void loadOutputFiles(latestEnvironmentId, true)}
+            onSave={(file) => void saveOutputFile(file)}
+            onOpen={(file) => void openOutputFile(file)}
+          />
+        )}
       </main>
 
       {settingsOpen && (

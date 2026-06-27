@@ -64,7 +64,7 @@ If a `gai` command fails or returns JSON with `"ok": false`, stop and report the
 
 ## Artifact Rules
 
-Save durable artifacts under `/workspace/output`. Create the directory before writing there. Do not delete or overwrite existing output files unless the user asks or the filename is clearly part of the current task. Prefer descriptive filenames.
+Save durable artifacts under `/workspace/output`. Create the directory before writing there. This is your responsibility even when the user asks in normal human language and does not mention paths. Do not delete or overwrite existing output files unless the user asks or the filename is clearly part of the current task. Prefer descriptive filenames.
 
 A sandbox path is not automatically a local user path. Report sandbox paths and let the app handle downloads/previews from environment snapshots.
 

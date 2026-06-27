@@ -57,6 +57,7 @@ import { Composer } from "./components/Composer";
 import { Transcript } from "./components/Transcript";
 import { BufferedAudio } from "./components/BufferedAudio";
 import { SettingsModal } from "./components/Overlays";
+import appIconUrl from "./assets/app-icon.png";
 
 type StatusEvent = {
   id: string;
@@ -73,6 +74,7 @@ type ConversationSummary = {
   sessions: Session[];
   latestAt: number;
   environmentId?: string;
+  draft?: boolean;
 };
 
 type SessionMediaState = {
@@ -96,6 +98,13 @@ const FALLBACK_RUNTIME: RuntimeConfig = {
 
 const ALL_AGENT_TOOLS: ToolType[] = ["code_execution", "google_search", "url_context"];
 const NEW_CONVERSATION_ID = "new";
+const NEW_CONVERSATION_DRAFT: ConversationSummary = {
+  id: NEW_CONVERSATION_ID,
+  title: "New chat",
+  sessions: [],
+  latestAt: 0,
+  draft: true
+};
 
 const bridgeUnavailable: IpcError = {
   name: "BridgeUnavailable",
@@ -693,6 +702,13 @@ export const App = () => {
   const conversations = useMemo(
     () => buildConversations(agentSessions),
     [agentSessions]
+  );
+  const visibleConversations = useMemo(
+    () =>
+      activeConversationId === NEW_CONVERSATION_ID
+        ? [NEW_CONVERSATION_DRAFT, ...conversations]
+        : conversations,
+    [activeConversationId, conversations]
   );
   const selectedConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === activeConversationId),
@@ -1428,6 +1444,11 @@ export const App = () => {
   }
 
   function selectConversation(conversationId: string) {
+    if (conversationId === NEW_CONVERSATION_ID) {
+      setActiveConversationId(NEW_CONVERSATION_ID);
+      setLatestRunId(null);
+      return;
+    }
     setActiveConversationId(conversationId);
     setCompose((current) => ({
       ...current,
@@ -1458,7 +1479,7 @@ export const App = () => {
       <header className="topbar">
         <div className="brand">
           <span className="brand-mark">
-            <Bot size={16} />
+            <img src={appIconUrl} alt="" aria-hidden="true" />
           </span>
           <h1>Gemini Anything Agent</h1>
         </div>
@@ -1503,12 +1524,12 @@ export const App = () => {
           </div>
 
           <div className="conversation-list">
-            {conversations.length === 0 ? (
+            {visibleConversations.length === 0 ? (
               <div className="conversation-empty">No saved local conversations yet.</div>
             ) : (
-              conversations.map((conversation) => (
+              visibleConversations.map((conversation) => (
                 <div
-                  className={`conversation-row ${
+                  className={`conversation-row ${conversation.draft ? "draft" : ""} ${
                     conversation.id === activeConversationId ? "active" : ""
                   }`}
                   key={conversation.id}
@@ -1523,20 +1544,23 @@ export const App = () => {
                     <span>
                       <strong>{conversation.title}</strong>
                       <em>
-                        {conversation.sessions.length} turn{conversation.sessions.length === 1 ? "" : "s"} ·{" "}
-                        {formatConversationTime(conversation.latestAt)}
+                        {conversation.draft
+                          ? "Draft"
+                          : `${conversation.sessions.length} turn${conversation.sessions.length === 1 ? "" : "s"} · ${formatConversationTime(conversation.latestAt)}`}
                       </em>
                     </span>
                   </button>
-                  <button
-                    type="button"
-                    className="conversation-delete"
-                    disabled={busy === "run" || busy === "cancel"}
-                    title="Delete local conversation"
-                    onClick={() => deleteConversation(conversation)}
-                  >
-                    <Trash2 size={13} />
-                  </button>
+                  {!conversation.draft && (
+                    <button
+                      type="button"
+                      className="conversation-delete"
+                      disabled={busy === "run" || busy === "cancel"}
+                      title="Delete local conversation"
+                      onClick={() => deleteConversation(conversation)}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
                 </div>
               ))
             )}
@@ -1546,7 +1570,7 @@ export const App = () => {
         <section className="chat-main" aria-label="Managed agent chat">
           <div className="chat-main-head">
             <span className="chat-main-title">
-              {selectedConversation ? selectedConversation.title : "New conversation"}
+              {selectedConversation ? selectedConversation.title : "New chat"}
             </span>
             {runningSession && <span className="live-dot">working…</span>}
             <span className="chat-main-head-spacer" />
@@ -1588,7 +1612,7 @@ export const App = () => {
                 </span>
                 <strong>
                   {activeConversationId === NEW_CONVERSATION_ID
-                    ? "Start a new conversation"
+                    ? "Start a new chat"
                     : "No local turns in this conversation"}
                 </strong>
                 <span>

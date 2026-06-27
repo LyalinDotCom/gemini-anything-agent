@@ -29,10 +29,13 @@ workspace-output/
 *.mp3
 *.tar
 *.tar.gz
+!app/assets/
+!app/assets/app-icon.png
+!app/src/renderer/assets/
+!app/src/renderer/assets/app-icon.png
 
 # Logs and local state
 *.log
 .DS_Store
 .gemini-anything-agent/
 agent-projects/
-

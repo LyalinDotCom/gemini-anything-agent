@@ -77,6 +77,7 @@ const ENV_PATH = join(APP_ROOT, ".env");
 const ENV_LOCAL_PATH = join(APP_ROOT, ".env.local");
 const PROJECTS_ROOT = join(APP_ROOT, "agent-projects");
 const AGENT_ASSETS_ROOT = join(REPO_ROOT, "agents");
+const APP_ICON_PATH = join(APP_ROOT, "assets", "app-icon.png");
 const LOCAL_OUTPUT_ROOT = join(REPO_ROOT, "outputs", "managed-agent");
 const mediaCacheRoot = (): string => join(app.getPath("userData"), "environment-media");
 
@@ -605,6 +606,7 @@ const createWindow = (): void => {
     minWidth: 1080,
     minHeight: 720,
     title: "Gemini Anything Agent",
+    icon: existsSync(APP_ICON_PATH) ? APP_ICON_PATH : undefined,
     // Direction B (Sequoia inset): let the native traffic lights float over our
     // own slim, draggable titlebar so the chrome reads as one native surface.
     titleBarStyle: "hiddenInset",
@@ -1033,6 +1035,9 @@ handle<[string], boolean>(ipcChannels.openExternal, async (url) => {
 
 app.whenReady().then(() => {
   registerMediaProtocol();
+  if (process.platform === "darwin" && app.dock && existsSync(APP_ICON_PATH)) {
+    app.dock.setIcon(APP_ICON_PATH);
+  }
   createWindow();
 
   app.on("activate", () => {

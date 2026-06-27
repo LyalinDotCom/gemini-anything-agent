@@ -170,12 +170,13 @@ export const runTranscribe = async (
     capability: "transcribe",
     model,
     outputs: [{ path: outputPath, mimeType: outputMime }],
-    message: transcript,
+    message: `Transcript written to ${outputPath}`,
     details: {
       inputFile: resolvedFilePath,
       inputMimeType: mimeType,
       uploadedFile: uploaded.name,
-      format
+      format,
+      transcriptCharacters: transcript.length
     }
   };
 };

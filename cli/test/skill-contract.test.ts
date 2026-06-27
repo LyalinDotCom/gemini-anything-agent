@@ -17,11 +17,13 @@ describe("agent skill contract", () => {
     expect(skill).toContain("audio transcription");
     expect(agents).toContain("use native managed-agent tools");
     expect(agents).toContain("use `gai transcribe`");
+    expect(agents).toContain("Do not paste transcript contents");
     expect(agents).toContain("Workspace root: `/workspace`");
     expect(agents).toContain("inspect `/workspace/output`");
     expect(systemPrompt).toContain("## Runtime Facts");
     expect(systemPrompt).toContain("## Operating Loop");
     expect(systemPrompt).toContain("Do not use `gai` for ordinary text answers");
+    expect(systemPrompt).toContain("do not paste the full transcript");
   });
 
   it("uses the wrapper, help discovery, and JSON output", () => {
@@ -31,6 +33,7 @@ describe("agent skill contract", () => {
     expect(skill).toContain('bash "$GAI" tts --help');
     expect(skill).toContain('bash "$GAI" transcribe --help');
     expect(skill).toContain("Follow the current help output; it is the source of truth.");
+    expect(skill).toContain("do not paste the transcript contents");
     expect(skill).toContain("--json");
     expect(skill).toContain("Never run bare `gai ...`");
     expect(skill).toContain("Never create your own wrapper");

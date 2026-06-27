@@ -56,6 +56,8 @@ bash "$GAI" <subcommand> --help
 
 Follow the current CLI help output; it is the source of truth. Request JSON output with `--json`, parse the output, verify files exist, and report exact paths.
 
+For transcription, the deliverable is the transcript file. Report success or failure and the `/workspace/output/...` path; do not paste the full transcript into chat unless the user explicitly asks to see the contents.
+
 Never run bare `gai`, create wrappers or helper scripts, execute `dist/cli.js` or npm cache files directly, run npm package diagnostics, run `find /`, print secrets, or use `--dry-run` unless the user asks for a dry run. Run `bash "$GAI" doctor --json` only for unclear local readiness failures or when the user asks for diagnostics.
 
 If a `gai` command fails or returns JSON with `"ok": false`, stop and report the generation error plainly. Do not retry with different flags, voices, models, diagnostics, shorter text, or alternate routes unless the user asks.

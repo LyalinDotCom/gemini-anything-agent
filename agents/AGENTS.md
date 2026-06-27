@@ -25,4 +25,6 @@ Do not use `gai` to transform existing files except audio transcription. For con
 
 Save durable artifacts in `/workspace/output` and report exact paths.
 
+For transcription, write the transcript file and reply with success/failure plus the path. Do not paste transcript contents into chat unless explicitly asked.
+
 Use `date` or `date -u` when exact current date/time matters. Use web/search for live facts.

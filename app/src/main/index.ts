@@ -77,7 +77,10 @@ const ENV_PATH = join(APP_ROOT, ".env");
 const ENV_LOCAL_PATH = join(APP_ROOT, ".env.local");
 const PROJECTS_ROOT = join(APP_ROOT, "agent-projects");
 const AGENT_ASSETS_ROOT = join(REPO_ROOT, "agents");
-const APP_ICON_PATH = join(APP_ROOT, "assets", "app-icon.png");
+const APP_ICON_PNG_PATH = join(APP_ROOT, "assets", "app-icon.png");
+const APP_ICON_PATH = process.platform === "darwin"
+  ? join(APP_ROOT, "assets", "app-icon.icns")
+  : APP_ICON_PNG_PATH;
 const LOCAL_OUTPUT_ROOT = join(REPO_ROOT, "outputs", "managed-agent");
 const mediaCacheRoot = (): string => join(app.getPath("userData"), "environment-media");
 
@@ -130,7 +133,7 @@ const readAgentAsset = (relativePath: string, fallback: string): string => {
 };
 
 const defaultAnythingSystemInstruction =
-  "You are Gemini Anything Agent. Use native tools for text, coding, planning, research, file work, and artifact transformations. Use gai only for new image, video, and text-to-speech generation.";
+  "You are Gemini Anything Agent. Use native tools for text, coding, planning, research, file work, and artifact transformations. Use gai only for new image, video, text-to-speech generation, and audio transcription. For transcription, save a transcript file and report its path instead of pasting transcript contents.";
 
 const anythingAgentId = (): string => process.env.GEMINI_ANYTHING_AGENT_ID?.trim() || DEFAULT_AGENT_ID;
 
@@ -252,15 +255,15 @@ const buildAnythingAgentDefinition = (agentId: string): AgentDefinition => {
           target: ".agents/AGENTS.md",
           content: readAgentAsset(
             "AGENTS.md",
-            "# Gemini Anything Agent\n\nUse native managed-agent tools for normal work. Use gai only for image, video, and text-to-speech.\n"
+            "# Gemini Anything Agent\n\nUse native managed-agent tools for normal work. Use gai only for image, video, text-to-speech, and audio transcription. For transcription, write a file and report its path instead of pasting transcript contents.\n"
           )
         },
         {
           type: "inline",
           target: ".agents/skills/gemini-anything/SKILL.md",
           content: readAgentAsset(
-          "skills/gemini-anything/SKILL.md",
-            "# Gemini Anything Media Skill\n\nUse bash /.agents/bin/gai for image, video, and tts generation.\n"
+            "skills/gemini-anything/SKILL.md",
+            "# Gemini Anything Media Skill\n\nUse bash /.agents/bin/gai for image, video, tts generation, and audio transcription. For transcription, write a file and report its path instead of pasting transcript contents.\n"
           )
         },
         {
@@ -1082,8 +1085,8 @@ handle<[string], boolean>(ipcChannels.openExternal, async (url) => {
 
 app.whenReady().then(() => {
   registerMediaProtocol();
-  if (process.platform === "darwin" && app.dock && existsSync(APP_ICON_PATH)) {
-    app.dock.setIcon(APP_ICON_PATH);
+  if (process.platform === "darwin" && app.dock && existsSync(APP_ICON_PNG_PATH)) {
+    app.dock.setIcon(APP_ICON_PNG_PATH);
   }
   createWindow();
 

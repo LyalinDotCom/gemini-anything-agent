@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  AudioLines,
   Bot,
   CheckCircle2,
   Download,
@@ -59,6 +60,12 @@ import { Transcript } from "./components/Transcript";
 import { BufferedAudio } from "./components/BufferedAudio";
 import { SettingsModal } from "./components/Overlays";
 import appIconUrl from "./assets/app-icon.png";
+import sampleCatImageUrl from "./assets/sample-prompts/cat-image.png";
+import sampleCatVideoUrl from "./assets/sample-prompts/cat-video.png";
+import sampleHackerNewsUrl from "./assets/sample-prompts/hacker-news-podcast.png";
+import sampleHtmlAppUrl from "./assets/sample-prompts/html-app.png";
+import sampleTranscriptUrl from "./assets/sample-prompts/transcript.png";
+import sampleWavMp3Url from "./assets/sample-prompts/wav-mp3.png";
 
 type StatusEvent = {
   id: string;
@@ -87,6 +94,13 @@ type SessionMediaState = {
   stage?: string;
 };
 
+type SamplePrompt = {
+  title: string;
+  detail: string;
+  prompt: string;
+  thumbnail: string;
+};
+
 const FALLBACK_RUNTIME: RuntimeConfig = {
   hasApiKey: false,
   apiRevision: managedAgentManifest.api.apiRevision,
@@ -108,6 +122,50 @@ const NEW_CONVERSATION_DRAFT: ConversationSummary = {
   draft: true,
   running: false
 };
+
+const SAMPLE_PROMPTS: SamplePrompt[] = [
+  {
+    title: "Cat Image",
+    detail: "Generate a cozy still image.",
+    thumbnail: sampleCatImageUrl,
+    prompt: "Create a cozy square image of a cute cat playing with string in a warm Pacific Northwest home."
+  },
+  {
+    title: "Cat Video",
+    detail: "Make a short moving scene.",
+    thumbnail: sampleCatVideoUrl,
+    prompt:
+      "Generate a short 16:9 video of a cute cat playing with a ball of yarn in a cozy Pacific Northwest living room, with pine trees visible through the windows."
+  },
+  {
+    title: "HN Podcast",
+    detail: "Research live news, then TTS.",
+    thumbnail: sampleHackerNewsUrl,
+    prompt:
+      "Look at the live Hacker News front page and create a short recap podcast audio file that summarizes the most interesting stories."
+  },
+  {
+    title: "WAV To MP3",
+    detail: "Create audio, then convert it.",
+    thumbnail: sampleWavMp3Url,
+    prompt:
+      "Create a 20-second spoken welcome podcast as a WAV file, then convert it to MP3 and make both files available."
+  },
+  {
+    title: "Transcript",
+    detail: "Generate audio, then save text.",
+    thumbnail: sampleTranscriptUrl,
+    prompt:
+      "Create a short two-speaker audio conversation about building with managed agents, then transcribe it with timestamps and speaker labels. Save the transcript as a Markdown file and link to it."
+  },
+  {
+    title: "HTML App",
+    detail: "Build a self-contained artifact.",
+    thumbnail: sampleHtmlAppUrl,
+    prompt:
+      "Make one self-contained HTML file I can open locally to show kids a basic solar system simulation with all planets, realistic positions for the current date and time, and motion sped up for demonstration."
+  }
+];
 
 const bridgeUnavailable: IpcError = {
   name: "BridgeUnavailable",
@@ -717,6 +775,36 @@ const fallbackAgent = (agentId: string): ManagedAgent => ({
   base_agent: ANTIGRAVITY_BASE_AGENT,
   description: "Preconfigured Gemini Anything managed agent."
 });
+
+const SamplePromptGallery = ({
+  disabled,
+  onSelect
+}: {
+  disabled: boolean;
+  onSelect: (prompt: string) => void;
+}) => (
+  <div className="sample-prompts" aria-label="Sample prompts">
+    <div className="sample-prompts-head">
+      <AudioLines size={14} />
+      <span>Sample prompts</span>
+    </div>
+    <div className="sample-prompt-grid">
+      {SAMPLE_PROMPTS.map((sample) => (
+        <button
+          type="button"
+          className="sample-prompt"
+          disabled={disabled}
+          key={sample.title}
+          onClick={() => onSelect(sample.prompt)}
+        >
+          <img src={sample.thumbnail} alt="" aria-hidden="true" />
+          <strong>{sample.title}</strong>
+          <span>{sample.detail}</span>
+        </button>
+      ))}
+    </div>
+  </div>
+);
 
 const snapshotAgentForRun = async (
   agentId: string,
@@ -1669,6 +1757,18 @@ export const App = () => {
     pushStatus({ level: "success", title: "Conversation deleted locally", detail: conversation.title });
   }
 
+  function loadSamplePrompt(prompt: string) {
+    setCompose((current) => ({
+      ...current,
+      inputMode: "string",
+      input: prompt,
+      parts: []
+    }));
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLTextAreaElement>(".chat-compose textarea")?.focus();
+    });
+  }
+
   return (
     <div className="app chat-app">
       <header className="topbar">
@@ -1806,19 +1906,29 @@ export const App = () => {
           </div>
           <div className="chat-scroll" ref={chatScrollRef} onScroll={updateScrollStickiness}>
             {chatSessions.length === 0 ? (
-              <div className="chat-empty">
-                <span className="chat-empty-mark">
-                  <Bot size={28} />
-                </span>
-                <strong>
-                  {activeConversationId === NEW_CONVERSATION_ID
-                    ? "Start a new chat"
-                    : "No local turns in this conversation"}
-                </strong>
-                <span>
-                  Session and environment continuity are on by default.
-                </span>
-              </div>
+              activeConversationId === NEW_CONVERSATION_ID ? (
+                <div className="chat-empty has-samples">
+                  <span className="chat-empty-mark">
+                    <Bot size={28} />
+                  </span>
+                  <strong>Start a new chat</strong>
+                  <span className="chat-empty-subtitle">Pick a sample prompt or write your own.</span>
+                  <SamplePromptGallery
+                    disabled={!appReady || selectedConversationRunning}
+                    onSelect={loadSamplePrompt}
+                  />
+                </div>
+              ) : (
+                <div className="chat-empty">
+                  <span className="chat-empty-mark">
+                    <Bot size={28} />
+                  </span>
+                  <strong>No local turns in this conversation</strong>
+                  <span className="chat-empty-subtitle">
+                    Session and environment continuity are on by default.
+                  </span>
+                </div>
+              )
             ) : (
               chatSessions.map((session) => (
                 <div className="conversation-turn" key={session.localId}>

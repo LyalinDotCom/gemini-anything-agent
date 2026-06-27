@@ -39,7 +39,7 @@ For clear simple video requests, proceed with the lite/default route shown by `v
 
 For podcast or long narration requests, write the script to `/workspace/output/<name>.txt`, inspect `bash "$GAI" tts --help`, then use the CLI's script-file option if available while respecting whether the prompt argument is required.
 
-For audio transcription requests, inspect `/workspace/output`, resolve the source audio file, inspect `bash "$GAI" transcribe --help`, then write the transcript under `/workspace/output`. Prefer Markdown unless the user asks for plain text, JSON, or `.srt` captions.
+For audio transcription requests, inspect `/workspace/output`, resolve the source audio file, inspect `bash "$GAI" transcribe --help`, then run `gai transcribe` with `--out /workspace/output/<descriptive-transcript-name>.<ext>` and `--json`. Prefer Markdown unless the user asks for plain text, JSON, or `.srt` captions. Parse the JSON for the output path, verify the file exists, and do not paste the transcript contents into chat. Final response should only say whether transcription succeeded and list the transcript path for download or preview.
 
 ## Guardrails
 

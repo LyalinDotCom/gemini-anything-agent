@@ -33,6 +33,8 @@ workspace-output/
 !app/assets/app-icon.png
 !app/src/renderer/assets/
 !app/src/renderer/assets/app-icon.png
+!app/src/renderer/assets/sample-prompts/
+!app/src/renderer/assets/sample-prompts/*.png
 
 # Logs and local state
 *.log

@@ -14,13 +14,6 @@ npx -y @lyalindotcom/gai@latest tts --help
 npx -y @lyalindotcom/gai@latest transcribe --help
 ```
 
-Examples:
-
-```bash
-npx -y @lyalindotcom/gai@latest tts --script-file script.txt --out outputs/podcast.wav --json
-npx -y @lyalindotcom/gai@latest transcribe podcast.wav --out outputs/podcast-transcript.md --json
-```
-
 ## Development
 
 ```bash
@@ -34,4 +27,4 @@ npm run gai -- models
 
 Live calls require `GEMINI_API_KEY`.
 
-In the managed-agent sample, the app passes the key by mounting a plaintext sandbox `.env`, and `/.agents/bin/gai` sources it. This is proof-of-concept wiring, not production secret handling.
+In the managed-agent sample, the app passes the key by mounting a plaintext sandbox `.env`, and `/.agents/bin/gai` sources it.

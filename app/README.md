@@ -38,14 +38,9 @@ npm run dev
 
 ## Key Warning
 
-This is proof-of-concept key handling.
-
 - Local `.env` is plaintext.
 - The sandbox `.env` is plaintext.
 - `/.agents/bin/gai` sources the sandbox `.env`.
-- Use restricted or throwaway keys.
-- Set quotas and billing alerts.
-- Never commit real keys.
 
 ## Notes
 

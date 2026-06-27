@@ -133,7 +133,12 @@
       <div class="notice-icon">!</div>
       <div>
         <strong>Experimental, unofficial, unsupported.</strong>
-        <p>This is not a supported Google product, not an official Gemini sample, and not production software. It does not accept contributions. Use it at your own risk, especially because managed-agent runs, media generation, video, transcription, retries, and loops can consume tokens or billable API usage quickly.</p>
+        <ul>
+          <li>Unofficial proof of concept.</li>
+          <li>Unsupported; no contributions.</li>
+          <li>User-supplied key is passed through plaintext <code>.env</code> files.</li>
+          <li>Live agent and media calls can cost money.</li>
+        </ul>
       </div>
     </div>
 
@@ -141,9 +146,8 @@
       <a href="#architecture">Architecture</a>
       <a href="#components">Components</a>
       <a href="#flow">How it works</a>
-      <a href="#scenarios">Scenarios</a>
       <a href="#setup">Setup</a>
-      <a href="#safety">Safety</a>
+      <a href="#risk">Risk</a>
     </nav>
 
     <section id="architecture">
@@ -308,8 +312,6 @@
 
     <section id="flow"><div class="section-head"><p class="section-kicker">Runtime Flow</p><h2>What happens when a user asks for something?</h2></div><div class="flow"><div class="flow-step"><div><strong>User sends a prompt.</strong><span>The app targets one configured agent, not a model picker.</span></div></div><div class="flow-step"><div><strong>The app ensures deployment.</strong><span>If the saved prompt, skill, wrapper, or environment sources changed, the app recreates the managed agent.</span></div></div><div class="flow-step"><div><strong>Continuity is attached.</strong><span>The app passes prior interaction and environment pointers by default, so the agent can remember context and reuse files.</span></div></div><div class="flow-step"><div><strong>The agent classifies the job.</strong><span>Code, tasks, analysis, research, browsing, and file edits use native managed-agent tools.</span></div></div><div class="flow-step"><div><strong>Specialized media routes through <code>gai</code>.</strong><span>New image, video, speech, and audio transcription tasks call the mounted CLI wrapper.</span></div></div><div class="flow-step"><div><strong>Artifacts come back to the app.</strong><span>Files are written to <code>/workspace/output</code>, downloaded from the remote environment, saved locally, and previewed inline.</span></div></div></div></section>
 
-    <section id="scenarios"><div class="section-head"><p class="section-kicker">Scenarios</p><h2>The important behavior is generic routing, not one-off fixes.</h2></div><div class="scenario-grid"><article class="scenario"><h3>Normal answer</h3><blockquote>Summarize the project and suggest the next engineering tasks.</blockquote><p>The managed agent answers directly with native reasoning and file tools.</p></article><article class="scenario"><h3>Image generation</h3><blockquote>Make me a square app icon for a CLI that generates anything.</blockquote><p>The agent uses <code>gai image</code>, writes an output file, and the app previews it.</p></article><article class="scenario"><h3>Podcast generation</h3><blockquote>Look at Hacker News and create a short recap podcast.</blockquote><p>The agent researches, writes a script, then uses <code>gai tts</code> for the audio.</p></article><article class="scenario"><h3>Existing artifact transformation</h3><blockquote>Convert that WAV podcast to MP3.</blockquote><p>The agent inspects <code>/workspace/output</code> and uses normal shell tools like <code>ffmpeg</code>; it should not call <code>gai</code> for conversion.</p></article><article class="scenario"><h3>Transcription</h3><blockquote>Transcribe the latest podcast with timestamps and speaker labels.</blockquote><p>The agent resolves the source audio and calls <code>gai transcribe</code>.</p></article><article class="scenario"><h3>Video generation</h3><blockquote>Make a short video of a cute cat playing with string in a cozy home.</blockquote><p>The agent uses <code>gai video</code>. Video can take longer and cost more, so guardrails matter.</p></article></div></section>
-
     <section id="setup"><div class="section-head"><p class="section-kicker">Setup</p><h2>Run the sample locally.</h2></div><div class="split"><article class="card"><h3>App</h3><pre><code>cd app
 npm install
 npm run dev</code></pre><p style="margin-top: 12px;">Live API calls require Electron because the API key stays in the main process.</p></article><article class="card"><h3>CLI</h3><pre><code>cd cli
@@ -322,9 +324,9 @@ GEMINI_API_KEY=
 GEMINI_ANYTHING_AGENT_ID=gemini-anything-agent
 GEMINI_ANYTHING_NPM_PACKAGE=@lyalindotcom/gai
 GEMINI_ANYTHING_NPM_VERSION=latest
-GEMINI_ANYTHING_TRANSCRIBE_MODEL=gemini-3.5-flash</code></pre></article><article class="card" style="margin-top: 16px;"><h3>Key handling</h3><p>The app reads the local repo-root <code>.env</code>, then mounts a generated plaintext <code>.env</code> file into the managed-agent remote sandbox. The wrapper at <code>/.agents/bin/gai</code> sources that file before running the npm package, so media commands can call live APIs.</p><p style="margin-top: 10px;">This is proof-of-concept wiring, not encrypted secret management. Use restricted or throwaway keys, quotas, billing alerts, and rotation. Do not commit real keys or treat snapshots and logs as secret-safe.</p></article></section>
+GEMINI_ANYTHING_TRANSCRIBE_MODEL=gemini-3.5-flash</code></pre></article><article class="card" style="margin-top: 16px;"><h3>Key handling</h3><p>The app reads the local repo-root <code>.env</code>, then mounts a generated plaintext <code>.env</code> file into the managed-agent remote sandbox. The wrapper at <code>/.agents/bin/gai</code> sources that file before running the npm package, so media commands can call live APIs.</p><p style="margin-top: 10px;">This is proof-of-concept wiring, not encrypted secret management.</p></article></section>
 
-    <section id="safety"><div class="section-head"><p class="section-kicker">Safety</p><h2>Do not treat this as production-ready.</h2><p class="section-copy">This sample intentionally gives an agent broad ability to reason, browse, run code, create files, and call specialized generation APIs. That is the point of the experiment, and it is also why cost and control guardrails are required before real use.</p></div><div class="card"><h3>Guardrails to add before adapting the idea</h3><div class="pill-list"><span class="pill">API spend limits</span><span class="pill">Quota alerts</span><span class="pill">Restricted keys</span><span class="pill">Proper secret storage</span><span class="pill">Media generation limits</span><span class="pill">Timeouts</span><span class="pill">Cancellation</span><span class="pill">File size restrictions</span><span class="pill">Policy checks</span><span class="pill">Expensive-action confirmation</span><span class="pill">Secret-safe logging</span><span class="pill">Remote/local file clarity</span></div></div></section>
+    <section id="risk"><div class="section-head"><p class="section-kicker">Risk</p><h2>Plaintext key wiring and live API usage.</h2><p class="section-copy">The user supplies the Gemini API key in <code>.env</code>. The app mounts that key into the remote managed-agent sandbox as plaintext <code>.env</code> content so <code>/.agents/bin/gai</code> can call live APIs. Media generation and agent loops can cost real money.</p></div></section>
 
     <footer class="footer"><strong>Repository layout:</strong> <code>app/</code> Electron chat harness, <code>agents/</code> managed-agent prompt and mounted wrapper, <code>cli/</code> <a href="https://www.npmjs.com/package/@lyalindotcom/gai"><code>@lyalindotcom/gai</code></a> package source, <code>outputs/</code> ignored local artifacts. This HTML file is standalone: styles and images are embedded directly inside the document.</footer>
   </main>

@@ -6,6 +6,8 @@ The user talks to one app. The app talks to one managed agent. The agent does no
 
 Optional richer overview: open [readme.html](readme.html) locally.
 
+DevRel walk-through: [Building a Managed Agent That Can Generate an Image](docs/gemini-anything-agent-image-walkthrough.html) ([Markdown source](docs/gemini-anything-agent-image-walkthrough.md)).
+
 ## Read This First
 
 - This is an unofficial proof of concept.

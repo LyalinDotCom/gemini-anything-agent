@@ -1223,7 +1223,7 @@ export const App = () => {
       return;
     }
     const previousSignature = outputRefreshSignatures.current[latestEnvironmentId];
-    const force = previousSignature !== outputRefreshSignature;
+    const force = Boolean(previousSignature && previousSignature !== outputRefreshSignature);
     const state = outputFilesByEnvironment[latestEnvironmentId];
     if (!force && (state?.checked || state?.loading)) {
       return;

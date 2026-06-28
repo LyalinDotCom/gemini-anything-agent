@@ -1,0 +1,1031 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Building a Managed Agent That Can Generate an Image</title>
+  <meta name="description" content="A DevRel walkthrough of Gemini Anything Agent: an Electron app, Gemini Managed Agent, and gai CLI working together to generate an image.">
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7fb;
+      --surface: #ffffff;
+      --surface-soft: #f9fafb;
+      --ink: #111827;
+      --muted: #5b6472;
+      --faint: #eef1f6;
+      --line: #d9dee8;
+      --blue: #2563eb;
+      --blue-soft: #eaf1ff;
+      --teal: #0f766e;
+      --teal-soft: #e7f7f4;
+      --orange: #e46f1a;
+      --orange-soft: #fff3e8;
+      --code-bg: #101827;
+      --code-line: #1f2a3a;
+      --shadow: 0 18px 60px rgba(18, 28, 45, 0.12);
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background:
+        linear-gradient(180deg, #ffffff 0%, var(--bg) 420px),
+        var(--bg);
+      color: var(--ink);
+      font-family: var(--sans);
+      line-height: 1.55;
+    }
+
+    a {
+      color: var(--blue);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    .page {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 34px 28px 72px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 54px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 760;
+      letter-spacing: 0;
+    }
+
+    .mark {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      background: #ecfdf5;
+      border: 1px solid #b7eee1;
+      color: var(--teal);
+      box-shadow: 0 8px 24px rgba(15, 118, 110, 0.12);
+    }
+
+    .mark svg {
+      width: 22px;
+      height: 22px;
+    }
+
+    .navlinks {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      padding: 7px 12px;
+      border-radius: 999px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      color: #2f3a4a;
+      box-shadow: 0 5px 18px rgba(18, 28, 45, 0.06);
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 0.92fr) minmax(360px, 1.08fr);
+      gap: 34px;
+      align-items: center;
+      margin-bottom: 46px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 11px;
+      border-radius: 999px;
+      background: var(--blue-soft);
+      color: #174ea6;
+      font-size: 13px;
+      font-weight: 720;
+      margin-bottom: 18px;
+    }
+
+    h1 {
+      font-size: clamp(42px, 5.2vw, 72px);
+      line-height: 0.96;
+      letter-spacing: 0;
+      margin: 0 0 22px;
+      max-width: 760px;
+    }
+
+    .lede {
+      font-size: clamp(18px, 2vw, 22px);
+      color: #435064;
+      max-width: 660px;
+      margin: 0 0 28px;
+    }
+
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      min-height: 42px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink);
+      font-weight: 720;
+      box-shadow: 0 8px 24px rgba(18, 28, 45, 0.08);
+    }
+
+    .button.primary {
+      background: var(--blue);
+      color: white;
+      border-color: var(--blue);
+    }
+
+    .hero-figure {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .hero-figure img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    .caption {
+      padding: 14px 16px 16px;
+      color: var(--muted);
+      font-size: 14px;
+      border-top: 1px solid var(--faint);
+      background: #fcfdff;
+    }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 0 0 54px;
+    }
+
+    .meta-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      box-shadow: 0 10px 30px rgba(18, 28, 45, 0.06);
+    }
+
+    .meta-label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 760;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 6px;
+    }
+
+    .meta-value {
+      font-weight: 780;
+      color: #182235;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 240px minmax(0, 1fr);
+      gap: 36px;
+      align-items: start;
+    }
+
+    .toc {
+      position: sticky;
+      top: 22px;
+      background: rgba(255, 255, 255, 0.86);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 12px 34px rgba(18, 28, 45, 0.08);
+    }
+
+    .toc-title {
+      font-size: 12px;
+      font-weight: 820;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin: 2px 0 10px;
+    }
+
+    .toc a {
+      display: block;
+      padding: 8px 9px;
+      border-radius: 8px;
+      color: #334155;
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .toc a:hover {
+      background: var(--blue-soft);
+      text-decoration: none;
+    }
+
+    article {
+      min-width: 0;
+    }
+
+    section {
+      margin-bottom: 44px;
+      scroll-margin-top: 28px;
+    }
+
+    h2 {
+      font-size: clamp(28px, 3vw, 42px);
+      line-height: 1.06;
+      letter-spacing: 0;
+      margin: 0 0 16px;
+    }
+
+    h3 {
+      font-size: 21px;
+      line-height: 1.2;
+      letter-spacing: 0;
+      margin: 0 0 10px;
+    }
+
+    p {
+      color: #3d4858;
+      margin: 0 0 16px;
+      font-size: 17px;
+    }
+
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin: 22px 0;
+    }
+
+    .role-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      box-shadow: 0 12px 30px rgba(18, 28, 45, 0.06);
+    }
+
+    .role-icon {
+      width: 42px;
+      height: 42px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      margin-bottom: 14px;
+      color: var(--blue);
+      background: var(--blue-soft);
+    }
+
+    .role-card:nth-child(2) .role-icon {
+      color: var(--teal);
+      background: var(--teal-soft);
+    }
+
+    .role-card:nth-child(3) .role-icon {
+      color: var(--orange);
+      background: var(--orange-soft);
+    }
+
+    .role-card p {
+      font-size: 15px;
+      margin-bottom: 0;
+    }
+
+    .flow {
+      display: grid;
+      gap: 10px;
+      counter-reset: flow;
+      margin: 22px 0;
+    }
+
+    .flow-step {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr);
+      gap: 14px;
+      align-items: start;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: 0 8px 22px rgba(18, 28, 45, 0.05);
+    }
+
+    .flow-step::before {
+      counter-increment: flow;
+      content: counter(flow);
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      background: #111827;
+      color: white;
+      font-weight: 780;
+      font-size: 14px;
+    }
+
+    .flow-step strong {
+      display: block;
+      margin-bottom: 2px;
+    }
+
+    .flow-step span {
+      color: var(--muted);
+    }
+
+    .callout {
+      border: 1px solid #b7d4ff;
+      border-radius: 8px;
+      background: linear-gradient(180deg, #f7fbff, #ffffff);
+      padding: 18px;
+      margin: 22px 0;
+      box-shadow: 0 10px 30px rgba(37, 99, 235, 0.08);
+    }
+
+    .callout.warning {
+      border-color: #f5c38f;
+      background: linear-gradient(180deg, #fff8ef, #ffffff);
+      box-shadow: 0 10px 30px rgba(228, 111, 26, 0.08);
+    }
+
+    .callout p:last-child {
+      margin-bottom: 0;
+    }
+
+    .code-card {
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid #263245;
+      background: var(--code-bg);
+      margin: 18px 0 24px;
+      box-shadow: 0 18px 48px rgba(16, 24, 39, 0.18);
+    }
+
+    .code-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--code-line);
+      background: #141f30;
+      color: #cbd5e1;
+      font-size: 13px;
+      font-family: var(--mono);
+    }
+
+    .copy {
+      border: 1px solid #334155;
+      color: #dbeafe;
+      background: #1e293b;
+      border-radius: 8px;
+      padding: 6px 9px;
+      font-size: 12px;
+      font-family: var(--sans);
+      font-weight: 720;
+      cursor: pointer;
+    }
+
+    pre {
+      margin: 0;
+      padding: 18px;
+      overflow-x: auto;
+      color: #e5edf7;
+      font-size: 13px;
+      line-height: 1.58;
+      font-family: var(--mono);
+      tab-size: 2;
+    }
+
+    pre code {
+      color: #dbe7f5;
+    }
+
+    .tok-comment {
+      color: #7c8da6;
+      font-style: italic;
+    }
+
+    .tok-keyword {
+      color: #8dd7ff;
+    }
+
+    .tok-string {
+      color: #a7f3d0;
+    }
+
+    .tok-template {
+      color: #c4b5fd;
+    }
+
+    .tok-number {
+      color: #fdba74;
+    }
+
+    .tok-function {
+      color: #f9e27d;
+    }
+
+    .tok-constant {
+      color: #93c5fd;
+    }
+
+    .tok-property {
+      color: #f0abfc;
+    }
+
+    .tok-operator {
+      color: #94a3b8;
+    }
+
+    .tok-variable {
+      color: #fda4af;
+    }
+
+    .tok-flag {
+      color: #bfdbfe;
+    }
+
+    code {
+      font-family: var(--mono);
+    }
+
+    p code,
+    li code {
+      color: #0f376e;
+      background: #edf4ff;
+      padding: 2px 5px;
+      border-radius: 6px;
+      font-size: 0.92em;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 0.72fr);
+      gap: 18px;
+      align-items: start;
+      margin-top: 22px;
+    }
+
+    .mini-panel {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      box-shadow: 0 12px 32px rgba(18, 28, 45, 0.06);
+    }
+
+    .mini-panel ul {
+      margin: 12px 0 0;
+      padding-left: 20px;
+      color: #3d4858;
+    }
+
+    .mini-panel li {
+      margin: 8px 0;
+    }
+
+    .footer {
+      margin-top: 54px;
+      padding-top: 26px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .footer a {
+      font-weight: 720;
+    }
+
+    @media (max-width: 980px) {
+      .hero,
+      .layout,
+      .split {
+        grid-template-columns: 1fr;
+      }
+
+      .toc {
+        position: relative;
+        top: auto;
+      }
+
+      .meta-grid,
+      .card-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 640px) {
+      .page {
+        padding: 22px 16px 52px;
+      }
+
+      .topbar {
+        align-items: flex-start;
+        flex-direction: column;
+        margin-bottom: 34px;
+      }
+
+      .navlinks {
+        justify-content: flex-start;
+      }
+
+      .hero {
+        gap: 24px;
+      }
+
+      .meta-grid,
+      .card-grid {
+        grid-template-columns: 1fr;
+      }
+
+      h1 {
+        font-size: 42px;
+      }
+
+      .flow-step {
+        grid-template-columns: 36px minmax(0, 1fr);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="topbar">
+      <div class="brand">
+        <div class="mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 8V4"></path>
+            <path d="M8 4h8"></path>
+            <rect x="5" y="8" width="14" height="10" rx="2"></rect>
+            <path d="M9 12v2"></path>
+            <path d="M15 12v2"></path>
+            <path d="M3 13h2"></path>
+            <path d="M19 13h2"></path>
+          </svg>
+        </div>
+        Gemini Anything Agent
+      </div>
+      <nav class="navlinks" aria-label="Article links">
+        <a class="pill" href="../README.md">README</a>
+        <a class="pill" href="https://www.npmjs.com/package/@lyalindotcom/gai" target="_blank" rel="noreferrer">npm package</a>
+        <a class="pill" href="https://ai.google.dev/gemini-api/docs/agents" target="_blank" rel="noreferrer">Managed Agents docs</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero" id="top">
+        <div>
+          <div class="eyebrow">DevRel walkthrough · create image scenario</div>
+          <h1>Building a managed agent that can generate an image.</h1>
+          <p class="lede">A practical sample showing how an Electron chat app, a Gemini Managed Agent, and a small GenAI SDK wrapper work together to turn one natural-language request into a generated file.</p>
+          <div class="hero-actions">
+            <a class="button primary" href="#managed-agent">Create the agent</a>
+            <a class="button" href="#sdk-wrapper">See the SDK wrapper</a>
+          </div>
+        </div>
+        <figure class="hero-figure">
+          <img src="./assets/gemini-anything-create-image-flow.jpg" alt="Architecture diagram showing Electron chat app, managed agent, gai CLI, Gemini image model, and local cached preview.">
+          <figcaption class="caption">The image flow: app -> managed agent -> <code>gai</code> CLI -> Gemini image model -> cached local preview.</figcaption>
+        </figure>
+      </section>
+
+      <div class="meta-grid" aria-label="Project summary">
+        <div class="meta-card">
+          <div class="meta-label">Sample</div>
+          <div class="meta-value">Unofficial proof of concept</div>
+        </div>
+        <div class="meta-card">
+          <div class="meta-label">Agent</div>
+          <div class="meta-value">One persistent remote sandbox</div>
+        </div>
+        <div class="meta-card">
+          <div class="meta-label">Media CLI</div>
+          <div class="meta-value">@lyalindotcom/gai</div>
+        </div>
+        <div class="meta-card">
+          <div class="meta-label">Artifact path</div>
+          <div class="meta-value">/workspace/output</div>
+        </div>
+      </div>
+
+      <div class="layout">
+        <aside class="toc" aria-label="Table of contents">
+          <div class="toc-title">In this article</div>
+          <a href="#idea">The idea</a>
+          <a href="#flow">Image flow</a>
+          <a href="#sdk-wrapper">SDK wrapper</a>
+          <a href="#managed-agent">Managed agent</a>
+          <a href="#request">Send a request</a>
+          <a href="#boundaries">Boundaries</a>
+        </aside>
+
+        <article>
+          <section id="idea">
+            <h2>The idea</h2>
+            <p>Gemini Anything Agent uses one chat surface and one managed agent. The agent does normal work directly: text, code, research, analysis, browsing, and file inspection. When a request needs a specialized media model, the agent calls a tiny CLI wrapper instead of guessing API details.</p>
+
+            <div class="card-grid">
+              <div class="role-card">
+                <div class="role-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"></path>
+                  </svg>
+                </div>
+                <h3>Electron app</h3>
+                <p>Owns the local UX: conversations, previews, output files, local cache, and agent deployment.</p>
+              </div>
+              <div class="role-card">
+                <div class="role-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 8V4"></path>
+                    <path d="M8 4h8"></path>
+                    <rect x="5" y="8" width="14" height="10" rx="2"></rect>
+                    <path d="M9 12v2"></path>
+                    <path d="M15 12v2"></path>
+                  </svg>
+                </div>
+                <h3>Managed agent</h3>
+                <p>Runs remotely, keeps continuity, decides what to do, and writes artifacts into the workspace.</p>
+              </div>
+              <div class="role-card">
+                <div class="role-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 17l6-6-6-6"></path>
+                    <path d="M12 19h8"></path>
+                  </svg>
+                </div>
+                <h3><code>gai</code> CLI</h3>
+                <p>Wraps the GenAI SDK for image, video, TTS, and transcription through one simple command surface.</p>
+              </div>
+            </div>
+
+            <div class="callout">
+              <p><strong>The main pattern:</strong> the agent is the general-purpose worker, while <code>gai</code> is the narrow media tool. That keeps model selection and media API details out of the app UI.</p>
+            </div>
+          </section>
+
+          <section id="flow">
+            <h2>The create-image flow</h2>
+            <p>When a user asks the app to create an image, the app does not call an image model directly. It starts or resumes a conversation with the managed agent and lets the agent choose the right action.</p>
+
+            <div class="flow" aria-label="Create image flow">
+              <div class="flow-step"><div><strong>The app checks configuration.</strong><span>It reads the local <code>.env</code> and verifies that a Gemini API key is available.</span></div></div>
+              <div class="flow-step"><div><strong>The app creates or refreshes the agent.</strong><span>On first chat start, the app deploys the agent definition, prompt files, skill file, wrapper script, and generated sandbox <code>.env</code>.</span></div></div>
+              <div class="flow-step"><div><strong>The user message goes to the managed agent.</strong><span>Conversation continuity and environment continuity are sent when available.</span></div></div>
+              <div class="flow-step"><div><strong>The agent decides this is media work.</strong><span>Its instructions tell it to use native tools for normal work and <code>/.agents/bin/gai</code> for new media generation.</span></div></div>
+              <div class="flow-step"><div><strong>The CLI creates the image.</strong><span>The command writes the generated file to <code>/workspace/output</code>.</span></div></div>
+              <div class="flow-step"><div><strong>The app downloads and caches outputs.</strong><span>Images, videos, audio, text, HTML, and other files appear in the local output panel without repeating downloads that are already cached.</span></div></div>
+            </div>
+          </section>
+
+          <section id="sdk-wrapper">
+            <h2>Wrapping the GenAI SDK</h2>
+            <p>The CLI wrapper is intentionally small. It selects a model, calls the GenAI SDK, decodes the returned image data, and writes the file. The published package is <a href="https://www.npmjs.com/package/@lyalindotcom/gai" target="_blank" rel="noreferrer"><code>@lyalindotcom/gai</code> on npm</a>.</p>
+
+            <div class="code-card">
+              <div class="code-head"><span>image-wrapper.ts</span><button class="copy" type="button">Copy</button></div>
+              <pre><code data-lang="ts">import { GoogleGenAI } from "@google/genai";
+import { writeFile } from "node:fs/promises";
+
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY
+});
+
+export async function generateImage(prompt: string, out = "image.jpg") {
+  const interaction = await ai.interactions.create({
+    model: process.env.GEMINI_IMAGE_MODEL ?? "gemini-3.1-flash-image",
+    input: prompt,
+    response_format: {
+      type: "image",
+      mime_type: "image/jpeg",
+      aspect_ratio: "1:1",
+      image_size: "1K"
+    }
+  } as never);
+
+  const image = (interaction as any).output_image;
+  if (!image?.data) {
+    throw new Error("The image model did not return output_image.data");
+  }
+
+  await writeFile(out, Buffer.from(image.data, "base64"));
+  return out;
+}</code></pre>
+            </div>
+
+            <p>Inside the managed-agent sandbox, the wrapper script uses <code>npx</code> so the agent can run the latest published package without bundling the CLI into the agent source.</p>
+
+            <div class="code-card">
+              <div class="code-head"><span>/.agents/bin/gai</span><button class="copy" type="button">Copy</button></div>
+              <pre><code data-lang="bash">#!/usr/bin/env bash
+set -euo pipefail
+if [ -f /.env ]; then set -a; . /.env; set +a; fi
+export NODE_USE_ENV_PROXY="${NODE_USE_ENV_PROXY:-1}"
+exec npx -y "${GEMINI_ANYTHING_NPM_PACKAGE:-@lyalindotcom/gai}@${GEMINI_ANYTHING_NPM_VERSION:-latest}" "$@"</code></pre>
+            </div>
+          </section>
+
+          <section id="managed-agent">
+            <h2>Creating the managed agent</h2>
+            <p>The app creates a Gemini Managed Agent with code execution, Google Search, URL context, a remote environment, and inline files that become available inside the sandbox. The key files are the system prompt, the skill instructions, the <code>gai</code> wrapper, and a generated <code>.env</code>.</p>
+
+            <div class="split">
+              <div>
+                <p>This copyable TypeScript sketch mirrors the shape used by the app. Replace the system prompt and skill text with your own instructions.</p>
+              </div>
+              <aside class="mini-panel">
+                <h3>Agent runtime</h3>
+                <ul>
+                  <li>Remote Linux sandbox</li>
+                  <li><code>/workspace</code> as the working directory</li>
+                  <li><code>/workspace/output</code> as the artifact handoff folder</li>
+                  <li><code>/.agents/bin/gai</code> as the media command</li>
+                </ul>
+              </aside>
+            </div>
+
+            <div class="code-card">
+              <div class="code-head"><span>create-agent.ts</span><button class="copy" type="button">Copy</button></div>
+              <pre><code data-lang="ts">const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
+const API_REVISION = "2026-05-20";
+const AGENT_ID = process.env.GEMINI_ANYTHING_AGENT_ID ?? "gemini-anything-agent";
+const GAI_PACKAGE = process.env.GEMINI_ANYTHING_NPM_PACKAGE ?? "@lyalindotcom/gai";
+const GAI_VERSION = process.env.GEMINI_ANYTHING_NPM_VERSION ?? "latest";
+
+const apiKey = process.env.GEMINI_API_KEY;
+if (!apiKey) {
+  throw new Error("Set GEMINI_API_KEY before creating the agent.");
+}
+
+const gaiWrapper = `#!/usr/bin/env bash
+set -euo pipefail
+if [ -f /.env ]; then set -a; . /.env; set +a; fi
+export NODE_USE_ENV_PROXY="\${NODE_USE_ENV_PROXY:-1}"
+exec npx -y "\${GEMINI_ANYTHING_NPM_PACKAGE:-${GAI_PACKAGE}}@\${GEMINI_ANYTHING_NPM_VERSION:-${GAI_VERSION}}" "$@"
+`;
+
+const systemInstruction = `
+You are Gemini Anything Agent.
+Use native managed-agent tools for text, code, research, analysis, and file work.
+Use /.agents/bin/gai only for new image, video, text-to-speech, and transcription work.
+When creating files, save them under /workspace/output and report the path.
+If the user refers to an existing artifact, inspect /workspace/output first.
+`;
+
+const skillText = `
+# Gemini Anything Skill
+
+Use /.agents/bin/gai --help to discover the available media commands.
+For image generation, run:
+
+/.agents/bin/gai image "&lt;prompt&gt;" --out /workspace/output/image.jpg --json
+
+Keep user-facing prompts clean. Put technical output-path instructions in the skill or system prompt.
+`;
+
+const agent = {
+  id: AGENT_ID,
+  base_agent: "antigravity-preview-05-2026",
+  system_instruction: systemInstruction,
+  tools: [
+    { type: "code_execution" },
+    { type: "google_search" },
+    { type: "url_context" }
+  ],
+  base_environment: {
+    type: "remote",
+    sources: [
+      { type: "inline", target: ".agents/bin/gai", content: gaiWrapper },
+      { type: "inline", target: ".agents/skills/gemini-anything/SKILL.md", content: skillText },
+      {
+        type: "inline",
+        target: ".env",
+        content: [
+          `GEMINI_API_KEY=${apiKey}`,
+          `GEMINI_ANYTHING_NPM_PACKAGE=${GAI_PACKAGE}`,
+          `GEMINI_ANYTHING_NPM_VERSION=${GAI_VERSION}`,
+          ""
+        ].join("\n")
+      }
+    ]
+  }
+};
+
+const response = await fetch(`${API_BASE}/agents`, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "x-goog-api-key": apiKey,
+    "x-goog-api-revision": API_REVISION
+  },
+  body: JSON.stringify(agent)
+});
+
+if (!response.ok) {
+  throw new Error(await response.text());
+}
+
+console.log(await response.json());</code></pre>
+            </div>
+          </section>
+
+          <section id="request">
+            <h2>Sending the request</h2>
+            <p>Once the agent exists, each chat turn is an interaction. The app sends the user input plus continuity pointers. Conversation continuity keeps the agent aware of prior turns. Environment continuity keeps the sandbox and files available across turns.</p>
+
+            <div class="code-card">
+              <div class="code-head"><span>interaction-request.ts</span><button class="copy" type="button">Copy</button></div>
+              <pre><code data-lang="ts">const request = {
+  agent: "gemini-anything-agent",
+  input: "Create a square image of a tiny robot assistant brewing coffee.",
+  previous_interaction_id: previousInteractionId,
+  environment: previousEnvironmentId ?? { type: "remote" },
+  background: true,
+  store: true
+};
+
+const response = await fetch(`${API_BASE}/interactions`, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "x-goog-api-key": process.env.GEMINI_API_KEY!,
+    "x-goog-api-revision": API_REVISION
+  },
+  body: JSON.stringify(request)
+});</code></pre>
+            </div>
+
+            <p>The result is not just a text answer. The agent can leave files in <code>/workspace/output</code>, and the local app turns that folder into a browsable output panel with previews and downloads.</p>
+          </section>
+
+          <section id="boundaries">
+            <h2>Boundaries</h2>
+            <div class="callout warning">
+              <p>This is an unofficial proof of concept. It uses your Gemini API key, can trigger real API spend, and mounts plaintext <code>.env</code> content into the managed-agent sandbox for simplicity.</p>
+            </div>
+            <p>That tradeoff is useful for a sample because it makes the architecture easy to inspect: the app deploys the agent, the agent calls <code>gai</code>, <code>gai</code> calls Gemini media models, and the app previews the files. For anything beyond a prototype, replace the sample secret flow with your own production-grade controls.</p>
+          </section>
+
+          <footer class="footer">
+            <p>References: <a href="https://ai.google.dev/gemini-api/docs/image-generation" target="_blank" rel="noreferrer">Gemini image generation docs</a>, <a href="https://ai.google.dev/gemini-api/docs/agents" target="_blank" rel="noreferrer">Gemini Agents docs</a>, <a href="https://blog.google/innovation-and-ai/technology/developers-tools/managed-agents-gemini-api/" target="_blank" rel="noreferrer">Managed Agents launch post</a>, and <a href="https://www.npmjs.com/package/@lyalindotcom/gai" target="_blank" rel="noreferrer"><code>@lyalindotcom/gai</code> on npm</a>.</p>
+          </footer>
+        </article>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const escapeHtml = (value) =>
+      value
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+
+    const protect = (source, patterns) => {
+      const tokens = [];
+      let output = source;
+      const markerFor = (id) => {
+        let value = "";
+        let remaining = id;
+        do {
+          value = String.fromCharCode(65 + (remaining % 26)) + value;
+          remaining = Math.floor(remaining / 26) - 1;
+        } while (remaining >= 0);
+        return `@@CODETOKEN${value}@@`;
+      };
+      patterns.forEach(({ pattern, className }) => {
+        output = output.replace(pattern, (match) => {
+          const id = tokens.length;
+          tokens.push(`<span class="${className}">${escapeHtml(match)}</span>`);
+          return markerFor(id);
+        });
+      });
+      return {
+        output,
+        restore(value) {
+          return value.replace(/@@CODETOKEN([A-Z]+)@@/g, (_, marker) => {
+            const id = [...marker].reduce((total, char) => total * 26 + char.charCodeAt(0) - 64, 0) - 1;
+            return tokens[id] ?? "";
+          });
+        }
+      };
+    };
+
+    const highlightTypeScript = (source) => {
+      const protectedParts = protect(source, [
+        { pattern: /`(?:\\[\s\S]|[^`\\])*`/g, className: "tok-template" },
+        { pattern: /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g, className: "tok-string" },
+        { pattern: /\/\*[\s\S]*?\*\//g, className: "tok-comment" },
+        { pattern: /\/\/[^\n]*/g, className: "tok-comment" }
+      ]);
+
+      let html = escapeHtml(protectedParts.output)
+        .replace(/\b(import|from|const|let|var|export|async|await|function|return|if|throw|new|as|never|type|interface)\b/g, '<span class="tok-keyword">$1</span>')
+        .replace(/\b(process|Buffer|Error|GoogleGenAI)\b/g, '<span class="tok-constant">$1</span>')
+        .replace(/\b(true|false|null|undefined)\b/g, '<span class="tok-constant">$1</span>')
+        .replace(/\b(\d+(?:\.\d+)?)\b/g, '<span class="tok-number">$1</span>')
+        .replace(/\b([A-Za-z_$][\w$]*)(?=\()/g, '<span class="tok-function">$1</span>')
+        .replace(/(\.)([A-Za-z_$][\w$]*)/g, '$1<span class="tok-property">$2</span>')
+        .replace(/([{}()[\],:;])/g, '<span class="tok-operator">$1</span>');
+
+      return protectedParts.restore(html);
+    };
+
+    const highlightBash = (source) => {
+      const protectedParts = protect(source, [
+        { pattern: /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g, className: "tok-string" },
+        { pattern: /#[^\n]*/g, className: "tok-comment" }
+      ]);
+
+      let html = escapeHtml(protectedParts.output)
+        .replace(/\b(if|then|fi|set|export|exec)\b/g, '<span class="tok-keyword">$1</span>')
+        .replace(/\b(npx|bash)\b/g, '<span class="tok-function">$1</span>')
+        .replace(/(--[a-zA-Z0-9-]+)/g, '<span class="tok-flag">$1</span>')
+        .replace(/(\$\{?[A-Za-z_][A-Za-z0-9_]*[^}\s"]*\}?|\$@)/g, '<span class="tok-variable">$1</span>');
+
+      return protectedParts.restore(html);
+    };
+
+    document.querySelectorAll("pre code[data-lang]").forEach((code) => {
+      const source = code.textContent;
+      code.dataset.source = source;
+      code.innerHTML = code.dataset.lang === "bash"
+        ? highlightBash(source)
+        : highlightTypeScript(source);
+    });
+
+    document.querySelectorAll(".code-card").forEach((card) => {
+      const button = card.querySelector(".copy");
+      const code = card.querySelector("code");
+      if (!button || !code) return;
+
+      button.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(code.dataset.source || code.innerText);
+          button.textContent = "Copied";
+          window.setTimeout(() => {
+            button.textContent = "Copy";
+          }, 1400);
+        } catch {
+          button.textContent = "Select";
+          window.setTimeout(() => {
+            button.textContent = "Copy";
+          }, 1400);
+        }
+      });
+    });
+  </script>
+</body>
+</html>

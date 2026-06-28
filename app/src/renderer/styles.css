@@ -4698,6 +4698,14 @@ button:disabled {
   background: #f6f6f8;
 }
 
+.chat-app .toggle.on .toggle-track {
+  background: var(--b-blue);
+}
+
+.chat-app .toggle.on .toggle-thumb {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
 /* ---- minimal footer over the gradient ---- */
 .chat-app .status-bar,
 .chat-app .status-bar.error,

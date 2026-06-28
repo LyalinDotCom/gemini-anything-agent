@@ -1,12 +1,10 @@
-import { useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import {
   AlertTriangle,
   ChevronRight,
-  CornerDownRight,
   ImagePlus,
   Loader2,
   Play,
-  Server,
   Sliders,
   Trash2,
   XCircle
@@ -63,20 +61,48 @@ export const Composer = ({
   onCancel: () => void;
 }) => {
   const [showOptions, setShowOptions] = useState(false);
+  const disabledPreviousInteractionId = useRef<string | undefined>(undefined);
+  const disabledEnvironmentId = useRef<string | undefined>(undefined);
+  const disabledEnvironmentWasSpecific = useRef(false);
+  const disabledBackgroundWasEnabled = useRef(false);
+  const rememberedAutoPreviousInteractionId = useRef<string | undefined>(undefined);
+  const rememberedAutoEnvironmentId = useRef<string | undefined>(undefined);
+  const rememberedSpecificEnvironmentId = useRef<string | undefined>(undefined);
   const explicitPreviousInteractionId = compose.previousInteractionId.trim();
   const manualEnvironment = compose.overrideEnvironment && compose.environmentId.trim();
   const conversationEnabled = compose.store && (compose.autoContinue || Boolean(explicitPreviousInteractionId));
   const reusingLatestEnvironment = compose.reuseEnvironment && !manualEnvironment && autoEnvironmentId;
+  const contextOverrideCount = explicitPreviousInteractionId ? 1 : compose.store && !compose.autoContinue ? 1 : 0;
+  const environmentOverrideCount = compose.overrideEnvironment ? 1 : !compose.reuseEnvironment ? 1 : 0;
   const imageParts = compose.parts.filter((part): part is ImagePartDraft => part.kind === "image");
   const optionCount =
     (compose.overrideSystemInstruction ? 1 : 0) +
     (compose.overrideTools ? 1 : 0) +
-    (compose.overrideEnvironment ? 1 : 0) +
-    (explicitPreviousInteractionId ? 1 : 0) +
+    contextOverrideCount +
+    environmentOverrideCount +
     (!compose.store ? 1 : 0) +
     (!compose.background ? 1 : 0) +
     (compose.serviceTier !== "standard" ? 1 : 0) +
     (compose.thinkingSummaries !== "none" ? 1 : 0);
+
+  useEffect(() => {
+    if (autoPreviousInteractionId) {
+      rememberedAutoPreviousInteractionId.current = autoPreviousInteractionId;
+    }
+  }, [autoPreviousInteractionId]);
+
+  useEffect(() => {
+    if (autoEnvironmentId) {
+      rememberedAutoEnvironmentId.current = autoEnvironmentId;
+    }
+  }, [autoEnvironmentId]);
+
+  useEffect(() => {
+    const environmentId = compose.environmentId.trim();
+    if (environmentId) {
+      rememberedSpecificEnvironmentId.current = environmentId;
+    }
+  }, [compose.environmentId]);
 
   const submitOnEnter = (event: React.KeyboardEvent) => {
     if (event.key === "Enter" && !event.shiftKey && canRun && !locked) {
@@ -92,12 +118,130 @@ export const Composer = ({
     const images = await Promise.all(Array.from(files).map(readImage));
     setCompose((current) => ({ ...current, inputMode: "string", parts: [...current.parts, ...images] }));
   };
-  const toggleConversation = () =>
-    setCompose((current) =>
-      current.previousInteractionId.trim() || current.autoContinue
-        ? { ...current, previousInteractionId: "", autoContinue: false }
-        : { ...current, store: true, autoContinue: true }
-    );
+  const setStoreHistory = (store: boolean) =>
+    setCompose((current) => {
+      const currentPrevious = current.previousInteractionId.trim();
+      if (!store) {
+        disabledPreviousInteractionId.current =
+          currentPrevious || autoPreviousInteractionId || rememberedAutoPreviousInteractionId.current;
+        disabledBackgroundWasEnabled.current = current.background;
+        return {
+          ...current,
+          store: false,
+          autoContinue: false,
+          previousInteractionId: "",
+          background: false
+        };
+      }
+
+      const restoredPrevious =
+        disabledPreviousInteractionId.current ||
+        currentPrevious ||
+        autoPreviousInteractionId ||
+        rememberedAutoPreviousInteractionId.current ||
+        "";
+      disabledPreviousInteractionId.current = undefined;
+      return {
+        ...current,
+        store: true,
+        autoContinue: !restoredPrevious,
+        previousInteractionId: restoredPrevious,
+        background: current.background || disabledBackgroundWasEnabled.current
+      };
+    });
+
+  const setContinueChatContext = (autoContinue: boolean) =>
+    setCompose((current) => {
+      const currentPrevious = current.previousInteractionId.trim();
+      if (!autoContinue) {
+        disabledPreviousInteractionId.current =
+          currentPrevious || autoPreviousInteractionId || rememberedAutoPreviousInteractionId.current;
+        return {
+          ...current,
+          autoContinue: false,
+          previousInteractionId: ""
+        };
+      }
+
+      const restoredPrevious =
+        disabledPreviousInteractionId.current ||
+        currentPrevious ||
+        autoPreviousInteractionId ||
+        rememberedAutoPreviousInteractionId.current ||
+        "";
+      disabledPreviousInteractionId.current = undefined;
+      return {
+        ...current,
+        store: true,
+        autoContinue: !restoredPrevious,
+        previousInteractionId: restoredPrevious
+      };
+    });
+
+  const setReuseSandboxEnvironment = (reuseEnvironment: boolean) =>
+    setCompose((current) => {
+      const currentSpecificEnvironment = current.overrideEnvironment ? current.environmentId.trim() : "";
+      if (!reuseEnvironment) {
+        disabledEnvironmentId.current =
+          currentSpecificEnvironment ||
+          autoEnvironmentId ||
+          rememberedAutoEnvironmentId.current ||
+          rememberedSpecificEnvironmentId.current;
+        disabledEnvironmentWasSpecific.current = Boolean(currentSpecificEnvironment);
+        if (current.environmentId.trim()) {
+          rememberedSpecificEnvironmentId.current = current.environmentId.trim();
+        }
+        return {
+          ...current,
+          reuseEnvironment: false,
+          overrideEnvironment: false
+        };
+      }
+
+      const restoredEnvironment =
+        disabledEnvironmentId.current ||
+        current.environmentId.trim() ||
+        autoEnvironmentId ||
+        rememberedAutoEnvironmentId.current ||
+        rememberedSpecificEnvironmentId.current ||
+        "";
+      const restoreSpecificEnvironment = Boolean(
+        restoredEnvironment && (disabledEnvironmentWasSpecific.current || (!autoEnvironmentId && !rememberedAutoEnvironmentId.current))
+      );
+      disabledEnvironmentId.current = undefined;
+      disabledEnvironmentWasSpecific.current = false;
+      return {
+        ...current,
+        reuseEnvironment: true,
+        overrideEnvironment: restoreSpecificEnvironment ? true : current.overrideEnvironment,
+        environmentId: restoreSpecificEnvironment ? restoredEnvironment : current.environmentId
+      };
+    });
+
+  const setSpecificEnvironment = (overrideEnvironment: boolean) =>
+    setCompose((current) => {
+      if (!overrideEnvironment) {
+        const environmentId = current.environmentId.trim();
+        if (environmentId) {
+          rememberedSpecificEnvironmentId.current = environmentId;
+        }
+        return { ...current, overrideEnvironment: false };
+      }
+
+      const restoredEnvironment =
+        current.environmentId.trim() ||
+        rememberedSpecificEnvironmentId.current ||
+        disabledEnvironmentId.current ||
+        autoEnvironmentId ||
+        rememberedAutoEnvironmentId.current ||
+        "";
+      return {
+        ...current,
+        reuseEnvironment: true,
+        overrideEnvironment: true,
+        environmentId: restoredEnvironment
+      };
+    });
 
   return (
     <div className="composer">
@@ -158,41 +302,6 @@ export const Composer = ({
         </label>
         <button
           type="button"
-          className={`icon-toggle ${conversationEnabled ? "on" : ""}`}
-          disabled={locked}
-          aria-pressed={conversationEnabled}
-          title={
-            explicitPreviousInteractionId
-              ? `Continuing ${explicitPreviousInteractionId}. Click to start a new conversation.`
-              : conversationEnabled
-                ? autoPreviousInteractionId
-                  ? `Continue latest stored conversation ${autoPreviousInteractionId}.`
-                  : "Continue the latest stored conversation when one exists."
-                : "Start a new conversation instead of continuing history."
-          }
-          onClick={toggleConversation}
-        >
-          <CornerDownRight size={15} />
-        </button>
-        <button
-          type="button"
-          className={`icon-toggle ${compose.reuseEnvironment ? "on" : ""}`}
-          disabled={locked}
-          aria-pressed={compose.reuseEnvironment}
-          title={
-            compose.reuseEnvironment
-              ? reusingLatestEnvironment
-                ? `Reuse latest environment ${autoEnvironmentId}.`
-                : "Reuse the latest environment when one exists."
-              : "Use a fresh remote environment for the next run."
-          }
-          onClick={() => setCompose((current) => ({ ...current, reuseEnvironment: !current.reuseEnvironment }))}
-        >
-          <Server size={15} />
-        </button>
-
-        <button
-          type="button"
           className={`run-options ${optionCount ? "active" : ""}`}
           disabled={locked}
           onClick={() => setShowOptions((value) => !value)}
@@ -216,20 +325,28 @@ export const Composer = ({
 
       {showOptions && (
         <div className="run-options-panel">
-          <p className="inline-note">One-off overrides for this run only. Off = inherits from the saved agent.</p>
+          <p className="inline-note">Run controls. Defaults keep chat context and sandbox continuity on.</p>
           <Toggle
             checked={compose.store}
             label="Store interaction history"
             disabled={locked}
-            onChange={(store) =>
-              setCompose((current) => ({
-                ...current,
-                store,
-                autoContinue: store ? current.autoContinue : false,
-                background: store ? current.background : false
-              }))
-            }
+            onChange={setStoreHistory}
           />
+          <Toggle
+            checked={conversationEnabled}
+            label="Continue chat context"
+            disabled={locked || !compose.store}
+            onChange={setContinueChatContext}
+          />
+          {conversationEnabled && (
+            <p className="inline-note">
+              {explicitPreviousInteractionId
+                ? `Continuing ${explicitPreviousInteractionId}.`
+                : autoPreviousInteractionId
+                  ? `Continuing latest chat context ${autoPreviousInteractionId}.`
+                  : "Will continue the latest chat context when one exists."}
+            </p>
+          )}
           <Toggle
             checked={compose.background && compose.store}
             label="Background execution"
@@ -239,6 +356,21 @@ export const Composer = ({
           {!compose.store && (
             <p className="inline-note warn">
               <AlertTriangle size={12} /> Background runs require Persistence on.
+            </p>
+          )}
+          <Toggle
+            checked={compose.reuseEnvironment}
+            label="Reuse sandbox environment"
+            disabled={locked}
+            onChange={setReuseSandboxEnvironment}
+          />
+          {compose.reuseEnvironment && (
+            <p className="inline-note">
+              {manualEnvironment
+                ? "A specific environment id below overrides latest-environment reuse."
+                : reusingLatestEnvironment
+                  ? `Reusing latest sandbox ${autoEnvironmentId}.`
+                  : "Will reuse the latest sandbox when one exists."}
             </p>
           )}
           <label className="field">
@@ -307,9 +439,9 @@ export const Composer = ({
             ))}
           <Toggle
             checked={compose.overrideEnvironment}
-            label="Use existing environment id"
+            label="Use specific environment id"
             disabled={locked}
-            onChange={(value) => setCompose((current) => ({ ...current, overrideEnvironment: value }))}
+            onChange={setSpecificEnvironment}
           />
           {compose.overrideEnvironment && (
             <TextField
@@ -322,12 +454,18 @@ export const Composer = ({
             />
           )}
           <TextField
-            label="Previous interaction id (continue a conversation)"
+            label="Specific previous interaction id"
             value={compose.previousInteractionId}
             mono
             disabled={locked}
             onChange={(previousInteractionId) =>
-              setCompose((current) => ({ ...current, previousInteractionId, autoContinue: false }))
+              setCompose((current) => {
+                const value = previousInteractionId.trim();
+                if (value) {
+                  disabledPreviousInteractionId.current = value;
+                }
+                return { ...current, previousInteractionId, autoContinue: false };
+              })
             }
           />
         </div>

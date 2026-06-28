@@ -71,15 +71,17 @@ export const useInteractionPoller = (
   const [polling, setPolling] = useState<boolean>(false);
   const [error, setError] = useState<IpcError | undefined>(undefined);
   const stoppedRef = useRef<boolean>(false);
+  const seedRef = useRef<Interaction | undefined>(seed);
 
   useEffect(() => {
+    seedRef.current = seed;
     if (seed) {
       setInteraction(seed);
     }
   }, [seed]);
 
   useEffect(() => {
-    if (!enabled || !id || isTerminal(seed) || !window.managedAgents) {
+    if (!enabled || !id || isTerminal(seedRef.current) || !window.managedAgents) {
       return;
     }
 
@@ -127,8 +129,9 @@ export const useInteractionPoller = (
       if (timer) {
         clearTimeout(timer);
       }
+      setPolling(false);
     };
-  }, [id, enabled, seed]);
+  }, [id, enabled]);
 
   return {
     interaction,

@@ -26,6 +26,7 @@ export npm_config_fund="${npm_config_fund:-false}"
 export npm_config_audit="${npm_config_audit:-false}"
 export NO_UPDATE_NOTIFIER="${NO_UPDATE_NOTIFIER:-1}"
 
-mkdir -p "$NPM_CONFIG_CACHE" "$WORKSPACE_ROOT/output"
+mkdir -p "$NPM_CONFIG_CACHE"
+mkdir -p "$WORKSPACE_ROOT/output" 2>/dev/null || true
 
 exec npx -y "${GAI_PACKAGE}@${GAI_VERSION}" "$@"

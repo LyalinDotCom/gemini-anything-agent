@@ -19,6 +19,8 @@ coverage/
 outputs/
 **/outputs/
 workspace-output/
+tmp/
+**/tmp/
 *.png
 *.jpg
 *.jpeg

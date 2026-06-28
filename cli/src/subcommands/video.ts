@@ -1,3 +1,4 @@
+import { rm } from "node:fs/promises";
 import { createGenAIClient } from "../genaiClient.js";
 import { videoModelForQuality, type VideoQuality } from "../models.js";
 import { ensureParentDir, fileExists, resolveOutputPath } from "../output.js";
@@ -92,10 +93,15 @@ export const runVideo = async (prompt: string, options: VideoOptions): Promise<C
   }
 
   await ensureParentDir(outputPath);
-  await ai.files.download({
-    file: generated.video,
-    downloadPath: outputPath
-  });
+  try {
+    await ai.files.download({
+      file: generated.video,
+      downloadPath: outputPath
+    });
+  } catch (error) {
+    await rm(outputPath, { force: true });
+    throw error;
+  }
 
   if (!(await fileExists(outputPath))) {
     throw new Error(`Video download completed but file was not found at ${outputPath}.`);

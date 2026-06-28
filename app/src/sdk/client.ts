@@ -340,7 +340,7 @@ const parseSseMessage = (raw: string): InteractionStreamEvent | undefined => {
   if (!data) {
     return undefined;
   }
-  if (data === "[DONE]") {
+  if (data.trim() === "[DONE]") {
     return { event_type: "done", event_id: eventId };
   }
 
@@ -391,6 +391,7 @@ export async function* readInteractionStream(
       yield event;
     }
   } finally {
+    await reader.cancel().catch(() => undefined);
     reader.releaseLock();
   }
 }

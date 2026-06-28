@@ -13,8 +13,11 @@ export const runDoctor = async (): Promise<CommandResult> => {
   try {
     await mkdir(outputDir, { recursive: true });
     const probe = join(outputDir, `.gai-write-test-${process.pid}`);
-    await writeFile(probe, "ok");
-    await rm(probe, { force: true });
+    try {
+      await writeFile(probe, "ok");
+    } finally {
+      await rm(probe, { force: true });
+    }
     outputWritable = true;
   } catch (error) {
     outputError = error instanceof Error ? error.message : String(error);

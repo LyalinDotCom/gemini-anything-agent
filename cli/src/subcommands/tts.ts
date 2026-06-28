@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createGenAIClient } from "../genaiClient.js";
 import { defaultTtsModel } from "../models.js";
-import { resolveOutputPath, writeBase64File, ensureParentDir } from "../output.js";
+import { resolveOutputPath, writeBase64File, ensureParentDir, extForMime } from "../output.js";
 import type { CommandResult } from "../types.js";
 
 type TtsOptions = {
@@ -51,14 +51,14 @@ export const runTts = async (prompt: string | undefined, options: TtsOptions): P
     throw new Error("TTS requires a prompt argument or --script-file <path>.");
   }
   const mimeType = options.mime || "audio/wav";
-  const outputPath = resolveOutputPath(options.out, "narration", ".wav");
+  const dryRunOutputPath = resolveOutputPath(options.out, "narration", extForMime(mimeType.toLowerCase(), ".wav"));
 
   if (options.dryRun) {
     return {
       ok: true,
       capability: "tts",
       model,
-      outputs: [{ path: outputPath, mimeType }],
+      outputs: [{ path: dryRunOutputPath, mimeType }],
       message: "dry run",
       details: {
         apiSurface: "interactions",
@@ -104,7 +104,13 @@ export const runTts = async (prompt: string | undefined, options: TtsOptions): P
   }
 
   const returnedMime = audio.mime_type || mimeType;
-  if (returnedMime.includes("l16")) {
+  const normalizedReturnedMime = returnedMime.toLowerCase();
+  const outputPath = resolveOutputPath(
+    options.out,
+    "narration",
+    normalizedReturnedMime.includes("l16") ? ".wav" : extForMime(normalizedReturnedMime, ".wav")
+  );
+  if (normalizedReturnedMime.includes("l16")) {
     await writeWavFromPcm(
       outputPath,
       Buffer.from(audio.data, "base64"),
@@ -119,6 +125,6 @@ export const runTts = async (prompt: string | undefined, options: TtsOptions): P
     ok: true,
     capability: "tts",
     model,
-    outputs: [{ path: outputPath, mimeType: returnedMime.includes("l16") ? "audio/wav" : returnedMime }]
+    outputs: [{ path: outputPath, mimeType: normalizedReturnedMime.includes("l16") ? "audio/wav" : returnedMime }]
   };
 };

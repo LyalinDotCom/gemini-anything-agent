@@ -140,7 +140,11 @@ const openExternal = (href: string | undefined): void => {
   if (!href || !isWebUrl(href)) {
     return;
   }
-  void window.managedAgents?.openExternal(href);
+  if (window.managedAgents?.openExternal) {
+    void window.managedAgents.openExternal(href);
+    return;
+  }
+  window.open(href, "_blank", "noopener,noreferrer");
 };
 
 const MediaEmbed = ({

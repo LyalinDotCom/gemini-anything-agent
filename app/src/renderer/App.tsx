@@ -1,30 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Archive,
-  AudioLines,
   Bot,
   CheckCircle2,
   Download,
-  ExternalLink,
   File,
-  FileText,
-  FolderOpen,
-  ImageIcon,
   Loader2,
-  Maximize2,
   MessageSquare,
-  Music2,
   PanelLeftClose,
   PanelLeftOpen,
-  PanelRightClose,
   PanelRightOpen,
   Plus,
   RefreshCw,
   Settings,
-  Sparkles,
   Trash2,
-  Video,
-  X,
   XCircle
 } from "lucide-react";
 import {
@@ -66,16 +54,14 @@ import {
   withAutoEnvironment
 } from "./lib/continuity";
 import { buildTimeline, type TimelineItem } from "./lib/timeline";
+import type { EnvironmentOutputState, SessionMediaState } from "./lib/mediaState";
+import { outputMediaItem } from "./lib/outputFiles";
 import { Composer } from "./components/Composer";
 import { Transcript } from "./components/Transcript";
-import { BufferedAudio } from "./components/BufferedAudio";
 import { SettingsModal } from "./components/Overlays";
-import sampleCatImageUrl from "./assets/sample-prompts/cat-image.png";
-import sampleCatVideoUrl from "./assets/sample-prompts/cat-video.png";
-import sampleHackerNewsUrl from "./assets/sample-prompts/hacker-news-podcast.png";
-import sampleHtmlAppUrl from "./assets/sample-prompts/html-app.png";
-import sampleTranscriptUrl from "./assets/sample-prompts/transcript.png";
-import sampleWavMp3Url from "./assets/sample-prompts/wav-mp3.png";
+import { MediaLightbox, SessionMedia } from "./components/GeneratedMedia";
+import { OutputFilesPanel } from "./components/OutputFilesPanel";
+import { SamplePromptGallery } from "./components/SamplePromptGallery";
 
 type StatusEvent = {
   id: string;
@@ -94,28 +80,6 @@ type ConversationSummary = {
   environmentId?: string;
   draft?: boolean;
   running?: boolean;
-};
-
-type SessionMediaState = {
-  loading: boolean;
-  items: ResolvedEnvironmentMedia[];
-  error?: string;
-  progress?: number;
-  stage?: string;
-};
-
-type EnvironmentOutputState = {
-  loading: boolean;
-  items: EnvironmentOutputFile[];
-  error?: string;
-  checked?: boolean;
-};
-
-type SamplePrompt = {
-  title: string;
-  detail: string;
-  prompt: string;
-  thumbnail: string;
 };
 
 const FALLBACK_RUNTIME: RuntimeConfig = {
@@ -139,50 +103,6 @@ const NEW_CONVERSATION_DRAFT: ConversationSummary = {
   draft: true,
   running: false
 };
-
-const SAMPLE_PROMPTS: SamplePrompt[] = [
-  {
-    title: "Cat Image",
-    detail: "Generate a cozy still image.",
-    thumbnail: sampleCatImageUrl,
-    prompt: "Create a cozy square image of a cute cat playing with string in a warm Pacific Northwest home."
-  },
-  {
-    title: "Cat Video",
-    detail: "Make a short moving scene.",
-    thumbnail: sampleCatVideoUrl,
-    prompt:
-      "Generate a short 16:9 video of a cute cat playing with a ball of yarn in a cozy Pacific Northwest living room, with pine trees visible through the windows."
-  },
-  {
-    title: "HN Podcast",
-    detail: "Research live news, then TTS.",
-    thumbnail: sampleHackerNewsUrl,
-    prompt:
-      "Look at the live Hacker News front page and create a short recap podcast audio file that summarizes the most interesting stories."
-  },
-  {
-    title: "WAV To MP3",
-    detail: "Create audio, then convert it.",
-    thumbnail: sampleWavMp3Url,
-    prompt:
-      "Create a 20-second spoken welcome podcast as a WAV file, then convert it to MP3 and make both files available."
-  },
-  {
-    title: "Transcript",
-    detail: "Transcribe a real episode.",
-    thumbnail: sampleTranscriptUrl,
-    prompt:
-      "Go to https://www.gcppodcast.com/post/episode-331-2022-year-end-wrap-up/, find the podcast audio file, and transcribe it."
-  },
-  {
-    title: "Solar HTML",
-    detail: "Build one openable file.",
-    thumbnail: sampleHtmlAppUrl,
-    prompt:
-      "Create a kid-friendly animated solar system as one self-contained HTML file. Include the Sun, all eight planets, labels, pause/play, and a speed slider."
-  }
-];
 
 const bridgeUnavailable: IpcError = {
   name: "BridgeUnavailable",
@@ -340,47 +260,6 @@ const formatConversationTime = (value: number): string =>
     minute: "2-digit"
   });
 
-const formatFileSize = (bytes: number): string => {
-  if (!Number.isFinite(bytes) || bytes <= 0) {
-    return "0 B";
-  }
-  const units = ["B", "KB", "MB", "GB"];
-  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  const value = bytes / 1024 ** index;
-  return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`;
-};
-
-const outputFileLabel = (file: EnvironmentOutputFile): string => {
-  switch (file.fileType) {
-    case "html":
-      return "HTML";
-    case "text":
-      return "Text";
-    case "document":
-      return "Document";
-    case "archive":
-      return "Archive";
-    case "image":
-      return "Image";
-    case "video":
-      return "Video";
-    case "audio":
-      return "Audio";
-    default:
-      return "File";
-  }
-};
-
-const outputMediaItem = (file: EnvironmentOutputFile): ResolvedEnvironmentMedia | undefined =>
-  file.mediaType && file.url
-    ? {
-        requestedPath: file.sandboxPath,
-        path: file.path,
-        url: file.url,
-        mediaType: file.mediaType
-      }
-    : undefined;
-
 const MEDIA_PATH_PATTERN =
   /(?:\/workspace\/|workspace\/|\/tmp\/|outputs\/)[^\s`"'()[\]{}<>]+\.(?:png|jpe?g|webp|gif|avif|svg|mp4|webm|mov|m4v|wav|mp3|m4a|aac|ogg|flac)(?:[?#][^\s`"'()[\]{}<>]+)?/gi;
 
@@ -462,246 +341,6 @@ const textFileNameForLabel = (label: string): string => {
     .replace(/^-+|-+$/g, "")
     .slice(0, 80) || "agent-output";
   return stem.endsWith(".md") || stem.endsWith(".txt") ? stem : `${stem}.md`;
-};
-
-const SessionMedia = ({
-  state,
-  onSave,
-  onRetry,
-  onOpen
-}: {
-  state: SessionMediaState | undefined;
-  onSave: (item: ResolvedEnvironmentMedia) => void;
-  onRetry: () => void;
-  onOpen: (item: ResolvedEnvironmentMedia) => void;
-}) => {
-  if (!state || (!state.loading && state.items.length === 0 && !state.error)) {
-    return null;
-  }
-
-  return (
-    <div className="session-media">
-      {state.loading && (
-        <div className="media-progress">
-          <span>{state.stage ?? "Downloading generated media..."}</span>
-          <div className="media-progress-track" aria-hidden="true">
-            <span style={{ width: `${state.progress ?? 35}%` }} />
-          </div>
-        </div>
-      )}
-      {state.error && (
-        <div className="media-error-row">
-          <span className="media-error">{state.error}</span>
-          <button type="button" className="ghost-button sm" onClick={onRetry}>
-            Retry download
-          </button>
-        </div>
-      )}
-      {state.items.map((item) => {
-        const opensFromCard = item.mediaType !== "audio";
-        return (
-          <figure
-            className={`media-card media-${item.mediaType} ${opensFromCard ? "can-open" : ""}`}
-            key={`${item.requestedPath}:${item.url}`}
-            onClick={(event) => {
-              if (!opensFromCard) {
-                return;
-              }
-              const tag = event.target instanceof HTMLElement ? event.target.tagName.toLowerCase() : "";
-              if (tag !== "video" && tag !== "audio" && tag !== "button") {
-                onOpen(item);
-              }
-            }}
-          >
-            {item.mediaType === "image" ? (
-              <img src={item.url} alt={item.requestedPath} loading="lazy" onClick={() => onOpen(item)} />
-            ) : item.mediaType === "video" ? (
-              <video src={item.url} controls preload="metadata" />
-            ) : (
-              <BufferedAudio src={item.url} />
-            )}
-            <figcaption>
-              <span>
-                {item.requestedPath}
-                {item.savedPath && (
-                  <>
-                    <br />
-                    Saved locally: <code>{item.savedPath}</code>
-                  </>
-                )}
-              </span>
-              <button type="button" className="ghost-button sm" onClick={() => onSave(item)}>
-                <Download size={12} />
-                Save As
-              </button>
-              <button type="button" className="ghost-button sm" onClick={() => onOpen(item)}>
-                <Maximize2 size={12} />
-                {item.mediaType === "audio" ? "Open player" : "Open"}
-              </button>
-              <button type="button" className="ghost-button sm" onClick={onRetry}>
-                Redownload
-              </button>
-            </figcaption>
-          </figure>
-        );
-      })}
-    </div>
-  );
-};
-
-const MediaLightbox = ({
-  item,
-  onClose
-}: {
-  item: ResolvedEnvironmentMedia | null;
-  onClose: () => void;
-}) => {
-  if (!item) {
-    return null;
-  }
-
-  return (
-    <div className="media-lightbox-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
-      <div className={`media-lightbox media-${item.mediaType}`} onClick={(event) => event.stopPropagation()}>
-        <header>
-          <div>
-            <strong>{item.requestedPath}</strong>
-            {item.savedPath && <code>{item.savedPath}</code>}
-          </div>
-          <button type="button" className="ghost-button sm" onClick={onClose}>
-            <X size={14} />
-            Close
-          </button>
-        </header>
-        <div className="media-lightbox-body">
-          {item.mediaType === "image" ? (
-            <img src={item.url} alt={item.requestedPath} />
-          ) : item.mediaType === "video" ? (
-            <video src={item.url} controls autoPlay />
-          ) : (
-            <BufferedAudio src={item.url} autoPlay />
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const OutputFileIcon = ({ file }: { file: EnvironmentOutputFile }) => {
-  switch (file.fileType) {
-    case "image":
-      return <ImageIcon size={15} />;
-    case "video":
-      return <Video size={15} />;
-    case "audio":
-      return <Music2 size={15} />;
-    case "html":
-    case "text":
-    case "document":
-      return <FileText size={15} />;
-    case "archive":
-      return <Archive size={15} />;
-    default:
-      return <File size={15} />;
-  }
-};
-
-const OutputFilesPanel = ({
-  state,
-  environmentId,
-  onRefresh,
-  onSave,
-  onOpen
-}: {
-  state: EnvironmentOutputState | undefined;
-  environmentId: string | undefined;
-  onRefresh: () => void;
-  onSave: (file: EnvironmentOutputFile) => void;
-  onOpen: (file: EnvironmentOutputFile) => void;
-}) => {
-  const panelState = state ?? { loading: false, items: [] };
-  const canRefresh = Boolean(environmentId && !panelState.loading);
-
-  return (
-    <aside className="output-panel" aria-label="Workspace output files">
-      <header className="output-panel-head">
-        <span className="output-panel-title">
-          <FolderOpen size={15} />
-          Output
-        </span>
-        <button
-          type="button"
-          className="head-icon"
-          title="Refresh output files"
-          aria-label="Refresh output files"
-          disabled={!canRefresh}
-          onClick={onRefresh}
-        >
-          <RefreshCw size={14} className={panelState.loading ? "spin" : undefined} />
-        </button>
-      </header>
-      <div className="output-panel-subtitle">/workspace/output</div>
-      {panelState.error && (
-        <div className="output-panel-error">
-          <span>{panelState.error}</span>
-          <button type="button" className="ghost-button sm" disabled={!canRefresh} onClick={onRefresh}>
-            Retry
-          </button>
-        </div>
-      )}
-      {panelState.loading && (
-        <div className="output-panel-loading">
-          <Loader2 size={14} className="spin" />
-          <span>{panelState.items.length > 0 ? "Refreshing files..." : "Checking output files..."}</span>
-        </div>
-      )}
-      <div className="output-file-list">
-        {!panelState.loading && panelState.items.length === 0 && !panelState.error && (
-          <div className="output-panel-empty">
-            <FolderOpen size={22} />
-            <strong>{environmentId ? "No output files yet" : "No workspace yet"}</strong>
-            <span>{environmentId ? "Generated artifacts will appear here." : "Start a chat to create one."}</span>
-          </div>
-        )}
-        {panelState.items.map((file) => {
-          const media = outputMediaItem(file);
-          return (
-            <div className="output-file-row" key={`${file.path}:${file.modifiedAt}`}>
-              <span className={`output-file-icon file-${file.fileType}`}>
-                <OutputFileIcon file={file} />
-              </span>
-              <div className="output-file-main">
-                <strong title={file.sandboxPath}>{file.relativePath}</strong>
-                <span>
-                  {outputFileLabel(file)} · {formatFileSize(file.bytes)}
-                </span>
-              </div>
-              <div className="output-file-actions">
-                <button
-                  type="button"
-                  className="icon-action"
-                  title={media ? "Open player" : "Open file"}
-                  aria-label={media ? "Open player" : "Open file"}
-                  onClick={() => onOpen(file)}
-                >
-                  {media ? <Maximize2 size={13} /> : <ExternalLink size={13} />}
-                </button>
-                <button
-                  type="button"
-                  className="icon-action"
-                  title="Save As"
-                  aria-label="Save As"
-                  onClick={() => onSave(file)}
-                >
-                  <Download size={13} />
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </aside>
-  );
 };
 
 const SessionControls = ({
@@ -951,36 +590,6 @@ const fallbackAgent = (agentId: string): ManagedAgent => ({
   description: "Preconfigured Gemini Anything managed agent."
 });
 
-const SamplePromptGallery = ({
-  disabled,
-  onSelect
-}: {
-  disabled: boolean;
-  onSelect: (prompt: string) => void;
-}) => (
-  <div className="sample-prompts" aria-label="Sample prompts">
-    <div className="sample-prompts-head">
-      <AudioLines size={14} />
-      <span>Sample prompts</span>
-    </div>
-    <div className="sample-prompt-grid">
-      {SAMPLE_PROMPTS.map((sample) => (
-        <button
-          type="button"
-          className="sample-prompt"
-          disabled={disabled}
-          key={sample.title}
-          onClick={() => onSelect(sample.prompt)}
-        >
-          <img src={sample.thumbnail} alt="" aria-hidden="true" />
-          <strong>{sample.title}</strong>
-          <span>{sample.detail}</span>
-        </button>
-      ))}
-    </div>
-  </div>
-);
-
 const snapshotAgentForRun = async (
   agentId: string,
   fallback: ManagedAgent
@@ -1114,6 +723,9 @@ export const App = () => {
   const activeOutputState = latestEnvironmentId ? outputFilesByEnvironment[latestEnvironmentId] : undefined;
   const activeOutputFileCount = activeOutputState?.items.length ?? 0;
   const outputPanelVisible = outputPanelOpen;
+  const latestRunSession = latestRunId
+    ? chatSessions.find((session) => session.localId === latestRunId)
+    : undefined;
   const outputRefreshSignature = useMemo(
     () =>
       chatSessions
@@ -1192,9 +804,13 @@ export const App = () => {
     setStartingConversationIds({});
     setCancelingSessionIds({});
     setOutputPanelOpen(false);
+    setMediaBySession({});
+    setOutputFilesByEnvironment({});
     pendingRunInputs.current.clear();
     activeResumeIds.current.clear();
     requestedMediaKeys.current.clear();
+    outputRefreshSignatures.current = {};
+    autoOpenedOutputEnvironments.current.clear();
   }, [keyMissing]);
 
   useEffect(() => {
@@ -1222,8 +838,17 @@ export const App = () => {
     if (!latestEnvironmentId || selectedConversationRunning || !window.managedAgents?.listEnvironmentOutputFiles) {
       return;
     }
+    const shouldDiscoverOutputs =
+      outputPanelOpen || Boolean(latestRunSession && !latestRunSession.streaming);
+    if (!shouldDiscoverOutputs) {
+      return;
+    }
     const previousSignature = outputRefreshSignatures.current[latestEnvironmentId];
-    const force = Boolean(previousSignature && previousSignature !== outputRefreshSignature);
+    const force = Boolean(
+      latestRunSession &&
+        previousSignature &&
+        previousSignature !== outputRefreshSignature
+    );
     const state = outputFilesByEnvironment[latestEnvironmentId];
     if (!force && (state?.checked || state?.loading)) {
       return;
@@ -1232,6 +857,8 @@ export const App = () => {
     void loadOutputFiles(latestEnvironmentId, force);
   }, [
     latestEnvironmentId,
+    latestRunSession,
+    outputPanelOpen,
     outputFilesByEnvironment,
     outputRefreshSignature,
     selectedConversationRunning
@@ -1876,12 +1503,15 @@ export const App = () => {
             items: result.value,
             checked: true
           }
-        : {
-            loading: false,
-            items: current[environmentId]?.items ?? [],
-            checked: true,
-            error: result.error.message
-          }
+        : (() => {
+            const previousItems = current[environmentId]?.items ?? [];
+            return {
+              loading: false,
+              items: previousItems,
+              checked: true,
+              error: previousItems.length ? undefined : result.error.message
+            };
+          })()
     }));
   }
 
@@ -1950,13 +1580,14 @@ export const App = () => {
     }
 
     requestedMediaKeys.current.add(requestKey);
+    const existingItems = cachedItems ?? [];
     setMediaBySession((current) => ({
       ...current,
       [session.localId]: {
-        loading: true,
-        items: force ? [] : (current[session.localId]?.items ?? session.resolvedMedia ?? []),
-        progress: 35,
-        stage: "Downloading generated media from the managed workspace..."
+        loading: existingItems.length === 0,
+        items: force ? existingItems : (current[session.localId]?.items ?? existingItems),
+        progress: existingItems.length === 0 ? 35 : 100,
+        stage: existingItems.length === 0 ? "Downloading generated media from the managed workspace..." : undefined
       }
     }));
 
@@ -1987,9 +1618,11 @@ export const App = () => {
           })()
         : {
             loading: false,
-            items: current[session.localId]?.items ?? [],
-            progress: 0,
-            error: result.error.message
+            items: current[session.localId]?.items ?? session.resolvedMedia ?? [],
+            progress: (current[session.localId]?.items ?? session.resolvedMedia ?? []).length ? 100 : 0,
+            error: (current[session.localId]?.items ?? session.resolvedMedia ?? []).length
+              ? undefined
+              : result.error.message
           }
     }));
   }
@@ -2085,10 +1718,6 @@ export const App = () => {
             <span className="status-dot" />
             {hasKey ? "Ready" : "Key missing"}
           </span>
-          <span className="agent-status gai-pill">
-            <Sparkles size={12} />
-            <code>{config.npmPackage}@{config.npmVersion}</code>
-          </span>
         </div>
       </header>
 
@@ -2170,6 +1799,18 @@ export const App = () => {
               ))
             )}
           </div>
+          <div className="conversation-footer">
+            <button
+              type="button"
+              className="sidebar-settings"
+              title="Settings"
+              aria-label="Settings"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <Settings size={15} />
+              <span>Settings</span>
+            </button>
+          </div>
         </aside>
 
         <section className="chat-main" aria-label="Managed agent chat">
@@ -2179,15 +1820,6 @@ export const App = () => {
             </span>
             {selectedConversationRunning && <span className="live-dot">working…</span>}
             <span className="chat-main-head-spacer" />
-            <button
-              type="button"
-              className="head-icon"
-              title="Settings"
-              aria-label="Settings"
-              onClick={() => setSettingsOpen(true)}
-            >
-              <Settings size={15} />
-            </button>
             <button
               type="button"
               className="head-icon"
@@ -2213,11 +1845,6 @@ export const App = () => {
             {chatSessions.length === 0 ? (
               activeConversationId === NEW_CONVERSATION_ID ? (
                 <div className="chat-empty has-samples">
-                  <span className="chat-empty-mark">
-                    <Bot size={28} />
-                  </span>
-                  <strong>Start a new chat</strong>
-                  <span className="chat-empty-subtitle">Pick a sample prompt or write your own.</span>
                   <SamplePromptGallery
                     disabled={!appReady || selectedConversationRunning}
                     onSelect={loadSamplePrompt}
@@ -2295,18 +1922,32 @@ export const App = () => {
           </div>
         </section>
 
-        <button
-          type="button"
-          className={`output-panel-toggle ${outputPanelOpen ? "open" : ""}`}
-          title={outputPanelOpen ? "Hide output files" : "Show output files"}
-          aria-label={outputPanelOpen ? "Hide output files" : "Show output files"}
-          aria-pressed={outputPanelOpen}
-          disabled={!appReady}
-          onClick={toggleOutputPanel}
-        >
-          {outputPanelOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
-          {activeOutputFileCount > 0 && <span>{activeOutputFileCount}</span>}
-        </button>
+        {!outputPanelOpen && (
+          <button
+            type="button"
+            className="output-panel-toggle"
+            title={
+              activeOutputFileCount > 0
+                ? `Show output files (${activeOutputFileCount} available)`
+                : "Show output files"
+            }
+            aria-label={
+              activeOutputFileCount > 0
+                ? `Show output files (${activeOutputFileCount} available)`
+                : "Show output files"
+            }
+            aria-pressed={false}
+            disabled={!appReady}
+            onClick={toggleOutputPanel}
+          >
+            <PanelRightOpen size={16} />
+            {activeOutputFileCount > 0 && (
+              <span className="output-panel-toggle-badge" aria-hidden="true">
+                <File size={10} />
+              </span>
+            )}
+          </button>
+        )}
 
         {outputPanelOpen && (
           <OutputFilesPanel
@@ -2315,6 +1956,7 @@ export const App = () => {
             onRefresh={() => latestEnvironmentId && void loadOutputFiles(latestEnvironmentId, true)}
             onSave={(file) => void saveOutputFile(file)}
             onOpen={(file) => void openOutputFile(file)}
+            onClose={() => setOutputPanelOpen(false)}
           />
         )}
       </main>

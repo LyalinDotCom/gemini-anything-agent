@@ -136,47 +136,54 @@ export const runTranscribe = async (
     name?: string;
   };
 
-  if (!uploaded.uri) {
-    throw new Error(`Audio upload completed but did not return a file URI for ${resolvedFilePath}.`);
-  }
-
-  const interaction = (await ai.interactions.create({
-    model,
-    input: [
-      {
-        type: "text",
-        text: prompt
-      },
-      {
-        type: "audio",
-        uri: uploaded.uri,
-        mime_type: uploaded.mimeType || uploaded.mime_type || mimeType
-      }
-    ]
-  } as never)) as {
-    output_text?: string;
-  };
-
-  const transcript = interaction.output_text?.trim();
-  if (!transcript) {
-    throw new Error(`Transcription model ${model} did not return output_text.`);
-  }
-
-  await ensureParentDir(outputPath);
-  await writeFile(outputPath, `${transcript}\n`, "utf8");
-
-  return {
-    ok: true,
-    capability: "transcribe",
-    model,
-    outputs: [{ path: outputPath, mimeType: outputMime }],
-    message: `Transcript written to ${outputPath}`,
-    details: {
-      inputFile: resolvedFilePath,
-      inputMimeType: mimeType,
-      uploadedFile: uploaded.name,
-      format,
-      transcriptCharacters: transcript.length
+  try {
+    if (!uploaded.uri) {
+      throw new Error(`Audio upload completed but did not return a file URI for ${resolvedFilePath}.`);
     }
-  };
+
+    const interaction = (await ai.interactions.create({
+      model,
+      input: [
+        {
+          type: "text",
+          text: prompt
+        },
+        {
+          type: "audio",
+          uri: uploaded.uri,
+          mime_type: uploaded.mimeType || uploaded.mime_type || mimeType
+        }
+      ]
+    } as never)) as {
+      output_text?: string;
+    };
+
+    const transcript = interaction.output_text?.trim();
+    if (!transcript) {
+      throw new Error(`Transcription model ${model} did not return output_text.`);
+    }
+
+    await ensureParentDir(outputPath);
+    await writeFile(outputPath, `${transcript}\n`, "utf8");
+
+    return {
+      ok: true,
+      capability: "transcribe",
+      model,
+      outputs: [{ path: outputPath, mimeType: outputMime }],
+      message: `Transcript written to ${outputPath}`,
+      details: {
+        inputFile: resolvedFilePath,
+        inputMimeType: mimeType,
+        uploadedFile: uploaded.name,
+        format,
+        transcriptCharacters: transcript.length
+      }
+    };
+  } finally {
+    const deleteUploadedFile = (ai.files as { delete?: (params: { name: string }) => Promise<unknown> }).delete;
+    if (uploaded.name && deleteUploadedFile) {
+      await deleteUploadedFile.call(ai.files, { name: uploaded.name }).catch(() => undefined);
+    }
+  }
 };

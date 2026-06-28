@@ -68,7 +68,7 @@ export const getApiKey = (): string | undefined => {
 export const requireApiKey = (): string => {
   const key = getApiKey();
   if (!key) {
-    throw new Error("GEMINI_API_KEY is required. Put it in .env or export it in the environment.");
+    throw new Error("GEMINI_API_KEY or GOOGLE_API_KEY is required. Put it in .env or export it in the environment.");
   }
   return key;
 };

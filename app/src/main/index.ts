@@ -121,12 +121,15 @@ const envValue = (value: string | undefined): string =>
     .replace(/^(['"])(.*)\1$/, "$2")
     .replace(/[\r\n]/g, "");
 
+const envValueOrDefault = (value: string | undefined, fallback: string): string =>
+  envValue(value) || fallback;
+
 const sandboxEnvContent = (): string =>
   [
     `GEMINI_API_KEY=${envValue(process.env.GEMINI_API_KEY)}`,
-    `GEMINI_ANYTHING_NPM_PACKAGE=${envValue(process.env.GEMINI_ANYTHING_NPM_PACKAGE ?? DEFAULT_NPM_PACKAGE)}`,
-    `GEMINI_ANYTHING_NPM_VERSION=${envValue(process.env.GEMINI_ANYTHING_NPM_VERSION ?? DEFAULT_NPM_VERSION)}`,
-    `GEMINI_ANYTHING_TRANSCRIBE_MODEL=${envValue(process.env.GEMINI_ANYTHING_TRANSCRIBE_MODEL ?? "gemini-3.5-flash")}`
+    `GEMINI_ANYTHING_NPM_PACKAGE=${envValueOrDefault(process.env.GEMINI_ANYTHING_NPM_PACKAGE, DEFAULT_NPM_PACKAGE)}`,
+    `GEMINI_ANYTHING_NPM_VERSION=${envValueOrDefault(process.env.GEMINI_ANYTHING_NPM_VERSION, DEFAULT_NPM_VERSION)}`,
+    `GEMINI_ANYTHING_TRANSCRIBE_MODEL=${envValueOrDefault(process.env.GEMINI_ANYTHING_TRANSCRIBE_MODEL, "gemini-3.5-flash")}`
   ].join("\n") + "\n";
 
 const readAgentAsset = (relativePath: string, fallback: string): string => {
@@ -424,6 +427,65 @@ const autoSaveMedia = (environmentId: string, sourcePath: string): string => {
   return target;
 };
 
+const localOutputRoot = (environmentId: string): string =>
+  join(LOCAL_OUTPUT_ROOT, safeCacheSegment(environmentId));
+
+const localOutputMediaEntries = (root: string, current = root): string[] => {
+  if (!existsSync(current)) {
+    return [];
+  }
+  return readdirSync(current, { withFileTypes: true }).flatMap((entry) => {
+    const fullPath = join(current, entry.name);
+    if (entry.isDirectory()) {
+      return localOutputMediaEntries(root, fullPath);
+    }
+    if (!entry.isFile() || !mediaTypeForPath(fullPath)) {
+      return [];
+    }
+    return [normalize(fullPath.slice(root.length)).replace(/^[/\\]+/, "").replace(/\\/g, "/")];
+  });
+};
+
+const copyAutoSavedMediaToCache = (
+  environmentId: string,
+  extractRoot: string,
+  requestedPaths?: string[]
+): void => {
+  const sourceRoot = localOutputRoot(environmentId);
+  if (!existsSync(sourceRoot)) {
+    return;
+  }
+
+  const entries = localOutputMediaEntries(sourceRoot);
+  const requestedNames = requestedPaths
+    ? new Set(
+        requestedPaths.flatMap((requestedPath) => {
+          const outputRelativePath = outputRelativePathForEntry(requestedPath);
+          return unique(
+            [outputRelativePath, outputRelativePath ? basename(outputRelativePath) : basename(requestedPath)]
+              .filter((value): value is string => Boolean(value))
+          );
+        })
+      )
+    : undefined;
+
+  for (const entry of entries) {
+    if (requestedNames && !requestedNames.has(entry) && !requestedNames.has(basename(entry))) {
+      continue;
+    }
+    const sourcePath = resolve(sourceRoot, entry);
+    if (!pathIsInside(sourcePath, resolve(sourceRoot)) || !existsSync(sourcePath) || !statSync(sourcePath).isFile()) {
+      continue;
+    }
+    const targetPath = resolve(extractRoot, "workspace", "output", entry);
+    if (!pathIsInside(targetPath, resolve(extractRoot))) {
+      continue;
+    }
+    mkdirSync(dirname(targetPath), { recursive: true });
+    copyFileSync(sourcePath, targetPath);
+  }
+};
+
 const mediaUrl = (environmentId: string, relativeEntry: string): string => {
   const encodedPath = relativeEntry
     .split("/")
@@ -537,9 +599,11 @@ const listEnvironmentOutputFilesFromSnapshot = async (
   const cacheRoot = join(mediaCacheRoot(), safeCacheSegment(environmentId));
   const extractRoot = join(cacheRoot, "files");
   const nextExtractRoot = join(cacheRoot, "files-next");
+  const previousExtractRoot = join(cacheRoot, "files-previous");
   const targetExtractRoot = force ? nextExtractRoot : extractRoot;
   const tarPath = join(cacheRoot, "snapshot.tar");
 
+  copyAutoSavedMediaToCache(environmentId, extractRoot);
   const cached = cachedEnvironmentOutputFiles(environmentId, extractRoot);
   if (!force && cached.length > 0) {
     return cached;
@@ -547,14 +611,15 @@ const listEnvironmentOutputFilesFromSnapshot = async (
 
   if (force) {
     rmSync(nextExtractRoot, { recursive: true, force: true });
+    rmSync(previousExtractRoot, { recursive: true, force: true });
   }
   mkdirSync(targetExtractRoot, { recursive: true });
   rmSync(tarPath, { force: true });
 
-  const buffer = await createClient().downloadEnvironmentSnapshot(environmentId);
-  writeFileSync(tarPath, Buffer.from(buffer));
-
   try {
+    const buffer = await createClient().downloadEnvironmentSnapshot(environmentId);
+    writeFileSync(tarPath, Buffer.from(buffer));
+
     const listed = await execFileAsync("tar", ["-tf", tarPath], { maxBuffer: 5 * 1024 * 1024 });
     const selectedEntries = unique(
       listed.stdout
@@ -565,10 +630,7 @@ const listEnvironmentOutputFilesFromSnapshot = async (
     );
 
     if (selectedEntries.length === 0) {
-      if (force) {
-        rmSync(extractRoot, { recursive: true, force: true });
-      }
-      return [];
+      return cachedEnvironmentOutputFiles(environmentId, extractRoot);
     }
 
     await execFileAsync("tar", ["-xf", tarPath, "-C", targetExtractRoot, ...selectedEntries], {
@@ -576,15 +638,33 @@ const listEnvironmentOutputFilesFromSnapshot = async (
     });
 
     if (force) {
-      rmSync(extractRoot, { recursive: true, force: true });
-      renameSync(nextExtractRoot, extractRoot);
+      if (existsSync(extractRoot)) {
+        renameSync(extractRoot, previousExtractRoot);
+      }
+      try {
+        renameSync(nextExtractRoot, extractRoot);
+        rmSync(previousExtractRoot, { recursive: true, force: true });
+      } catch (error) {
+        rmSync(extractRoot, { recursive: true, force: true });
+        if (existsSync(previousExtractRoot)) {
+          renameSync(previousExtractRoot, extractRoot);
+        }
+        throw error;
+      }
     }
 
     return cachedEnvironmentOutputFiles(environmentId, extractRoot);
+  } catch (error) {
+    const fallback = cachedEnvironmentOutputFiles(environmentId, extractRoot);
+    if (fallback.length > 0) {
+      return fallback;
+    }
+    throw error;
   } finally {
     rmSync(tarPath, { force: true });
     if (force) {
       rmSync(nextExtractRoot, { recursive: true, force: true });
+      rmSync(previousExtractRoot, { recursive: true, force: true });
     }
   }
 };
@@ -661,6 +741,13 @@ const upsertEnvKey = (envPath: string, name: string, value: string): void => {
   let content = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
   const line = `${name}=${value}`;
   const pattern = new RegExp(`^${name}=.*$`, "m");
+  if (!value) {
+    content = content
+      .replace(new RegExp(`^${name}=.*(?:\\r?\\n)?`, "m"), "")
+      .replace(/\n{3,}/g, "\n\n");
+    writeFileSync(envPath, content, "utf8");
+    return;
+  }
   if (pattern.test(content)) {
     // Function replacer so a "$" in the value is written literally, not as a $-pattern.
     content = content.replace(pattern, () => line);
@@ -694,24 +781,26 @@ const ok = <T>(value: T): IpcResult<T> => ({ ok: true, value });
 const fail = <T>(error: unknown): IpcResult<T> => ({ ok: false, error: serializeError(error) });
 const streamControllers = new Map<string, AbortController>();
 const STREAM_BUFFER_TTL_MS = 5 * 60_000;
-const streamBuffers = new Map<
-  string,
-  {
-    events: InteractionStreamEvent[];
-    latestInteraction?: Interaction;
-    done: boolean;
-    lastEventId?: string;
-    cleanupTimer?: ReturnType<typeof setTimeout>;
-  }
->();
+type StreamBuffer = {
+  events: InteractionStreamEvent[];
+  latestInteraction?: Interaction;
+  done: boolean;
+  lastEventId?: string;
+  cleanupTimer?: ReturnType<typeof setTimeout>;
+};
+const streamBuffers = new Map<string, StreamBuffer>();
 
-const scheduleStreamBufferCleanup = (streamId: string): void => {
-  const buffer = streamBuffers.get(streamId);
+const scheduleStreamBufferCleanup = (streamId: string, buffer: StreamBuffer): void => {
+  if (streamBuffers.get(streamId) !== buffer) {
+    return;
+  }
   if (!buffer || buffer.cleanupTimer) {
     return;
   }
   buffer.cleanupTimer = setTimeout(() => {
-    streamBuffers.delete(streamId);
+    if (streamBuffers.get(streamId) === buffer) {
+      streamBuffers.delete(streamId);
+    }
   }, STREAM_BUFFER_TTL_MS);
 };
 
@@ -861,9 +950,9 @@ handle(ipcChannels.runtimeConfig, () => ({
   baseUrl: process.env.GEMINI_API_BASE_URL ?? GEMINI_API_BASE_URL,
   envPath: ENV_PATH,
   docsLastChecked: "2026-06-22",
-  agentId: process.env.GEMINI_ANYTHING_AGENT_ID ?? DEFAULT_AGENT_ID,
-  npmPackage: process.env.GEMINI_ANYTHING_NPM_PACKAGE ?? DEFAULT_NPM_PACKAGE,
-  npmVersion: process.env.GEMINI_ANYTHING_NPM_VERSION ?? DEFAULT_NPM_VERSION
+  agentId: envValueOrDefault(process.env.GEMINI_ANYTHING_AGENT_ID, DEFAULT_AGENT_ID),
+  npmPackage: envValueOrDefault(process.env.GEMINI_ANYTHING_NPM_PACKAGE, DEFAULT_NPM_PACKAGE),
+  npmVersion: envValueOrDefault(process.env.GEMINI_ANYTHING_NPM_VERSION, DEFAULT_NPM_VERSION)
 }));
 
 handle<[string], SetApiKeyResult>(ipcChannels.setApiKey, async (key) => {
@@ -971,10 +1060,16 @@ ipcMain.handle(
     streamBuffers.set(streamId, buffer);
     const client = createClient();
     let latestInteraction: Interaction | undefined;
+    const abortForDestroyedSender = () => controller.abort(new Error("Renderer was destroyed."));
+    event.sender.once("destroyed", abortForDestroyedSender);
 
     try {
       for await (const streamEvent of client.createInteractionStream(augmentInteractionRequest(request), { signal: controller.signal })) {
         latestInteraction = rememberStreamEvent(buffer, streamEvent);
+        if (event.sender.isDestroyed()) {
+          controller.abort(new Error("Renderer was destroyed."));
+          break;
+        }
         event.sender.send(ipcChannels.interactionStreamEvent, {
           streamId,
           event: streamEvent
@@ -1001,8 +1096,9 @@ ipcMain.handle(
       }
       return fail<Interaction>(error);
     } finally {
+      event.sender.off("destroyed", abortForDestroyedSender);
       buffer.done = true;
-      scheduleStreamBufferCleanup(streamId);
+      scheduleStreamBufferCleanup(streamId, buffer);
       streamControllers.delete(streamId);
     }
   }
@@ -1021,7 +1117,9 @@ ipcMain.handle(
     };
     streamBuffers.set(streamId, buffer);
     const client = createClient();
-    let latestInteraction: Interaction | undefined = buffer.latestInteraction;
+    let latestInteraction: Interaction | undefined;
+    const abortForDestroyedSender = () => controller.abort(new Error("Renderer was destroyed."));
+    event.sender.once("destroyed", abortForDestroyedSender);
 
     try {
       for await (const streamEvent of client.resumeInteractionStream(interactionId, {
@@ -1029,6 +1127,10 @@ ipcMain.handle(
         signal: controller.signal
       })) {
         latestInteraction = rememberStreamEvent(buffer, streamEvent);
+        if (event.sender.isDestroyed()) {
+          controller.abort(new Error("Renderer was destroyed."));
+          break;
+        }
         event.sender.send(ipcChannels.interactionStreamEvent, {
           streamId,
           event: streamEvent
@@ -1054,8 +1156,9 @@ ipcMain.handle(
       }
       return fail<Interaction>(error);
     } finally {
+      event.sender.off("destroyed", abortForDestroyedSender);
       buffer.done = true;
-      scheduleStreamBufferCleanup(streamId);
+      scheduleStreamBufferCleanup(streamId, buffer);
       streamControllers.delete(streamId);
     }
   }
@@ -1122,7 +1225,11 @@ handle<[string, string[]], ResolvedEnvironmentMedia[]>(
     const cacheRoot = join(mediaCacheRoot(), safeCacheSegment(environmentId));
     const extractRoot = join(cacheRoot, "files");
     const tarPath = join(cacheRoot, "snapshot.tar");
-    const cached = resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
+    let cached = resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
+    if (!cached) {
+      copyAutoSavedMediaToCache(environmentId, extractRoot, requestedPaths);
+      cached = resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
+    }
     if (cached) {
       return cached;
     }
@@ -1130,10 +1237,10 @@ handle<[string, string[]], ResolvedEnvironmentMedia[]>(
     rmSync(tarPath, { force: true });
     mkdirSync(extractRoot, { recursive: true });
 
-    const buffer = await createClient().downloadEnvironmentSnapshot(environmentId);
-    writeFileSync(tarPath, Buffer.from(buffer));
-
     try {
+      const buffer = await createClient().downloadEnvironmentSnapshot(environmentId);
+      writeFileSync(tarPath, Buffer.from(buffer));
+
       const listed = await execFileAsync("tar", ["-tf", tarPath], { maxBuffer: 5 * 1024 * 1024 });
       const tarEntries = listed.stdout
         .split("\n")
@@ -1186,6 +1293,13 @@ handle<[string, string[]], ResolvedEnvironmentMedia[]>(
             ]
           : [];
       });
+    } catch (error) {
+      copyAutoSavedMediaToCache(environmentId, extractRoot, requestedPaths);
+      const fallback = resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
+      if (fallback) {
+        return fallback;
+      }
+      throw error;
     } finally {
       rmSync(tarPath, { force: true });
     }

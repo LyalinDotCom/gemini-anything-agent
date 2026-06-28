@@ -1,4 +1,4 @@
-import { mkdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, extname, join, resolve } from "node:path";
 import { defaultOutputDir } from "./config.js";
 
@@ -30,8 +30,11 @@ export const writeBase64File = async (path: string, data: string): Promise<numbe
 export const ensureWritableDirectory = async (directory: string): Promise<void> => {
   await mkdir(directory, { recursive: true });
   const probe = join(directory, `.write-test-${process.pid}`);
-  await writeFile(probe, "ok");
-  await import("node:fs/promises").then(({ rm }) => rm(probe, { force: true }));
+  try {
+    await writeFile(probe, "ok");
+  } finally {
+    await rm(probe, { force: true });
+  }
 };
 
 export const fileExists = async (path: string): Promise<boolean> => {
@@ -78,4 +81,3 @@ export const printResult = (result: unknown, json: boolean): void => {
   }
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 };
-

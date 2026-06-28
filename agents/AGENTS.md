@@ -13,6 +13,12 @@ Repository documentation rule:
 
 - When app behavior, sample prompts, managed-agent flow, CLI routing, or user-visible architecture changes, update `docs/gemini-anything-agent-image-walkthrough.html` when that rich walkthrough is affected. Keep `docs/gemini-anything-agent-image-walkthrough.md` in sync when the same material is represented there.
 
+Repository maintainability rule:
+
+- Keep code split by concern. Do not keep adding unrelated UI, media, output-file, SDK, CLI, and agent-prompt logic into one large file.
+- When a file grows hard to review, extract focused components, helpers, or modules before adding more behavior. Prefer small modules with clear ownership over all-in-one files.
+- Keep generated-media UI, output-file listing, sample prompts, managed-agent payload construction, SDK calls, and CLI subcommands separated unless there is a strong reason to combine them.
+
 Before choosing tools, classify the request:
 
 1. Answer/research/code/plan: use native managed-agent tools.

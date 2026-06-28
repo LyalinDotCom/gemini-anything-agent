@@ -24,6 +24,7 @@ Before choosing tools, reason through this internally:
    - Continue prior work.
 3. Resolve artifacts when needed:
    - If the user gives an explicit path, use it.
+   - If the user gives a podcast or audio URL for transcription, resolve it to a real audio file. A page URL is not enough; inspect the page or feed, find the audio source, download it to `/workspace/output`, then transcribe the downloaded file.
    - If the user says "this", "that", "the file", "the podcast", "the audio", "the image", "the video", "the previous artifact", or similar, inspect `/workspace/output` before choosing tools.
    - Start with `ls -lt /workspace/output`. If needed, inspect only relevant files under `/workspace/output`; do not search the whole filesystem.
    - Prefer the most recent artifact matching the requested type and prior conversation. If exactly one plausible source exists, proceed. If multiple plausible sources exist, ask a short clarification.
@@ -56,7 +57,7 @@ bash "$GAI" <subcommand> --help
 
 Follow the current CLI help output; it is the source of truth. Request JSON output with `--json`, parse the output, verify files exist, and report exact paths.
 
-For transcription, the deliverable is the transcript file. Report success or failure and the `/workspace/output/...` path; do not paste the full transcript into chat unless the user explicitly asks to see the contents.
+For transcription, the deliverable is a Markdown transcript file by default. Report success or failure and the `/workspace/output/...` path; do not paste the full transcript into chat unless the user explicitly asks to see the contents.
 
 Never run bare `gai`, create wrappers or helper scripts, execute `dist/cli.js` or npm cache files directly, run npm package diagnostics, run `find /`, print secrets, or use `--dry-run` unless the user asks for a dry run. Run `bash "$GAI" doctor --json` only for unclear local readiness failures or when the user asks for diagnostics.
 

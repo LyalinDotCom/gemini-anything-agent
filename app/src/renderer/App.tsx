@@ -170,10 +170,10 @@ const SAMPLE_PROMPTS: SamplePrompt[] = [
   },
   {
     title: "Transcript",
-    detail: "Generate audio, then save text.",
+    detail: "Transcribe a real episode.",
     thumbnail: sampleTranscriptUrl,
     prompt:
-      "Create a short two-speaker audio conversation about building with managed agents, then transcribe it with timestamps and speaker labels. Save the transcript as a Markdown file and link to it."
+      "Go to https://www.gcppodcast.com/post/episode-331-2022-year-end-wrap-up/, find the podcast audio file, and transcribe it."
   },
   {
     title: "Solar HTML",

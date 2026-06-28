@@ -6,7 +6,7 @@ Do not use this skill for ordinary text answers, code generation, planning, rese
 
 Do not use this skill for converting, renaming, moving, packaging, trimming, resizing, inspecting, or otherwise transforming an existing file, except audio transcription. Existing artifact work belongs to native managed-agent tools unless the requested operation is transcription, captions, timestamps, or speaker labeling from audio.
 
-Before using this skill, classify the action. If the user refers to an existing artifact with words like "this", "that", "the file", "the podcast", "the audio", "the image", "the video", or "the previous artifact", inspect `/workspace/output` first and resolve the source artifact. Only continue with this skill if the resolved action is new media generation or audio transcription.
+Before using this skill, classify the action. If the user refers to an existing artifact with words like "this", "that", "the file", "the podcast", "the audio", "the image", "the video", or "the previous artifact", inspect `/workspace/output` first and resolve the source artifact. If the user gives a URL for transcription, treat the URL as the source to resolve; it may be a direct audio URL or a web page containing the episode audio. Only continue with this skill if the resolved action is new media generation or audio transcription.
 
 ## Use The CLI
 
@@ -41,14 +41,21 @@ For clear simple video requests, proceed with the lite/default route shown by `v
 
 For podcast or long narration requests, write the script to `/workspace/output/<name>.txt`, inspect `bash "$GAI" tts --help`, then use the CLI's script-file option if available while respecting whether the prompt argument is required.
 
-For audio transcription requests, inspect `/workspace/output`, resolve the source audio file, inspect `bash "$GAI" transcribe --help`, then run `gai transcribe` with `--out /workspace/output/<descriptive-transcript-name>.<ext>` and `--json`. Prefer Markdown unless the user asks for plain text, JSON, or `.srt` captions. Parse the JSON for the output path, verify the file exists, and do not paste the transcript contents into chat. Final response should only say whether transcription succeeded and list the transcript path for download or preview.
+For audio transcription requests, resolve the source first:
+
+- If the user gives a sandbox path, use that file.
+- If the user gives a direct audio URL, download it to `/workspace/output/<descriptive-source-name>.<ext>`, verify it exists and has nonzero size, then transcribe the downloaded file.
+- If the user gives a web page URL, inspect the page with native URL/web tools and resolve the episode audio link. Look for `<audio>` sources, `og:audio`, podcast/RSS feed links, enclosure URLs, or direct `.mp3`, `.m4a`, `.wav`, `.aac`, `.ogg`, or `.flac` links. Download the resolved audio file to `/workspace/output` before transcription. If multiple plausible audio sources exist, ask a short clarification.
+- If the user refers to "this podcast", "the audio", or similar, inspect `/workspace/output` and use the newest plausible audio file when unambiguous.
+
+After resolving the local audio file, inspect `bash "$GAI" transcribe --help`, then run `gai transcribe` with `--format markdown`, `--out /workspace/output/<descriptive-transcript-name>.md`, and `--json` unless the user asks for another format. Parse the JSON for the output path, verify the transcript file exists, and do not paste the transcript contents into chat. Final response should only say whether transcription succeeded and list the transcript path for download or preview.
 
 ## Guardrails
 
 Never run bare `gai ...`.
 Never create your own wrapper, install script, Python helper, or alternate executable path.
 Never execute `dist/cli.js`, `cli.js`, or files inside the npm cache directly.
-Never run `npm install`, `npm info`, `npm view`, `curl`, `printenv`, `find /`, package-file inspection, or Node one-off diagnostics yourself.
+Never run `npm install`, `npm info`, `npm view`, `printenv`, `find /`, package-file inspection, or Node one-off diagnostics yourself. Do not use `curl` for diagnostics. For an explicit user-provided URL that must become an input artifact, you may use native URL/web tools or a direct download command to fetch that page/audio into `/workspace/output`.
 Never use `--dry-run` unless the user explicitly asks for a dry run.
 Do not inline or print `GEMINI_API_KEY`; rely on the existing environment.
 

@@ -6,9 +6,19 @@ import { promptForInput } from "./interactionInput";
 
 const MEDIA_PATH_PATTERN =
   /(?:\/workspace\/|workspace\/|\/tmp\/|outputs\/)[^\s`"'()[\]{}<>]+\.(?:png|jpe?g|webp|gif|avif|svg|mp4|webm|mov|m4v|wav|mp3|m4a|aac|ogg|flac)(?:[?#][^\s`"'()[\]{}<>]+)?/gi;
+const MANAGED_OUTPUT_PATTERN = /(?:^|\/)outputs\/managed-agent\/[^/]+\/(.+)$/i;
 
 const cleanMediaPath = (value: string): string =>
   value.replace(/[),.;:!?]+$/g, "").replace(/[?#].*$/, "");
+
+const canonicalMediaPath = (value: string): string => {
+  const cleaned = cleanMediaPath(value).replace(/\\/g, "/");
+  const savedOutputMatch = cleaned.match(MANAGED_OUTPUT_PATTERN);
+  if (savedOutputMatch?.[1]) {
+    return `/workspace/output/${savedOutputMatch[1]}`;
+  }
+  return cleaned;
+};
 
 const TRANSCRIPT_REQUEST_PATTERN = /\b(transcrib(?:e|ed|ing)?|transcript|captions?|subtitles?|srt)\b/i;
 const MEDIA_PRODUCING_REQUEST_PATTERN =
@@ -18,7 +28,7 @@ export const extractMediaPaths = (text: string | undefined): string[] => {
   if (!text) {
     return [];
   }
-  return [...new Set([...text.matchAll(MEDIA_PATH_PATTERN)].map((match) => cleanMediaPath(match[0])))];
+  return [...new Set([...text.matchAll(MEDIA_PATH_PATTERN)].map((match) => canonicalMediaPath(match[0])))];
 };
 
 export const shouldAutoResolveMedia = (session: Session): boolean => {
@@ -29,11 +39,11 @@ export const shouldAutoResolveMedia = (session: Session): boolean => {
 };
 
 export const mediaPathMatches = (item: ResolvedEnvironmentMedia, requestedPath: string): boolean => {
-  const requested = cleanMediaPath(requestedPath).replace(/^[/\\]+/, "").replace(/\\/g, "/");
+  const requested = canonicalMediaPath(requestedPath).replace(/^[/\\]+/, "");
   const requestedWithoutWorkspace = requested.replace(/^workspace\//, "");
   const candidates = [item.requestedPath, item.path, item.savedPath]
     .filter((value): value is string => Boolean(value))
-    .map((value) => cleanMediaPath(value).replace(/^[/\\]+/, "").replace(/\\/g, "/"));
+    .map((value) => canonicalMediaPath(value).replace(/^[/\\]+/, ""));
   return candidates.some((candidate) => {
     const withoutWorkspace = candidate.replace(/^workspace\//, "");
     return (

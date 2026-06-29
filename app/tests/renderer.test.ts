@@ -497,6 +497,18 @@ describe("renderer media resolver", () => {
     ).toEqual(["/workspace/output/cat.png", "workspace/output/clip.mp4"]);
   });
 
+  it("canonicalizes autosaved managed-agent media paths back to workspace output paths", () => {
+    expect(
+      extractMediaPaths(
+        [
+          "/workspace/output/welcome.wav",
+          "Saved locally: /Users/me/project/outputs/managed-agent/env-123/welcome.wav",
+          "Also outputs/managed-agent/env-123/nested/cat.png."
+        ].join("\n")
+      )
+    ).toEqual(["/workspace/output/welcome.wav", "/workspace/output/nested/cat.png"]);
+  });
+
   it("does not auto-download media for transcript-only requests", () => {
     expect(shouldAutoResolveMedia(mediaSession("transcribe this audio file with timestamps"))).toBe(false);
     expect(shouldAutoResolveMedia(mediaSession("make a podcast and transcribe it"))).toBe(true);
@@ -514,6 +526,7 @@ describe("renderer media resolver", () => {
 
     expect(mediaPathMatches(item, "workspace/output/cat.png")).toBe(true);
     expect(mediaPathMatches(item, "/local/outputs/cat.png")).toBe(true);
+    expect(mediaPathMatches(item, "/Users/me/project/outputs/managed-agent/env-123/cat.png")).toBe(true);
     expect(mediaPathMatches(item, "/workspace/output/dog.png")).toBe(false);
   });
 });

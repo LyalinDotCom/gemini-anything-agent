@@ -430,6 +430,16 @@ const outputRelativePathForEntry = (value: string): string | undefined => {
   return relativeOutputPath;
 };
 
+const canonicalMediaRequestPath = (value: string): string | undefined => {
+  const cleaned = value.trim().replace(/[?#].*$/, "").replace(/\\/g, "/");
+  const savedOutputMatch = cleaned.match(/(?:^|\/)outputs\/managed-agent\/[^/]+\/(.+)$/i);
+  if (savedOutputMatch?.[1]) {
+    const outputPath = normalizedRelativeTarPath(savedOutputMatch[1]);
+    return outputPath && mediaTypeForPath(outputPath) ? `/workspace/output/${outputPath}` : undefined;
+  }
+  return cleaned && mediaTypeForPath(cleaned) ? cleaned : undefined;
+};
+
 const requestedPathMatchesTarEntry = (requestedPath: string, tarEntry: string): boolean => {
   const requested = requestedPath.replace(/^[/\\]+/, "").replace(/\\/g, "/");
   const requestedWithoutWorkspace = requested.replace(/^workspace\//, "");
@@ -1336,8 +1346,8 @@ handle<[string, string[]], ResolvedEnvironmentMedia[]>(
   async (environmentId, paths) => {
     const requestedPaths = unique(
       paths
-        .map((path) => path.trim())
-        .filter((path) => path.length > 0 && mediaTypeForPath(path))
+        .map(canonicalMediaRequestPath)
+        .filter((path): path is string => Boolean(path))
     );
     if (requestedPaths.length === 0) {
       return [];

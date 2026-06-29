@@ -35,9 +35,12 @@ import {
 } from "../src/renderer/lib/continuity";
 import {
   extractMediaPaths,
+  extractWorkspaceOutputPaths,
   mediaPathMatches,
+  mentionsWorkspaceOutput,
   shouldAutoResolveMedia
 } from "../src/renderer/lib/mediaResolver";
+import { outputFileMatchesPath, outputFilesCoverPaths } from "../src/renderer/lib/outputFiles";
 
 const KEY_FOR: Partial<Record<CapabilityKey, string>> = {
   brain: "system_instruction",
@@ -509,6 +512,21 @@ describe("renderer media resolver", () => {
     ).toEqual(["/workspace/output/welcome.wav", "/workspace/output/nested/cat.png"]);
   });
 
+  it("extracts any workspace output path for output-folder refreshes", () => {
+    const text = [
+      "Created Image: /workspace/output/cozy_cat_string.jpg",
+      "Created HTML: workspace/output/solar-system.html.",
+      "Saved locally: /Users/me/project/outputs/managed-agent/env-123/transcripts/episode.md"
+    ].join("\n");
+
+    expect(extractWorkspaceOutputPaths(text)).toEqual([
+      "/workspace/output/cozy_cat_string.jpg",
+      "workspace/output/solar-system.html",
+      "/workspace/output/transcripts/episode.md"
+    ]);
+    expect(mentionsWorkspaceOutput(text)).toBe(true);
+  });
+
   it("does not auto-download media for transcript-only requests", () => {
     expect(shouldAutoResolveMedia(mediaSession("transcribe this audio file with timestamps"))).toBe(false);
     expect(shouldAutoResolveMedia(mediaSession("make a podcast and transcribe it"))).toBe(true);
@@ -528,6 +546,26 @@ describe("renderer media resolver", () => {
     expect(mediaPathMatches(item, "/local/outputs/cat.png")).toBe(true);
     expect(mediaPathMatches(item, "/Users/me/project/outputs/managed-agent/env-123/cat.png")).toBe(true);
     expect(mediaPathMatches(item, "/workspace/output/dog.png")).toBe(false);
+  });
+
+  it("checks whether cached output files cover claimed workspace paths", () => {
+    const files = [
+      {
+        sandboxPath: "/workspace/output/cozy_cat_string.jpg",
+        relativePath: "cozy_cat_string.jpg",
+        name: "cozy_cat_string.jpg",
+        path: "/cache/environment/workspace/output/cozy_cat_string.jpg",
+        bytes: 123,
+        modifiedAt: 1,
+        fileType: "image" as const,
+        mediaType: "image" as const,
+        url: "gemini-media://env/workspace/output/cozy_cat_string.jpg"
+      }
+    ];
+
+    expect(outputFileMatchesPath(files[0], "workspace/output/cozy_cat_string.jpg")).toBe(true);
+    expect(outputFilesCoverPaths(files, ["/workspace/output/cozy_cat_string.jpg"])).toBe(true);
+    expect(outputFilesCoverPaths(files, ["/workspace/output/missing.jpg"])).toBe(false);
   });
 });
 

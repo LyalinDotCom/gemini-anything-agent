@@ -31,6 +31,30 @@ export const outputFileLabel = (file: EnvironmentOutputFile): string => {
   }
 };
 
+const cleanOutputPath = (value: string): string =>
+  value.replace(/[),.;:!?]+$/g, "").replace(/[?#].*$/, "").replace(/^[/\\]+/, "").replace(/\\/g, "/");
+
+export const outputFileMatchesPath = (file: EnvironmentOutputFile, requestedPath: string): boolean => {
+  const requested = cleanOutputPath(requestedPath);
+  const requestedWithoutWorkspace = requested.replace(/^workspace\//, "");
+  const candidates = [file.sandboxPath, file.relativePath, file.path]
+    .filter((value): value is string => Boolean(value))
+    .map(cleanOutputPath);
+
+  return candidates.some((candidate) => {
+    const withoutWorkspace = candidate.replace(/^workspace\//, "");
+    return (
+      candidate === requested ||
+      withoutWorkspace === requestedWithoutWorkspace ||
+      candidate.endsWith(`/${requested}`) ||
+      withoutWorkspace.endsWith(`/${requestedWithoutWorkspace}`)
+    );
+  });
+};
+
+export const outputFilesCoverPaths = (files: EnvironmentOutputFile[] | undefined, paths: string[]): boolean =>
+  Boolean(files?.length) && paths.every((path) => files!.some((file) => outputFileMatchesPath(file, path)));
+
 export const outputMediaItem = (file: EnvironmentOutputFile): ResolvedEnvironmentMedia | undefined =>
   file.mediaType && file.url
     ? {

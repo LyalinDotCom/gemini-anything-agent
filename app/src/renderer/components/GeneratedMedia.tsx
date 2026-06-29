@@ -83,7 +83,7 @@ export const SessionMedia = ({
               <img
                 src={item.url}
                 alt={item.requestedPath}
-                loading="lazy"
+                loading="eager"
                 onError={() => markFailed(item.url)}
                 onClick={() => onOpen(item)}
               />

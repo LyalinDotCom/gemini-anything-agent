@@ -7,11 +7,13 @@ import { promptForInput } from "./interactionInput";
 const MEDIA_PATH_PATTERN =
   /(?:\/workspace\/|workspace\/|\/tmp\/|outputs\/)[^\s`"'()[\]{}<>]+\.(?:png|jpe?g|webp|gif|avif|svg|mp4|webm|mov|m4v|wav|mp3|m4a|aac|ogg|flac)(?:[?#][^\s`"'()[\]{}<>]+)?/gi;
 const MANAGED_OUTPUT_PATTERN = /(?:^|\/)outputs\/managed-agent\/[^/]+\/(.+)$/i;
+const WORKSPACE_OUTPUT_PATH_PATTERN =
+  /(?:\/?workspace\/output\/|(?:^|\/)outputs\/managed-agent\/)[^\s`"'()[\]{}<>]+(?:[?#][^\s`"'()[\]{}<>]+)?/gi;
 
 const cleanMediaPath = (value: string): string =>
   value.replace(/[),.;:!?]+$/g, "").replace(/[?#].*$/, "");
 
-const canonicalMediaPath = (value: string): string => {
+const canonicalOutputPath = (value: string): string => {
   const cleaned = cleanMediaPath(value).replace(/\\/g, "/");
   const savedOutputMatch = cleaned.match(MANAGED_OUTPUT_PATTERN);
   if (savedOutputMatch?.[1]) {
@@ -28,7 +30,14 @@ export const extractMediaPaths = (text: string | undefined): string[] => {
   if (!text) {
     return [];
   }
-  return [...new Set([...text.matchAll(MEDIA_PATH_PATTERN)].map((match) => canonicalMediaPath(match[0])))];
+  return [...new Set([...text.matchAll(MEDIA_PATH_PATTERN)].map((match) => canonicalOutputPath(match[0])))];
+};
+
+export const extractWorkspaceOutputPaths = (text: string | undefined): string[] => {
+  if (!text) {
+    return [];
+  }
+  return [...new Set([...text.matchAll(WORKSPACE_OUTPUT_PATH_PATTERN)].map((match) => canonicalOutputPath(match[0])))];
 };
 
 export const shouldAutoResolveMedia = (session: Session): boolean => {
@@ -38,12 +47,15 @@ export const shouldAutoResolveMedia = (session: Session): boolean => {
   return !transcriptionOnly;
 };
 
+export const mentionsWorkspaceOutput = (text: string | undefined): boolean =>
+  extractWorkspaceOutputPaths(text).length > 0;
+
 export const mediaPathMatches = (item: ResolvedEnvironmentMedia, requestedPath: string): boolean => {
-  const requested = canonicalMediaPath(requestedPath).replace(/^[/\\]+/, "");
+  const requested = canonicalOutputPath(requestedPath).replace(/^[/\\]+/, "");
   const requestedWithoutWorkspace = requested.replace(/^workspace\//, "");
   const candidates = [item.requestedPath, item.path, item.savedPath]
     .filter((value): value is string => Boolean(value))
-    .map((value) => canonicalMediaPath(value).replace(/^[/\\]+/, ""));
+    .map((value) => canonicalOutputPath(value).replace(/^[/\\]+/, ""));
   return candidates.some((candidate) => {
     const withoutWorkspace = candidate.replace(/^workspace\//, "");
     return (

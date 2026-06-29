@@ -769,10 +769,7 @@ const listEnvironmentOutputFilesFromSnapshot = async (
       );
 
       if (selectedEntries.length === 0) {
-        if (force) {
-          replaceExtractRootFromNext();
-          return [];
-        }
+        rmSync(nextExtractRoot, { recursive: true, force: true });
         return cachedEnvironmentOutputFiles(environmentId, extractRoot);
       }
 

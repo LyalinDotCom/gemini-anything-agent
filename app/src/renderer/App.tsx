@@ -53,8 +53,10 @@ import {
 import {
   cachedMediaStateForSession,
   extractMediaPaths,
+  extractWorkspaceOutputPaths,
   mediaItemsCoverPaths,
   mergeResolvedMedia,
+  mentionsWorkspaceOutput,
   outputMediaItemsForPaths,
   shouldAutoResolveMedia,
   textFileNameForLabel
@@ -74,7 +76,7 @@ import {
   timelineItemsForSession
 } from "./lib/sessionState";
 import { bridgeUnavailable, FALLBACK_RUNTIME } from "./lib/runtimeConfig";
-import { outputMediaItem } from "./lib/outputFiles";
+import { outputFilesCoverPaths, outputMediaItem } from "./lib/outputFiles";
 import { Composer } from "./components/Composer";
 import { Transcript } from "./components/Transcript";
 import { SettingsModal } from "./components/Overlays";
@@ -106,6 +108,9 @@ const snapshotAgentForRun = async (
   }
 };
 
+const MEDIA_RETRY_DELAYS_MS = [1200, 2500, 5000, 9000];
+const OUTPUT_RETRY_DELAYS_MS = [1200, 2500, 5000, 9000];
+
 export const App = () => {
   const [runtime, setRuntime] = useState<RuntimeConfig | null>(null);
   const [compose, setCompose] = useState<ComposeState>(initialCompose);
@@ -126,6 +131,11 @@ export const App = () => {
   const activeResumeIds = useRef<Set<string>>(new Set());
   const pendingRunInputs = useRef<Map<string, PendingComposeInput>>(new Map());
   const requestedMediaKeys = useRef<Set<string>>(new Set());
+  const completedOutputHydrationKeys = useRef<Set<string>>(new Set());
+  const mediaRetryCounts = useRef<Record<string, number>>({});
+  const mediaRetryTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const outputRetryCounts = useRef<Record<string, number>>({});
+  const outputRetryTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const outputRefreshSignatures = useRef<Record<string, string>>({});
   const autoOpenedOutputEnvironments = useRef<Set<string>>(new Set());
   const ensureAgentPromise = useRef<Promise<EnsureAnythingAgentResult | undefined> | null>(null);
@@ -319,6 +329,8 @@ export const App = () => {
     pendingRunInputs.current.clear();
     activeResumeIds.current.clear();
     requestedMediaKeys.current.clear();
+    completedOutputHydrationKeys.current.clear();
+    clearAllRetryTimers();
     outputRefreshSignatures.current = {};
     autoOpenedOutputEnvironments.current.clear();
   }, [keyMissing]);
@@ -345,6 +357,32 @@ export const App = () => {
   }, [chatSessions, latestRunId, outputFilesByEnvironment]);
 
   useEffect(() => {
+    for (const session of agentSessions) {
+      const environmentId = sessionEnvironmentId(session);
+      if (!environmentId || session.streaming || !session.completedAt) {
+        continue;
+      }
+      const outputText = mediaSearchTextForSession(session);
+      const expectedOutputPaths = extractWorkspaceOutputPaths(outputText);
+      const mediaPaths = extractMediaPaths(outputText);
+      if (expectedOutputPaths.length === 0 && mediaPaths.length === 0) {
+        continue;
+      }
+
+      const hydrationKey = `${session.localId}:${session.completedAt}`;
+      if (completedOutputHydrationKeys.current.has(hydrationKey)) {
+        continue;
+      }
+
+      completedOutputHydrationKeys.current.add(hydrationKey);
+      void loadOutputFiles(environmentId, true, { retryUntilPaths: expectedOutputPaths });
+      if (mediaPaths.length > 0 && shouldAutoResolveMedia(session)) {
+        void resolveMediaForSession(session, true);
+      }
+    }
+  }, [agentSessions]);
+
+  useEffect(() => {
     if (!latestEnvironmentId || selectedConversationRunning || !window.managedAgents?.listEnvironmentOutputFiles) {
       return;
     }
@@ -354,17 +392,21 @@ export const App = () => {
       return;
     }
     const previousSignature = outputRefreshSignatures.current[latestEnvironmentId];
+    const completedLatestRun = Boolean(latestRunSession && latestRunSession.completedAt && !latestRunSession.streaming);
     const force = Boolean(
-      latestRunSession &&
-        previousSignature &&
-        previousSignature !== outputRefreshSignature
+      completedLatestRun &&
+        (!previousSignature || previousSignature !== outputRefreshSignature || !outputFilesByEnvironment[latestEnvironmentId]?.checked)
     );
     const state = outputFilesByEnvironment[latestEnvironmentId];
-    if (!force && (state?.checked || state?.loading)) {
+    if (state?.loading || (!force && state?.checked)) {
       return;
     }
     outputRefreshSignatures.current[latestEnvironmentId] = outputRefreshSignature;
-    void loadOutputFiles(latestEnvironmentId, force);
+    void loadOutputFiles(
+      latestEnvironmentId,
+      force,
+      latestRunSession ? { retryUntilPaths: extractWorkspaceOutputPaths(mediaSearchTextForSession(latestRunSession)) } : undefined
+    );
   }, [
     latestEnvironmentId,
     latestRunSession,
@@ -422,6 +464,85 @@ export const App = () => {
     });
   };
 
+  function clearMediaRetry(requestKey: string) {
+    const timer = mediaRetryTimers.current[requestKey];
+    if (timer) {
+      clearTimeout(timer);
+      delete mediaRetryTimers.current[requestKey];
+    }
+    delete mediaRetryCounts.current[requestKey];
+  }
+
+  function clearOutputRetry(environmentId: string) {
+    const timer = outputRetryTimers.current[environmentId];
+    if (timer) {
+      clearTimeout(timer);
+      delete outputRetryTimers.current[environmentId];
+    }
+    delete outputRetryCounts.current[environmentId];
+  }
+
+  function clearAllRetryTimers() {
+    for (const timer of Object.values(mediaRetryTimers.current)) {
+      clearTimeout(timer);
+    }
+    for (const timer of Object.values(outputRetryTimers.current)) {
+      clearTimeout(timer);
+    }
+    mediaRetryTimers.current = {};
+    mediaRetryCounts.current = {};
+    outputRetryTimers.current = {};
+    outputRetryCounts.current = {};
+  }
+
+  function shouldRetrySessionOutputHydration(session: Session): boolean {
+    if (session.streaming || !session.completedAt) {
+      return false;
+    }
+    const outputText = mediaSearchTextForSession(session);
+    return mentionsWorkspaceOutput(outputText) || extractMediaPaths(outputText).length > 0;
+  }
+
+  function scheduleMediaRetry(session: Session, requestKey: string): boolean {
+    if (!shouldRetrySessionOutputHydration(session)) {
+      return false;
+    }
+    if (mediaRetryTimers.current[requestKey]) {
+      return true;
+    }
+    const attempt = mediaRetryCounts.current[requestKey] ?? 0;
+    const delay = MEDIA_RETRY_DELAYS_MS[attempt];
+    if (!delay) {
+      return false;
+    }
+
+    mediaRetryCounts.current[requestKey] = attempt + 1;
+    mediaRetryTimers.current[requestKey] = setTimeout(() => {
+      delete mediaRetryTimers.current[requestKey];
+      requestedMediaKeys.current.delete(requestKey);
+      void resolveMediaForSession(session, true);
+    }, delay);
+    return true;
+  }
+
+  function scheduleOutputRetry(environmentId: string, expectedPaths: string[]): boolean {
+    if (outputRetryTimers.current[environmentId]) {
+      return true;
+    }
+    const attempt = outputRetryCounts.current[environmentId] ?? 0;
+    const delay = OUTPUT_RETRY_DELAYS_MS[attempt];
+    if (!delay) {
+      return false;
+    }
+
+    outputRetryCounts.current[environmentId] = attempt + 1;
+    outputRetryTimers.current[environmentId] = setTimeout(() => {
+      delete outputRetryTimers.current[environmentId];
+      void loadOutputFiles(environmentId, true, { retryUntilPaths: expectedPaths });
+    }, delay);
+    return true;
+  }
+
   const setOptimisticSentImagesForKeys = (keys: string[], images: ImagePartDraft[]) => {
     if (images.length === 0) {
       return;
@@ -477,6 +598,20 @@ export const App = () => {
         );
       })
     );
+    completedOutputHydrationKeys.current = new Set(
+      [...completedOutputHydrationKeys.current].filter((key) => !deletedIds.has(key.split(":", 1)[0]))
+    );
+    for (const key of Object.keys(mediaRetryTimers.current)) {
+      const [localId] = key.split(":", 1);
+      if (deletedIds.has(localId)) {
+        clearMediaRetry(key);
+      }
+    }
+    for (const environmentId of deletedEnvironmentIds) {
+      if (!remainingEnvironmentIds.has(environmentId)) {
+        clearOutputRetry(environmentId);
+      }
+    }
     outputRefreshSignatures.current = Object.fromEntries(
       Object.entries(outputRefreshSignatures.current).filter(
         ([environmentId]) => !deletedEnvironmentIds.has(environmentId) || remainingEnvironmentIds.has(environmentId)
@@ -1064,6 +1199,9 @@ export const App = () => {
   }
 
   function mediaStateForSession(session: Session): SessionMediaState | undefined {
+    if (!shouldAutoResolveMedia(session)) {
+      return undefined;
+    }
     const runtimeState = mediaBySession[session.localId];
     const persistedState = cachedMediaStateForSession(session);
     if (session.streaming) {
@@ -1094,9 +1232,13 @@ export const App = () => {
     return runtimeState ?? persistedState;
   }
 
-  async function loadOutputFiles(environmentId: string, force = false) {
+  async function loadOutputFiles(
+    environmentId: string,
+    force = false,
+    options: { retryUntilPaths?: string[] } = {}
+  ): Promise<EnvironmentOutputFile[] | undefined> {
     if (!window.managedAgents?.listEnvironmentOutputFiles) {
-      return;
+      return undefined;
     }
     setOutputFilesByEnvironment((current) => ({
       ...current,
@@ -1109,24 +1251,48 @@ export const App = () => {
     }));
 
     const result = await window.managedAgents.listEnvironmentOutputFiles(environmentId, force);
+    let nextItems: EnvironmentOutputFile[] | undefined;
+    let retryScheduled = false;
     setOutputFilesByEnvironment((current) => ({
       ...current,
       [environmentId]: result.ok
-        ? {
-            loading: false,
-            items: result.value,
-            checked: true
-          }
+        ? (() => {
+            const previousItems = current[environmentId]?.items ?? [];
+            const expectedPaths = options.retryUntilPaths ?? [];
+            nextItems = result.value.length > 0 ? result.value : previousItems;
+            const missingExpectedPaths =
+              expectedPaths.length > 0 && !outputFilesCoverPaths(nextItems, expectedPaths);
+            retryScheduled = missingExpectedPaths
+              ? scheduleOutputRetry(environmentId, expectedPaths)
+              : false;
+            if (!missingExpectedPaths) {
+              clearOutputRetry(environmentId);
+            }
+            return {
+              loading: retryScheduled,
+              items: nextItems,
+              checked: !retryScheduled,
+              error: undefined
+            };
+          })()
         : (() => {
             const previousItems = current[environmentId]?.items ?? [];
+            const expectedPaths = options.retryUntilPaths ?? [];
+            const retryAfterError =
+              expectedPaths.length > 0 && !outputFilesCoverPaths(previousItems, expectedPaths);
+            retryScheduled = retryAfterError
+              ? scheduleOutputRetry(environmentId, expectedPaths)
+              : false;
+            nextItems = previousItems;
             return {
-              loading: false,
+              loading: retryScheduled,
               items: previousItems,
-              checked: true,
-              error: previousItems.length ? undefined : result.error.message
+              checked: !retryScheduled,
+              error: retryScheduled || previousItems.length ? undefined : result.error.message
             };
           })()
     }));
+    return nextItems;
   }
 
   async function saveOutputFile(file: EnvironmentOutputFile) {
@@ -1182,6 +1348,7 @@ export const App = () => {
     const outputItems = outputMediaItemsForPaths(outputFilesByEnvironment[environmentId]?.items, paths);
     if (!force && outputItems.length > 0) {
       requestedMediaKeys.current.add(requestKey);
+      clearMediaRetry(requestKey);
       const items = mergeResolvedMedia(cachedItems, outputItems);
       setMediaBySession((current) => ({
         ...current,
@@ -1207,6 +1374,7 @@ export const App = () => {
     }
     if (!force && mediaItemsCoverPaths(runtimeItems, paths)) {
       requestedMediaKeys.current.add(requestKey);
+      clearMediaRetry(requestKey);
       setMediaBySession((current) => ({
         ...current,
         [session.localId]: {
@@ -1238,7 +1406,11 @@ export const App = () => {
     }));
 
     const result = await window.managedAgents.resolveEnvironmentMedia(environmentId, paths);
+    const retryScheduled = result.ok
+      ? result.value.length === 0 && scheduleMediaRetry(session, requestKey)
+      : scheduleMediaRetry(session, requestKey);
     if (result.ok && result.value.length > 0) {
+      clearMediaRetry(requestKey);
       setSessions((current) =>
         current.map((currentSession) =>
           currentSession.localId === session.localId
@@ -1256,17 +1428,21 @@ export const App = () => {
         ? (() => {
             const items = mergeResolvedMedia(current[session.localId]?.items ?? session.resolvedMedia, result.value);
             return {
-              loading: false,
+              loading: retryScheduled && items.length === 0,
               items,
-              progress: 100,
-              error: result.value.length ? undefined : "No generated media file was found in the downloaded workspace."
+              progress: retryScheduled ? 65 : 100,
+              stage: retryScheduled ? "Waiting for generated media to appear in the workspace..." : undefined,
+              error: result.value.length || retryScheduled
+                ? undefined
+                : "No generated media file was found in the downloaded workspace."
             };
           })()
         : {
-            loading: false,
+            loading: retryScheduled && !(current[session.localId]?.items ?? session.resolvedMedia ?? []).length,
             items: current[session.localId]?.items ?? session.resolvedMedia ?? [],
-            progress: (current[session.localId]?.items ?? session.resolvedMedia ?? []).length ? 100 : 0,
-            error: (current[session.localId]?.items ?? session.resolvedMedia ?? []).length
+            progress: retryScheduled ? 65 : (current[session.localId]?.items ?? session.resolvedMedia ?? []).length ? 100 : 0,
+            stage: retryScheduled ? "Waiting for generated media to appear in the workspace..." : undefined,
+            error: retryScheduled || (current[session.localId]?.items ?? session.resolvedMedia ?? []).length
               ? undefined
               : result.error.message
           }

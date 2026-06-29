@@ -76,10 +76,12 @@ const audioDurationHint = async (blob: Blob, src: string): Promise<number | unde
 export const BufferedAudio = ({ src, autoPlay = false, className }: BufferedAudioProps) => {
   const audioRef = useRef<HTMLAudioElement>(null);
   const autoPlayHandledRef = useRef(false);
-  const [objectUrl, setObjectUrl] = useState<string>();
+  const [audioUrl, setAudioUrl] = useState<string>();
+  const [directSource, setDirectSource] = useState(false);
   const [loading, setLoading] = useState(true);
   const [durationHint, setDurationHint] = useState<number>();
   const [duration, setDuration] = useState<number>();
+  const [metadataLoaded, setMetadataLoaded] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [paused, setPaused] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -88,10 +90,12 @@ export const BufferedAudio = ({ src, autoPlay = false, className }: BufferedAudi
     let canceled = false;
     let nextObjectUrl: string | undefined;
     const controller = new AbortController();
-    setObjectUrl(undefined);
+    setAudioUrl(undefined);
+    setDirectSource(false);
     setLoading(true);
     setDurationHint(undefined);
     setDuration(undefined);
+    setMetadataLoaded(false);
     setCurrentTime(0);
     setPaused(true);
     setLoadFailed(false);
@@ -114,7 +118,8 @@ export const BufferedAudio = ({ src, autoPlay = false, className }: BufferedAudi
         if (nextDurationHint) {
           setDuration(nextDurationHint);
         }
-        setObjectUrl(nextObjectUrl);
+        setAudioUrl(nextObjectUrl);
+        setDirectSource(false);
         setLoading(false);
       })
       .catch((error) => {
@@ -122,9 +127,9 @@ export const BufferedAudio = ({ src, autoPlay = false, className }: BufferedAudi
           return;
         }
         if (!canceled) {
-          setObjectUrl(undefined);
+          setAudioUrl(src);
+          setDirectSource(true);
           setLoading(false);
-          setLoadFailed(true);
         }
       });
 
@@ -143,16 +148,18 @@ export const BufferedAudio = ({ src, autoPlay = false, className }: BufferedAudi
     }
   }, [duration, durationHint]);
 
-  const ready = Boolean(objectUrl && !loading && duration && duration > 0 && !loadFailed);
+  const nativeFallback = Boolean(audioUrl && directSource && metadataLoaded && !duration && !loadFailed);
+  const ready = Boolean(audioUrl && !loading && duration && duration > 0 && !loadFailed);
 
   useEffect(() => {
-    if (ready && autoPlay && !autoPlayHandledRef.current) {
+    if ((ready || nativeFallback) && autoPlay && !autoPlayHandledRef.current) {
       autoPlayHandledRef.current = true;
       void audioRef.current?.play().catch(() => undefined);
     }
-  }, [autoPlay, ready]);
+  }, [autoPlay, nativeFallback, ready]);
 
   const syncDuration = () => {
+    setMetadataLoaded(true);
     const nextDuration = audioRef.current?.duration;
     if (Number.isFinite(nextDuration) && nextDuration && nextDuration > 0) {
       setDuration(nextDuration);
@@ -187,18 +194,21 @@ export const BufferedAudio = ({ src, autoPlay = false, className }: BufferedAudi
 
   return (
     <span className={`audio-buffer ${!loading ? "is-ready" : ""} ${className ?? ""}`}>
-      {(!ready || loading) && (
+      {(loading || (!ready && !nativeFallback)) && (
         <span className="audio-loading" role="status">
           {!loadFailed && <Loader2 size={14} className="spin" />}
           <span>{loadFailed ? "Audio could not be loaded." : loading ? "Loading audio..." : "Preparing audio..."}</span>
         </span>
       )}
-      {objectUrl && (
+      {audioUrl && (
         <audio
           ref={audioRef}
-          src={objectUrl}
+          src={audioUrl}
+          className={nativeFallback ? "audio-native" : undefined}
+          controls={nativeFallback}
           preload="auto"
           onLoadedMetadata={syncDuration}
+          onCanPlay={syncDuration}
           onDurationChange={syncDuration}
           onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime ?? 0)}
           onPlay={() => setPaused(false)}

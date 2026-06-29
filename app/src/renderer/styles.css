@@ -1396,6 +1396,15 @@ svg {
   pointer-events: none;
 }
 
+.audio-buffer audio.audio-native {
+  position: static;
+  width: 100%;
+  height: 54px;
+  overflow: visible;
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .audio-loading {
   display: inline-flex;
   align-items: center;

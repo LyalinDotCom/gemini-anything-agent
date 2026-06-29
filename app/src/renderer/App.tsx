@@ -1176,7 +1176,9 @@ export const App = () => {
       return;
     }
     const requestKey = `${session.localId}:${environmentId}:${paths.join("|")}`;
-    const cachedItems = session.resolvedMedia ?? mediaBySession[session.localId]?.items;
+    const runtimeItems = mediaBySession[session.localId]?.items;
+    const persistedItems = session.resolvedMedia;
+    const cachedItems = runtimeItems ?? persistedItems;
     const outputItems = outputMediaItemsForPaths(outputFilesByEnvironment[environmentId]?.items, paths);
     if (!force && outputItems.length > 0) {
       requestedMediaKeys.current.add(requestKey);
@@ -1203,13 +1205,13 @@ export const App = () => {
       }
       return;
     }
-    if (!force && mediaItemsCoverPaths(cachedItems, paths)) {
+    if (!force && mediaItemsCoverPaths(runtimeItems, paths)) {
       requestedMediaKeys.current.add(requestKey);
       setMediaBySession((current) => ({
         ...current,
         [session.localId]: {
           loading: false,
-          items: cachedItems ?? [],
+          items: runtimeItems ?? [],
           progress: 100
         }
       }));

@@ -542,12 +542,13 @@ const copyAutoSavedMediaToCache = (
   }
 };
 
-const mediaUrl = (environmentId: string, relativeEntry: string): string => {
+const mediaUrl = (environmentId: string, relativeEntry: string, version?: string): string => {
   const encodedPath = relativeEntry
     .split("/")
     .map((part) => encodeURIComponent(part))
     .join("/");
-  return `${MEDIA_PROTOCOL}://${safeCacheSegment(environmentId)}/${encodedPath}`;
+  const cacheBust = version ? `?v=${encodeURIComponent(version)}` : "";
+  return `${MEDIA_PROTOCOL}://${safeCacheSegment(environmentId)}/${encodedPath}${cacheBust}`;
 };
 
 const cachedMediaEntries = (root: string, current = root): string[] => {
@@ -596,6 +597,7 @@ const cachedEnvironmentOutputFiles = (
 
       const stats = statSync(fullPath);
       const mediaType = mediaTypeForPath(fullPath);
+      const version = `${Math.round(stats.mtimeMs)}-${stats.size}`;
       const file: EnvironmentOutputFile = {
         sandboxPath: `/workspace/output/${outputRelativePath}`,
         relativePath: outputRelativePath,
@@ -605,7 +607,7 @@ const cachedEnvironmentOutputFiles = (
         modifiedAt: stats.mtimeMs,
         fileType: outputFileTypeForPath(fullPath),
         mediaType,
-        url: mediaType ? mediaUrl(environmentId, relativeEntry) : undefined
+        url: mediaType ? mediaUrl(environmentId, relativeEntry, version) : undefined
       };
       return [file];
     })
@@ -632,13 +634,15 @@ const resolveCachedEnvironmentMedia = (
       return [];
     }
     const mediaType = mediaTypeForPath(path);
+    const stats = statSync(path);
+    const version = `${Math.round(stats.mtimeMs)}-${stats.size}`;
     return mediaType
       ? [
           {
             requestedPath,
             path,
             savedPath: autoSaveMedia(environmentId, path),
-            url: mediaUrl(environmentId, relativeEntry),
+            url: mediaUrl(environmentId, relativeEntry, version),
             mediaType
           }
         ]
@@ -1405,6 +1409,8 @@ handle<[string, string[]], ResolvedEnvironmentMedia[]>(
             return [];
           }
           const mediaType = mediaTypeForPath(path);
+          const stats = statSync(path);
+          const version = `${Math.round(stats.mtimeMs)}-${stats.size}`;
           const savedPath = mediaType ? autoSaveMedia(environmentId, path) : undefined;
           return mediaType
             ? [
@@ -1412,7 +1418,7 @@ handle<[string, string[]], ResolvedEnvironmentMedia[]>(
                   requestedPath,
                   path,
                   savedPath,
-                  url: mediaUrl(environmentId, relativeEntry),
+                  url: mediaUrl(environmentId, relativeEntry, version),
                   mediaType
                 }
               ]

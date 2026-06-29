@@ -21,6 +21,7 @@ outputs/
 workspace-output/
 tmp/
 **/tmp/
+notes/agent-bug-reports/
 *.png
 *.jpg
 *.jpeg

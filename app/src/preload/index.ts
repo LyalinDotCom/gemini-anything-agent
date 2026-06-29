@@ -12,6 +12,7 @@ import type {
   SaveResolvedMediaResult,
   SaveTextResult,
   SetApiKeyResult,
+  SetSpecializedToolsResult,
   SnapshotDownloadResult
 } from "../shared/electron-api";
 import { ipcChannels } from "../shared/electron-api";
@@ -30,6 +31,8 @@ const invoke = <T>(channel: string, ...args: unknown[]): Promise<IpcResult<T>> =
 const bridge: ManagedAgentsBridge = {
   getRuntimeConfig: () => invoke<RuntimeConfig>(ipcChannels.runtimeConfig),
   setApiKey: (key: string) => invoke<SetApiKeyResult>(ipcChannels.setApiKey, key),
+  setSpecializedToolsEnabled: (enabled: boolean) =>
+    invoke<SetSpecializedToolsResult>(ipcChannels.setSpecializedToolsEnabled, enabled),
   ensureAnythingAgent: (agentId?: string) =>
     invoke<EnsureAnythingAgentResult>(ipcChannels.ensureAnythingAgent, agentId),
   createAgent: (agent: AgentDefinition) => invoke<ManagedAgent>(ipcChannels.createAgent, agent),

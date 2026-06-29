@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Building a Managed Agent That Can Generate an Image</title>
-  <meta name="description" content="A DevRel walkthrough of Gemini Anything Agent: an Electron app, Gemini Managed Agent, and gai CLI working together to generate an image.">
+  <title>Building a Managed Agent That Can Generate Media</title>
+  <meta name="description" content="A DevRel walkthrough of Gemini Anything Agent: an Electron app, Gemini Managed Agent, and gai CLI working together to generate media.">
   <style>
     :root {
       color-scheme: light;
@@ -627,9 +627,9 @@
     <main>
       <section class="hero" id="top">
         <div>
-          <div class="eyebrow">DevRel walkthrough · create image scenario</div>
-          <h1>Building a managed agent that can generate an image.</h1>
-          <p class="lede">A practical sample showing how an Electron chat app, a Gemini Managed Agent, and a small GenAI SDK wrapper work together to turn one natural-language request into a generated file.</p>
+          <div class="eyebrow">DevRel walkthrough · media generation scenario</div>
+          <h1>Building a managed agent that can generate media.</h1>
+          <p class="lede">A practical sample showing how an Electron chat app, a Gemini Managed Agent, and a small GenAI SDK wrapper work together to turn natural-language requests into generated files.</p>
           <div class="hero-actions">
             <a class="button primary" href="#managed-agent">Create the agent</a>
             <a class="button" href="#sdk-wrapper">See the SDK wrapper</a>
@@ -707,7 +707,7 @@
                   </svg>
                 </div>
                 <h3><code>gai</code> CLI</h3>
-                <p>Wraps the GenAI SDK for image, video, TTS, and transcription through one simple command surface.</p>
+                <p>Wraps the GenAI SDK for image, video, TTS, music, and transcription through one simple command surface.</p>
               </div>
             </div>
 
@@ -732,7 +732,7 @@
 
           <section id="sdk-wrapper">
             <h2>Wrapping the GenAI SDK</h2>
-            <p>The CLI wrapper is intentionally small. It selects a model, calls the GenAI SDK, decodes the returned image data, and writes the file. The published package is <a href="https://www.npmjs.com/package/@lyalindotcom/gai" target="_blank" rel="noreferrer"><code>@lyalindotcom/gai</code> on npm</a>.</p>
+            <p>The CLI wrapper is intentionally small. It selects a model, calls the GenAI SDK, decodes returned media data, and writes the file. The published package is <a href="https://www.npmjs.com/package/@lyalindotcom/gai" target="_blank" rel="noreferrer"><code>@lyalindotcom/gai</code> on npm</a>.</p>
 
             <div class="code-card">
               <div class="code-head"><span>image-wrapper.ts</span><button class="copy" type="button">Copy</button></div>
@@ -774,6 +774,15 @@ set -euo pipefail
 if [ -f /.env ]; then set -a; . /.env; set +a; fi
 export NODE_USE_ENV_PROXY="${NODE_USE_ENV_PROXY:-1}"
 exec npx -y "${GEMINI_ANYTHING_NPM_PACKAGE:-@lyalindotcom/gai}@${GEMINI_ANYTHING_NPM_VERSION:-latest}" "$@"</code></pre>
+            </div>
+
+            <p>The same command surface owns the specialized audio routes. TTS creates spoken audio, music creates musical tracks through Lyria, and transcription starts from an existing audio file and writes a transcript artifact.</p>
+
+            <div class="code-card">
+              <div class="code-head"><span>audio-routes.sh</span><button class="copy" type="button">Copy</button></div>
+              <pre><code data-lang="bash">bash /.agents/bin/gai tts "Say hello in a warm voice." --out /workspace/output/hello.wav --json
+bash /.agents/bin/gai music "A short upbeat instrumental theme song." --out /workspace/output/theme.mp3 --json
+bash /.agents/bin/gai transcribe /workspace/output/podcast.mp3 --out /workspace/output/podcast-transcript.md --json</code></pre>
             </div>
           </section>
 
@@ -819,7 +828,7 @@ exec npx -y "\${GEMINI_ANYTHING_NPM_PACKAGE:-${GAI_PACKAGE}}@\${GEMINI_ANYTHING_
 const systemInstruction = `
 You are Gemini Anything Agent.
 Use native managed-agent tools for text, code, research, analysis, and file work.
-Use /.agents/bin/gai only for new image, video, text-to-speech, and transcription work.
+Use /.agents/bin/gai only for new image, video, text-to-speech, music, and transcription work.
 When creating files, save them under /workspace/output and report the path.
 If the user refers to an existing artifact, inspect /workspace/output first.
 `;
@@ -827,10 +836,18 @@ If the user refers to an existing artifact, inspect /workspace/output first.
 const skillText = `
 # Gemini Anything Skill
 
-Use /.agents/bin/gai --help to discover the available media commands.
+Use bash /.agents/bin/gai --help to discover the available media commands.
+Run the relevant subcommand help before using image, video, tts, music, or transcribe.
+
 For image generation, run:
 
-/.agents/bin/gai image "&lt;prompt&gt;" --out /workspace/output/image.jpg --json
+bash /.agents/bin/gai image "&lt;prompt&gt;" --out /workspace/output/image.jpg --json
+
+For music generation, run:
+
+bash /.agents/bin/gai music "&lt;prompt&gt;" --out /workspace/output/theme.mp3 --json
+
+For transcription, write a Markdown transcript file and report the path. Do not paste the full transcript into chat unless asked.
 
 Keep user-facing prompts clean. Put technical output-path instructions in the skill or system prompt.
 `;
@@ -856,6 +873,7 @@ const agent = {
           `GEMINI_API_KEY=${apiKey}`,
           `GEMINI_ANYTHING_NPM_PACKAGE=${GAI_PACKAGE}`,
           `GEMINI_ANYTHING_NPM_VERSION=${GAI_VERSION}`,
+          "GEMINI_ANYTHING_MUSIC_MODEL=lyria-3-clip-preview",
           ""
         ].join("\n")
       }
@@ -919,7 +937,7 @@ const response = await fetch(`${API_BASE}/interactions`, {
           </section>
 
           <footer class="footer">
-            <p>References: <a href="https://ai.google.dev/gemini-api/docs/image-generation" target="_blank" rel="noreferrer">Gemini image generation docs</a>, <a href="https://ai.google.dev/gemini-api/docs/agents" target="_blank" rel="noreferrer">Gemini Agents docs</a>, <a href="https://blog.google/innovation-and-ai/technology/developers-tools/managed-agents-gemini-api/" target="_blank" rel="noreferrer">Managed Agents launch post</a>, and <a href="https://www.npmjs.com/package/@lyalindotcom/gai" target="_blank" rel="noreferrer"><code>@lyalindotcom/gai</code> on npm</a>.</p>
+            <p>References: <a href="https://ai.google.dev/gemini-api/docs/image-generation" target="_blank" rel="noreferrer">Gemini image generation docs</a>, <a href="https://ai.google.dev/gemini-api/docs/music-generation" target="_blank" rel="noreferrer">Lyria 3 music generation docs</a>, <a href="https://ai.google.dev/gemini-api/docs/agents" target="_blank" rel="noreferrer">Gemini Agents docs</a>, <a href="https://blog.google/innovation-and-ai/technology/developers-tools/managed-agents-gemini-api/" target="_blank" rel="noreferrer">Managed Agents launch post</a>, and <a href="https://www.npmjs.com/package/@lyalindotcom/gai" target="_blank" rel="noreferrer"><code>@lyalindotcom/gai</code> on npm</a>.</p>
           </footer>
         </article>
       </div>

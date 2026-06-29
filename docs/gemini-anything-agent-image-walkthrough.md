@@ -1,8 +1,8 @@
-# Building a Managed Agent That Can Generate an Image
+# Building a Managed Agent That Can Generate Media
 
 This sample shows a small but useful pattern: one chat app talks to one persistent Gemini Managed Agent, and that agent becomes the runtime container for work. It can reason, browse, code, inspect files, and call a specialized CLI only when the user asks for media.
 
-The scenario below follows one request: a user asks the app to create an image.
+The scenario below follows one request: a user asks the app to create an image. The same routing pattern now covers image, video, TTS, music generation, and audio transcription.
 
 ![Gemini Anything Agent create image flow](./assets/gemini-anything-create-image-flow.jpg)
 
@@ -14,13 +14,13 @@ Gemini Anything Agent has three pieces:
 
 - **Electron chat app**: the local UI, conversation list, output panel, previews, and managed-agent client.
 - **Gemini Managed Agent**: the remote Linux sandbox that handles the work and keeps conversation/environment continuity.
-- **`@lyalindotcom/gai` CLI**: the media wrapper around the GenAI SDK for image, video, TTS, and transcription.
+- **`@lyalindotcom/gai` CLI**: the media wrapper around the GenAI SDK for image, video, TTS, music, and transcription.
 
 The app is not a media generator by itself. The managed agent is not asked to memorize every media API shape. Instead, the app gives the managed agent a tiny tool surface:
 
 ```bash
-/.agents/bin/gai --help
-/.agents/bin/gai image "a cozy product shot of a tiny robot assistant" --out /workspace/output/robot.jpg --json
+bash /.agents/bin/gai --help
+bash /.agents/bin/gai image "a cozy product shot of a tiny robot assistant" --out /workspace/output/robot.jpg --json
 ```
 
 The agent uses that CLI only for specialized media work. For normal text, coding, research, analysis, and file transformations, the agent uses its native managed-agent capabilities.
@@ -87,6 +87,16 @@ exec npx -y "${GEMINI_ANYTHING_NPM_PACKAGE:-@lyalindotcom/gai}@${GEMINI_ANYTHING
 
 That lets the agent stay stable while the CLI package can be updated independently.
 
+The same wrapper owns the specialized audio routes:
+
+```bash
+bash /.agents/bin/gai tts "Say hello in a warm voice." --out /workspace/output/hello.wav --json
+bash /.agents/bin/gai music "A short upbeat instrumental theme song." --out /workspace/output/theme.mp3 --json
+bash /.agents/bin/gai transcribe /workspace/output/podcast.mp3 --out /workspace/output/podcast-transcript.md --json
+```
+
+TTS is for spoken audio and podcast-style narration. Music is for songs, loops, instrumental beds, and theme tracks. Transcription starts from an existing audio file and writes a transcript file instead of pasting the whole transcript into chat.
+
 ## Creating the Managed Agent
 
 The app builds the managed agent definition from local files in `agents/` and deploys it through the Managed Agents API. Google's managed-agent docs describe the runtime as a configurable agent harness with a Linux sandbox for code execution, files, and web work; see the [Agents overview](https://ai.google.dev/gemini-api/docs/agents) and the launch post on [Managed Agents in the Gemini API](https://blog.google/innovation-and-ai/technology/developers-tools/managed-agents-gemini-api/).
@@ -115,7 +125,7 @@ exec npx -y "\${GEMINI_ANYTHING_NPM_PACKAGE:-${GAI_PACKAGE}}@\${GEMINI_ANYTHING_
 const systemInstruction = `
 You are Gemini Anything Agent.
 Use native managed-agent tools for text, code, research, analysis, and file work.
-Use /.agents/bin/gai only for new image, video, text-to-speech, and transcription work.
+Use /.agents/bin/gai only for new image, video, text-to-speech, music, and transcription work.
 When creating files, save them under /workspace/output and report the path.
 If the user refers to an existing artifact, inspect /workspace/output first.
 `;
@@ -123,10 +133,18 @@ If the user refers to an existing artifact, inspect /workspace/output first.
 const skillText = `
 # Gemini Anything Skill
 
-Use /.agents/bin/gai --help to discover the available media commands.
+Use bash /.agents/bin/gai --help to discover the available media commands.
+Run the relevant subcommand help before using image, video, tts, music, or transcribe.
+
 For image generation, run:
 
-/.agents/bin/gai image "<prompt>" --out /workspace/output/image.jpg --json
+bash /.agents/bin/gai image "<prompt>" --out /workspace/output/image.jpg --json
+
+For music generation, run:
+
+bash /.agents/bin/gai music "<prompt>" --out /workspace/output/theme.mp3 --json
+
+For transcription, write a Markdown transcript file and report the path. Do not paste the full transcript into chat unless asked.
 
 Keep user-facing prompts clean. Put technical output-path instructions in the skill or system prompt, not in sample user prompts.
 `;
@@ -160,6 +178,7 @@ const agent = {
           `GEMINI_API_KEY=${apiKey}`,
           `GEMINI_ANYTHING_NPM_PACKAGE=${GAI_PACKAGE}`,
           `GEMINI_ANYTHING_NPM_VERSION=${GAI_VERSION}`,
+          "GEMINI_ANYTHING_MUSIC_MODEL=lyria-3-clip-preview",
           ""
         ].join("\n")
       }
@@ -236,4 +255,4 @@ Keeping those roles separate gives you a cleaner sample:
 - The sample `.env` flow is plaintext and intentionally simple.
 - The managed agent can perform multi-step work, so use this pattern carefully.
 
-For the runnable package, see [`@lyalindotcom/gai` on npm](https://www.npmjs.com/package/@lyalindotcom/gai).
+For the runnable package, see [`@lyalindotcom/gai` on npm](https://www.npmjs.com/package/@lyalindotcom/gai). For current music model details, see Google's [Lyria 3 music generation docs](https://ai.google.dev/gemini-api/docs/music-generation).

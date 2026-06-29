@@ -1182,6 +1182,31 @@ export const App = () => {
     await saveApiKey("");
   }
 
+  async function setSpecializedToolsEnabled(enabled: boolean) {
+    if (!window.managedAgents?.setSpecializedToolsEnabled) {
+      pushStatus({ level: "error", title: bridgeUnavailable.name, detail: bridgeUnavailable.message });
+      return;
+    }
+    setBusy("save-tools");
+    try {
+      const result = await window.managedAgents.setSpecializedToolsEnabled(enabled);
+      if (!result.ok) {
+        pushStatus({ level: "error", title: result.error.name, detail: result.error.message });
+        return;
+      }
+      await loadRuntime();
+      pushStatus({
+        level: "success",
+        title: enabled ? "Specialized tools enabled" : "Plain agent mode enabled",
+        detail: enabled
+          ? "Next run will deploy the media skill, gai CLI, and sandbox env."
+          : "Next run will deploy without the media skill, gai CLI, or sandbox env."
+      });
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function copyText(text: string, label: string) {
     try {
       await navigator.clipboard.writeText(text);
@@ -1697,9 +1722,11 @@ export const App = () => {
           runtime={runtime}
           hasBridge={hasBridge}
           saving={busy === "save-key"}
+          savingSpecializedTools={busy === "save-tools"}
           onClose={() => setSettingsOpen(false)}
           onSave={saveApiKey}
           onClear={clearApiKey}
+          onSetSpecializedToolsEnabled={(enabled) => void setSpecializedToolsEnabled(enabled)}
         />
       )}
 

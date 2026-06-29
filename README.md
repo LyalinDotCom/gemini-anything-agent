@@ -2,11 +2,11 @@
 
 Unofficial proof-of-concept showing one Gemini Managed Agent as a persistent container for code, tasks, analysis, and generated media.
 
-The user talks to one app. The app talks to one managed agent. The agent does normal work itself and calls [`@lyalindotcom/gai`](https://www.npmjs.com/package/@lyalindotcom/gai) only for image, video, TTS, and audio transcription.
+The user talks to one app. The app talks to one managed agent. The agent does normal work itself and calls [`@lyalindotcom/gai`](https://www.npmjs.com/package/@lyalindotcom/gai) only for image, video, TTS, music, and audio transcription.
 
 Optional richer overview: open [readme.html](readme.html) locally.
 
-DevRel walk-through: [Building a Managed Agent That Can Generate an Image](docs/gemini-anything-agent-image-walkthrough.html) ([Markdown source](docs/gemini-anything-agent-image-walkthrough.md)).
+DevRel walk-through: [Building a Managed Agent That Can Generate Media](docs/gemini-anything-agent-image-walkthrough.html) ([Markdown source](docs/gemini-anything-agent-image-walkthrough.md)).
 
 ## Read This First
 
@@ -32,6 +32,7 @@ GEMINI_API_KEY=your_key_here
 GEMINI_ANYTHING_AGENT_ID=gemini-anything-agent
 GEMINI_ANYTHING_NPM_PACKAGE=@lyalindotcom/gai
 GEMINI_ANYTHING_NPM_VERSION=latest
+GEMINI_ANYTHING_MUSIC_MODEL=lyria-3-clip-preview
 GEMINI_ANYTHING_TRANSCRIBE_MODEL=gemini-3.5-flash
 ```
 
@@ -108,7 +109,7 @@ bash "$GAI" --help
 
 Native managed-agent tools handle text, code, tasks, analysis, research, browsing, file work, and existing-file transformations.
 
-`gai` handles new image generation, video generation, TTS, and audio transcription.
+`gai` handles new image generation, video generation, TTS, music generation, and audio transcription.
 
 When the user refers to an existing artifact, the agent should inspect `/workspace/output` first.
 

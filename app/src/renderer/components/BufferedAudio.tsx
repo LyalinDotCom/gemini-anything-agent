@@ -7,6 +7,13 @@ type BufferedAudioProps = {
   className?: string;
 };
 
+type WindowWithWebkitAudio = Window &
+  typeof globalThis & {
+    webkitAudioContext?: typeof AudioContext;
+  };
+
+const MAX_DECODE_DURATION_BYTES = 120 * 1024 * 1024;
+
 const formatAudioTime = (seconds: number | undefined): string => {
   if (seconds === undefined || !Number.isFinite(seconds) || seconds < 0) {
     return "0:00";
@@ -64,13 +71,38 @@ const wavDurationFromBlob = async (blob: Blob): Promise<number | undefined> => {
   return Number.isFinite(duration) && duration > 0 ? duration : undefined;
 };
 
+const decodedAudioDurationFromBlob = async (blob: Blob): Promise<number | undefined> => {
+  if (blob.size > MAX_DECODE_DURATION_BYTES) {
+    return undefined;
+  }
+
+  const AudioContextCtor =
+    window.AudioContext ?? (window as WindowWithWebkitAudio).webkitAudioContext;
+  if (!AudioContextCtor) {
+    return undefined;
+  }
+
+  const context = new AudioContextCtor();
+  try {
+    const decoded = await context.decodeAudioData(await blob.arrayBuffer());
+    return Number.isFinite(decoded.duration) && decoded.duration > 0 ? decoded.duration : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    void context.close().catch(() => undefined);
+  }
+};
+
 const audioDurationHint = async (blob: Blob, src: string): Promise<number | undefined> => {
   const lowerSrc = src.toLowerCase();
   const lowerType = blob.type.toLowerCase();
   if (lowerSrc.includes(".wav") || lowerType.includes("wav") || lowerType.includes("wave")) {
-    return wavDurationFromBlob(blob);
+    const wavDuration = await wavDurationFromBlob(blob);
+    if (wavDuration) {
+      return wavDuration;
+    }
   }
-  return undefined;
+  return decodedAudioDurationFromBlob(blob);
 };
 
 export const BufferedAudio = ({ src, autoPlay = false, className }: BufferedAudioProps) => {
@@ -148,8 +180,9 @@ export const BufferedAudio = ({ src, autoPlay = false, className }: BufferedAudi
     }
   }, [duration, durationHint]);
 
-  const nativeFallback = Boolean(audioUrl && directSource && metadataLoaded && !duration && !loadFailed);
-  const ready = Boolean(audioUrl && !loading && duration && duration > 0 && !loadFailed);
+  const effectiveDuration = durationHint ?? duration;
+  const nativeFallback = Boolean(audioUrl && directSource && metadataLoaded && !effectiveDuration && !loadFailed);
+  const ready = Boolean(audioUrl && !loading && effectiveDuration && effectiveDuration > 0 && !loadFailed);
 
   useEffect(() => {
     if ((ready || nativeFallback) && autoPlay && !autoPlayHandledRef.current) {
@@ -160,6 +193,10 @@ export const BufferedAudio = ({ src, autoPlay = false, className }: BufferedAudi
 
   const syncDuration = () => {
     setMetadataLoaded(true);
+    if (durationHint) {
+      setDuration(durationHint);
+      return;
+    }
     const nextDuration = audioRef.current?.duration;
     if (Number.isFinite(nextDuration) && nextDuration && nextDuration > 0) {
       setDuration(nextDuration);
@@ -172,7 +209,7 @@ export const BufferedAudio = ({ src, autoPlay = false, className }: BufferedAudi
 
   const togglePlayback = () => {
     const audio = audioRef.current;
-    if (!audio || !duration) {
+    if (!audio || !effectiveDuration) {
       return;
     }
     if (audio.paused) {
@@ -184,10 +221,10 @@ export const BufferedAudio = ({ src, autoPlay = false, className }: BufferedAudi
 
   const seek = (value: string) => {
     const audio = audioRef.current;
-    if (!audio || !duration) {
+    if (!audio || !effectiveDuration) {
       return;
     }
-    const nextTime = Math.min(duration, Math.max(0, Number(value)));
+    const nextTime = Math.min(effectiveDuration, Math.max(0, Number(value)));
     audio.currentTime = nextTime;
     setCurrentTime(nextTime);
   };
@@ -215,7 +252,7 @@ export const BufferedAudio = ({ src, autoPlay = false, className }: BufferedAudi
           onPause={() => setPaused(true)}
           onEnded={() => {
             setPaused(true);
-            setCurrentTime(duration ?? audioRef.current?.currentTime ?? 0);
+            setCurrentTime(effectiveDuration ?? audioRef.current?.currentTime ?? 0);
           }}
           onError={() => setLoadFailed(true)}
         />
@@ -231,15 +268,15 @@ export const BufferedAudio = ({ src, autoPlay = false, className }: BufferedAudi
             {paused ? <Play size={17} fill="currentColor" /> : <Pause size={17} fill="currentColor" />}
           </button>
           <span className="audio-player-time">
-            {formatAudioTime(currentTime)} / {formatAudioTime(duration)}
+            {formatAudioTime(currentTime)} / {formatAudioTime(effectiveDuration)}
           </span>
           <input
             className="audio-player-scrub"
             type="range"
             min="0"
-            max={duration ?? 0}
+            max={effectiveDuration ?? 0}
             step="0.01"
-            value={Math.min(currentTime, duration ?? 0)}
+            value={Math.min(currentTime, effectiveDuration ?? 0)}
             onChange={(event) => seek(event.currentTarget.value)}
             aria-label="Audio position"
           />

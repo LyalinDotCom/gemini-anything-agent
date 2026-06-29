@@ -19,12 +19,18 @@ export type RuntimeConfig = {
   agentId: string;
   npmPackage: string;
   npmVersion: string;
+  specializedToolsEnabled: boolean;
 };
 
 export type SetApiKeyResult = {
   hasApiKey: boolean;
   apiKeyMasked?: string;
   envPath: string;
+};
+
+export type SetSpecializedToolsResult = {
+  specializedToolsEnabled: boolean;
+  settingsPath: string;
 };
 
 export type EnsureAnythingAgentResult = {
@@ -105,6 +111,7 @@ export type IpcResult<T> =
 export type ManagedAgentsBridge = {
   getRuntimeConfig: () => Promise<IpcResult<RuntimeConfig>>;
   setApiKey: (key: string) => Promise<IpcResult<SetApiKeyResult>>;
+  setSpecializedToolsEnabled: (enabled: boolean) => Promise<IpcResult<SetSpecializedToolsResult>>;
   ensureAnythingAgent: (agentId?: string) => Promise<IpcResult<EnsureAnythingAgentResult>>;
   createAgent: (agent: AgentDefinition) => Promise<IpcResult<ManagedAgent>>;
   listAgents: () => Promise<IpcResult<AgentListResponse>>;
@@ -157,6 +164,7 @@ export type ManagedAgentsBridge = {
 export const ipcChannels = {
   runtimeConfig: "managed-agents:runtime-config",
   setApiKey: "managed-agents:set-api-key",
+  setSpecializedToolsEnabled: "managed-agents:set-specialized-tools-enabled",
   ensureAnythingAgent: "managed-agents:ensure-anything-agent",
   createAgent: "managed-agents:create-agent",
   listAgents: "managed-agents:list-agents",

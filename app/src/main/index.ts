@@ -1,9 +1,10 @@
-import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from "electron";
 import { config as loadEnv } from "dotenv";
 import { createHash, randomUUID } from "node:crypto";
 import {
   existsSync,
   copyFileSync,
+  createReadStream,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -13,9 +14,10 @@ import {
   writeFileSync
 } from "node:fs";
 import { execFile } from "node:child_process";
+import { Readable } from "node:stream";
 import { promisify } from "node:util";
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import {
   ANTIGRAVITY_BASE_AGENT,
   GEMINI_API_BASE_URL,
@@ -42,6 +44,7 @@ import {
   type SaveResolvedMediaResult,
   type SaveTextResult,
   type SetApiKeyResult,
+  type SetSpecializedToolsResult,
   type SnapshotDownloadResult
 } from "../shared/electron-api";
 
@@ -64,6 +67,10 @@ protocol.registerSchemesAsPrivileged([
 const DEFAULT_AGENT_ID = "gemini-anything-agent";
 const DEFAULT_NPM_PACKAGE = "@lyalindotcom/gai";
 const DEFAULT_NPM_VERSION = "latest";
+const SPECIALIZED_TOOLS_ENV_KEY = "GEMINI_ANYTHING_SPECIALIZED_TOOLS_ENABLED";
+type LocalAppSettings = {
+  specializedToolsEnabled?: boolean;
+};
 
 const snapshotTarPath = (cacheRoot: string): string => join(cacheRoot, `snapshot-${randomUUID()}.tar`);
 const tarEntriesPath = (cacheRoot: string): string => join(cacheRoot, `snapshot-entries-${randomUUID()}.txt`);
@@ -89,6 +96,7 @@ const APP_ICON_PATH = process.platform === "darwin"
   : APP_ICON_PNG_PATH;
 const LOCAL_OUTPUT_ROOT = join(REPO_ROOT, "outputs", "managed-agent");
 const mediaCacheRoot = (): string => join(app.getPath("userData"), "environment-media");
+const localSettingsPath = (): string => join(app.getPath("userData"), "settings.json");
 
 const loadEnvIfPresent = (path: string, override = false): void => {
   if (existsSync(path)) {
@@ -128,11 +136,49 @@ const envValue = (value: string | undefined): string =>
 const envValueOrDefault = (value: string | undefined, fallback: string): string =>
   envValue(value) || fallback;
 
+const envFlagEnabled = (value: string | undefined, fallback: boolean): boolean => {
+  const normalized = envValue(value).toLowerCase();
+  if (!normalized) {
+    return fallback;
+  }
+  if (["0", "false", "off", "no", "disabled"].includes(normalized)) {
+    return false;
+  }
+  if (["1", "true", "on", "yes", "enabled"].includes(normalized)) {
+    return true;
+  }
+  return fallback;
+};
+
+const specializedToolsEnabled = (): boolean =>
+  readLocalAppSettings().specializedToolsEnabled ?? envFlagEnabled(process.env[SPECIALIZED_TOOLS_ENV_KEY], true);
+
+const readLocalAppSettings = (): LocalAppSettings => {
+  const path = localSettingsPath();
+  if (!existsSync(path)) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as LocalAppSettings;
+    return typeof parsed === "object" && parsed ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const writeLocalAppSettings = (settings: LocalAppSettings): string => {
+  const path = localSettingsPath();
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+  return path;
+};
+
 const sandboxEnvContent = (): string =>
   [
     `GEMINI_API_KEY=${envValue(process.env.GEMINI_API_KEY)}`,
     `GEMINI_ANYTHING_NPM_PACKAGE=${envValueOrDefault(process.env.GEMINI_ANYTHING_NPM_PACKAGE, DEFAULT_NPM_PACKAGE)}`,
     `GEMINI_ANYTHING_NPM_VERSION=${envValueOrDefault(process.env.GEMINI_ANYTHING_NPM_VERSION, DEFAULT_NPM_VERSION)}`,
+    `GEMINI_ANYTHING_MUSIC_MODEL=${envValueOrDefault(process.env.GEMINI_ANYTHING_MUSIC_MODEL, "lyria-3-clip-preview")}`,
     `GEMINI_ANYTHING_TRANSCRIBE_MODEL=${envValueOrDefault(process.env.GEMINI_ANYTHING_TRANSCRIBE_MODEL, "gemini-3.5-flash")}`
   ].join("\n") + "\n";
 
@@ -142,14 +188,17 @@ const readAgentAsset = (relativePath: string, fallback: string): string => {
 };
 
 const defaultAnythingSystemInstruction =
-  "You are Gemini Anything Agent. Use native tools for text, coding, planning, research, file work, and artifact transformations. Use gai only for new image, video, text-to-speech generation, and audio transcription. For transcription, save a transcript file and report its path instead of pasting transcript contents.";
+  "You are Gemini Anything Agent. Use native tools for text, coding, planning, research, file work, and artifact transformations. Use gai only for new image, video, text-to-speech, music generation, and audio transcription. For transcription, save a transcript file and report its path instead of pasting transcript contents.";
+
+const defaultPlainAgentSystemInstruction =
+  "You are Gemini Anything Agent running in plain native mode. Use only the managed agent's built-in tools for text, coding, planning, research, file work, analysis, and artifacts. Do not assume a project-specific media CLI, media skill, or sandbox .env exists.";
 
 const anythingAgentId = (): string => process.env.GEMINI_ANYTHING_AGENT_ID?.trim() || DEFAULT_AGENT_ID;
 
 const isAnythingAgentRequest = (request: InteractionCreateRequest): boolean =>
   request.agent.trim() === anythingAgentId();
 
-const currentInvocationContext = (): string => {
+const currentInvocationContext = (includeSpecializedTools = specializedToolsEnabled()): string => {
   const now = new Date();
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "unknown";
   return [
@@ -160,8 +209,12 @@ const currentInvocationContext = (): string => {
     "- You are running as a remote Gemini Managed Agent in a Google-hosted Linux sandbox.",
     "- Workspace root in the sandbox: `/workspace`.",
     "- Durable artifact folder in the sandbox: `/workspace/output`.",
-    "- Mounted agent instruction files: `/.agents/AGENTS.md` and `/.agents/skills/gemini-anything/SKILL.md`.",
-    "- Mounted media CLI wrapper: `/.agents/bin/gai`.",
+    includeSpecializedTools
+      ? "- Mounted agent instruction files: `/.agents/AGENTS.md` and `/.agents/skills/gemini-anything/SKILL.md`."
+      : "- Specialized media skill files are not mounted in this mode.",
+    includeSpecializedTools
+      ? "- Mounted media CLI wrapper: `/.agents/bin/gai`."
+      : "- The `gai` media CLI wrapper and sandbox `.env` are not mounted in this mode.",
     "- Follow-up turns may include two independent continuity pointers: `previous_interaction_id` for conversation context and `environment` for sandbox/filesystem state.",
     "- If a request depends on existing artifacts, inspect `/workspace/output` before choosing tools.",
     "- If exact current date/time or live facts matter, verify with `date`, `date -u`, and web/search as appropriate.",
@@ -170,11 +223,14 @@ const currentInvocationContext = (): string => {
 };
 
 const anythingSystemInstructionForRequest = (request: InteractionCreateRequest): string => {
-  const base = readAgentAsset("system-prompt.md", defaultAnythingSystemInstruction);
+  const includeSpecializedTools = specializedToolsEnabled();
+  const base = includeSpecializedTools
+    ? readAgentAsset("system-prompt.md", defaultAnythingSystemInstruction)
+    : defaultPlainAgentSystemInstruction;
   const override = request.system_instruction?.trim();
   return [
     base,
-    currentInvocationContext(),
+    currentInvocationContext(includeSpecializedTools),
     override
       ? [
           "## Additional Per-Interaction Instruction",
@@ -251,21 +307,15 @@ const redactAgentListForRenderer = (response: AgentListResponse): AgentListRespo
 const agentConfigHash = (agent: AgentDefinition): string =>
   createHash("sha256").update(JSON.stringify(redactDefinitionSecrets(agent))).digest("hex").slice(0, 12);
 
-const buildAnythingAgentDefinition = (agentId: string): AgentDefinition => {
-  const definition: AgentDefinition = {
-    id: agentId,
-    base_agent: ANTIGRAVITY_BASE_AGENT,
-    system_instruction: readAgentAsset("system-prompt.md", defaultAnythingSystemInstruction),
-    tools: [
-      { type: "code_execution" },
-      { type: "google_search" },
-      { type: "url_context" }
-    ],
-    base_environment: {
-      type: "remote",
-      sources: [
+const buildAnythingAgentDefinition = (
+  agentId: string,
+  options: { specializedToolsEnabled?: boolean } = {}
+): AgentDefinition => {
+  const includeSpecializedTools = options.specializedToolsEnabled ?? specializedToolsEnabled();
+  const sources = includeSpecializedTools
+    ? [
         {
-          type: "inline",
+          type: "inline" as const,
           target: ".agents/bin/gai",
           content: readAgentAsset(
             "bin/gai",
@@ -282,33 +332,49 @@ const buildAnythingAgentDefinition = (agentId: string): AgentDefinition => {
           )
         },
         {
-          type: "inline",
+          type: "inline" as const,
           target: ".agents/AGENTS.md",
           content: readAgentAsset(
             "AGENTS.md",
-            "# Gemini Anything Agent\n\nUse native managed-agent tools for normal work. Use gai only for image, video, text-to-speech, and audio transcription. For transcription, write a file and report its path instead of pasting transcript contents.\n"
+            "# Gemini Anything Agent\n\nUse native managed-agent tools for normal work. Use gai only for image, video, text-to-speech, music generation, and audio transcription. For transcription, write a file and report its path instead of pasting transcript contents.\n"
           )
         },
         {
-          type: "inline",
+          type: "inline" as const,
           target: ".agents/skills/gemini-anything/SKILL.md",
           content: readAgentAsset(
             "skills/gemini-anything/SKILL.md",
-            "# Gemini Anything Media Skill\n\nUse bash /.agents/bin/gai for image, video, tts generation, and audio transcription. For transcription, write a file and report its path instead of pasting transcript contents.\n"
+            "# Gemini Anything Media Skill\n\nUse bash /.agents/bin/gai for image, video, tts, music generation, and audio transcription. For transcription, write a file and report its path instead of pasting transcript contents.\n"
           )
         },
         {
-          type: "inline",
+          type: "inline" as const,
           target: ".env",
           content: sandboxEnvContent()
         }
       ]
-    }
+    : undefined;
+  const definition: AgentDefinition = {
+    id: agentId,
+    base_agent: ANTIGRAVITY_BASE_AGENT,
+    system_instruction: includeSpecializedTools
+      ? readAgentAsset("system-prompt.md", defaultAnythingSystemInstruction)
+      : defaultPlainAgentSystemInstruction,
+    tools: [
+      { type: "code_execution" },
+      { type: "google_search" },
+      { type: "url_context" }
+    ],
+    base_environment: sources ? { type: "remote", sources } : { type: "remote" }
   };
 
   return {
     ...definition,
-    description: `Gemini Anything managed agent with media generation routed through gai. config:${agentConfigHash(definition)}`
+    description: `${
+      includeSpecializedTools
+        ? "Gemini Anything managed agent with media generation routed through gai."
+        : "Gemini Anything managed agent in plain native mode without gai, media skill, or sandbox env."
+    } config:${agentConfigHash(definition)}`
   };
 };
 
@@ -343,6 +409,114 @@ const MEDIA_EXTENSIONS = new Map<string, ResolvedEnvironmentMedia["mediaType"]>(
 
 const mediaTypeForPath = (path: string): ResolvedEnvironmentMedia["mediaType"] | undefined =>
   MEDIA_EXTENSIONS.get(extname(path).toLowerCase());
+
+const MEDIA_MIME_TYPES = new Map<string, string>([
+  [".png", "image/png"],
+  [".jpg", "image/jpeg"],
+  [".jpeg", "image/jpeg"],
+  [".webp", "image/webp"],
+  [".gif", "image/gif"],
+  [".avif", "image/avif"],
+  [".svg", "image/svg+xml"],
+  [".mp4", "video/mp4"],
+  [".webm", "video/webm"],
+  [".mov", "video/quicktime"],
+  [".m4v", "video/x-m4v"],
+  [".wav", "audio/wav"],
+  [".mp3", "audio/mpeg"],
+  [".m4a", "audio/mp4"],
+  [".aac", "audio/aac"],
+  [".ogg", "audio/ogg"],
+  [".flac", "audio/flac"]
+]);
+
+const mediaMimeTypeForPath = (path: string): string =>
+  MEDIA_MIME_TYPES.get(extname(path).toLowerCase()) ?? "application/octet-stream";
+
+type ByteRange = { start: number; end: number };
+
+const byteRangeForHeader = (rangeHeader: string | null, size: number): ByteRange | undefined | "invalid" => {
+  if (!rangeHeader) {
+    return undefined;
+  }
+
+  const match = rangeHeader.match(/^bytes=(\d*)-(\d*)$/);
+  if (!match) {
+    return "invalid";
+  }
+
+  const [, startText, endText] = match;
+  if (!startText && !endText) {
+    return "invalid";
+  }
+
+  let start: number;
+  let end: number;
+  if (!startText) {
+    const suffixLength = Number(endText);
+    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) {
+      return "invalid";
+    }
+    start = Math.max(0, size - suffixLength);
+    end = size - 1;
+  } else {
+    start = Number(startText);
+    end = endText ? Number(endText) : size - 1;
+  }
+
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(end) ||
+    start < 0 ||
+    end < start ||
+    start >= size
+  ) {
+    return "invalid";
+  }
+
+  return { start, end: Math.min(end, size - 1) };
+};
+
+const mediaFileResponse = (path: string, request: Request): Response => {
+  const stats = statSync(path);
+  const size = stats.size;
+  const mimeType = mediaMimeTypeForPath(path);
+  const range = byteRangeForHeader(request.headers.get("range"), size);
+
+  if (range === "invalid") {
+    return new Response(null, {
+      status: 416,
+      headers: {
+        "Accept-Ranges": "bytes",
+        "Content-Range": `bytes */${size}`,
+        "Content-Type": mimeType
+      }
+    });
+  }
+
+  const headers = new Headers({
+    "Accept-Ranges": "bytes",
+    "Content-Type": mimeType
+  });
+
+  if (!range) {
+    headers.set("Content-Length", String(size));
+    return new Response(
+      request.method === "HEAD" ? null : (Readable.toWeb(createReadStream(path)) as unknown as BodyInit),
+      { status: 200, headers }
+    );
+  }
+
+  const length = range.end - range.start + 1;
+  headers.set("Content-Length", String(length));
+  headers.set("Content-Range", `bytes ${range.start}-${range.end}/${size}`);
+  return new Response(
+    request.method === "HEAD"
+      ? null
+      : (Readable.toWeb(createReadStream(path, { start: range.start, end: range.end })) as unknown as BodyInit),
+    { status: 206, headers }
+  );
+};
 
 const TEXT_EXTENSIONS = new Set([
   ".txt",
@@ -812,7 +986,7 @@ const registerMediaProtocol = (): void => {
       return new Response("Not found", { status: 404 });
     }
 
-    return net.fetch(pathToFileURL(path).toString());
+    return mediaFileResponse(path, request);
   });
 };
 
@@ -1080,7 +1254,8 @@ handle(ipcChannels.runtimeConfig, () => ({
   docsLastChecked: "2026-06-22",
   agentId: envValueOrDefault(process.env.GEMINI_ANYTHING_AGENT_ID, DEFAULT_AGENT_ID),
   npmPackage: envValueOrDefault(process.env.GEMINI_ANYTHING_NPM_PACKAGE, DEFAULT_NPM_PACKAGE),
-  npmVersion: envValueOrDefault(process.env.GEMINI_ANYTHING_NPM_VERSION, DEFAULT_NPM_VERSION)
+  npmVersion: envValueOrDefault(process.env.GEMINI_ANYTHING_NPM_VERSION, DEFAULT_NPM_VERSION),
+  specializedToolsEnabled: specializedToolsEnabled()
 }));
 
 handle<[string], SetApiKeyResult>(ipcChannels.setApiKey, async (key) => {
@@ -1099,6 +1274,17 @@ handle<[string], SetApiKeyResult>(ipcChannels.setApiKey, async (key) => {
     hasApiKey: Boolean(process.env.GEMINI_API_KEY),
     apiKeyMasked: maskKey(process.env.GEMINI_API_KEY),
     envPath: ENV_PATH
+  };
+});
+
+handle<[boolean], SetSpecializedToolsResult>(ipcChannels.setSpecializedToolsEnabled, async (enabled) => {
+  const settingsPath = writeLocalAppSettings({
+    ...readLocalAppSettings(),
+    specializedToolsEnabled: enabled
+  });
+  return {
+    specializedToolsEnabled: enabled,
+    settingsPath
   };
 });
 

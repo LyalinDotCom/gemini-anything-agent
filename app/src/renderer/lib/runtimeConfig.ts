@@ -9,7 +9,8 @@ export const FALLBACK_RUNTIME: RuntimeConfig = {
   docsLastChecked: "2026-06-22",
   agentId: "gemini-anything-agent",
   npmPackage: "@lyalindotcom/gai",
-  npmVersion: "latest"
+  npmVersion: "latest",
+  specializedToolsEnabled: true
 };
 
 export const bridgeUnavailable: IpcError = {

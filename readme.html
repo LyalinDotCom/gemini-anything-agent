@@ -294,7 +294,7 @@
   <text x="720" y="751" text-anchor="middle" class="label">app downloads previews to local</text>
   <text x="720" y="780" text-anchor="middle" class="mono">outputs/managed-agent</text>
 </svg>
-        <figcaption class="caption">The app deploys and talks to one saved managed agent. The remote sandbox keeps files under <code>/workspace/output</code>. The mounted wrapper at <code>/.agents/bin/gai</code> runs the live npm package when the agent needs image, video, TTS, or transcription.</figcaption>
+        <figcaption class="caption">The app deploys and talks to one saved managed agent. The remote sandbox keeps files under <code>/workspace/output</code>. The mounted wrapper at <code>/.agents/bin/gai</code> runs the live npm package when the agent needs image, video, TTS, music, or transcription.</figcaption>
       </figure>
     </section>
 
@@ -310,7 +310,7 @@
       </div>
     </section>
 
-    <section id="flow"><div class="section-head"><p class="section-kicker">Runtime Flow</p><h2>What happens when a user asks for something?</h2></div><div class="flow"><div class="flow-step"><div><strong>User sends a prompt.</strong><span>The app targets one configured agent, not a model picker.</span></div></div><div class="flow-step"><div><strong>The app ensures deployment.</strong><span>If the saved prompt, skill, wrapper, or environment sources changed, the app recreates the managed agent.</span></div></div><div class="flow-step"><div><strong>Continuity is attached.</strong><span>The app passes prior interaction and environment pointers by default, so the agent can remember context and reuse files.</span></div></div><div class="flow-step"><div><strong>The agent classifies the job.</strong><span>Code, tasks, analysis, research, browsing, and file edits use native managed-agent tools.</span></div></div><div class="flow-step"><div><strong>Specialized media routes through <code>gai</code>.</strong><span>New image, video, speech, and audio transcription tasks call the mounted CLI wrapper.</span></div></div><div class="flow-step"><div><strong>Artifacts come back to the app.</strong><span>Files are written to <code>/workspace/output</code>, downloaded from the remote environment, saved locally, and previewed inline.</span></div></div></div></section>
+    <section id="flow"><div class="section-head"><p class="section-kicker">Runtime Flow</p><h2>What happens when a user asks for something?</h2></div><div class="flow"><div class="flow-step"><div><strong>User sends a prompt.</strong><span>The app targets one configured agent, not a model picker.</span></div></div><div class="flow-step"><div><strong>The app ensures deployment.</strong><span>If the saved prompt, skill, wrapper, or environment sources changed, the app recreates the managed agent.</span></div></div><div class="flow-step"><div><strong>Continuity is attached.</strong><span>The app passes prior interaction and environment pointers by default, so the agent can remember context and reuse files.</span></div></div><div class="flow-step"><div><strong>The agent classifies the job.</strong><span>Code, tasks, analysis, research, browsing, and file edits use native managed-agent tools.</span></div></div><div class="flow-step"><div><strong>Specialized media routes through <code>gai</code>.</strong><span>New image, video, speech, music, and audio transcription tasks call the mounted CLI wrapper.</span></div></div><div class="flow-step"><div><strong>Artifacts come back to the app.</strong><span>Files are written to <code>/workspace/output</code>, downloaded from the remote environment, saved locally, and previewed inline.</span></div></div></div></section>
 
     <section id="setup"><div class="section-head"><p class="section-kicker">Setup</p><h2>Run the sample locally.</h2></div><div class="split"><article class="card"><h3>App</h3><pre><code>cd app
 npm install
@@ -324,6 +324,7 @@ GEMINI_API_KEY=
 GEMINI_ANYTHING_AGENT_ID=gemini-anything-agent
 GEMINI_ANYTHING_NPM_PACKAGE=@lyalindotcom/gai
 GEMINI_ANYTHING_NPM_VERSION=latest
+GEMINI_ANYTHING_MUSIC_MODEL=lyria-3-clip-preview
 GEMINI_ANYTHING_TRANSCRIBE_MODEL=gemini-3.5-flash</code></pre></article><article class="card" style="margin-top: 16px;"><h3>Key handling</h3><p>The app reads the local repo-root <code>.env</code>, then mounts a generated plaintext <code>.env</code> file into the managed-agent remote sandbox. The wrapper at <code>/.agents/bin/gai</code> sources that file before running the npm package, so media commands can call live APIs.</p><p style="margin-top: 10px;">This is proof-of-concept wiring, not encrypted secret management.</p></article></section>
 
     <section id="risk"><div class="section-head"><p class="section-kicker">Risk</p><h2>Plaintext key wiring and live API usage.</h2><p class="section-copy">The user supplies the Gemini API key in <code>.env</code>. The app mounts that key into the remote managed-agent sandbox as plaintext <code>.env</code> content so <code>/.agents/bin/gai</code> can call live APIs. Media generation and agent loops can cost real money.</p></div></section>

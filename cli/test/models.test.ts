@@ -8,6 +8,7 @@ describe("model registry", () => {
       "gemini-3.1-flash-image",
       "gemini-3.1-flash-tts-preview",
       "gemini-3.5-flash",
+      "lyria-3-clip-preview",
       "veo-3.1-lite-generate-preview"
     ]);
   });
@@ -21,7 +22,7 @@ describe("model registry", () => {
 
   it("only documents the supported MVP capabilities", () => {
     expect(new Set(MODEL_REGISTRY.map((entry) => entry.capability))).toEqual(
-      new Set(["agy", "image", "video", "tts", "transcribe"])
+      new Set(["agy", "image", "video", "tts", "music", "transcribe"])
     );
   });
 });

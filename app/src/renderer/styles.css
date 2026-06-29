@@ -3080,6 +3080,30 @@ button:disabled {
   font-size: 13px;
 }
 
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.settings-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.settings-row-text strong {
+  font-size: 13px;
+}
+
+.settings-row-text span {
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+
 .key-status {
   display: flex;
   align-items: center;

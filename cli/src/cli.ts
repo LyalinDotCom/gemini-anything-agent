@@ -6,6 +6,7 @@ import { printResult } from "./output.js";
 import { runDoctor } from "./subcommands/doctor.js";
 import { runImage } from "./subcommands/image.js";
 import { listModels } from "./subcommands/models.js";
+import { runMusic } from "./subcommands/music.js";
 import { runTranscribe } from "./subcommands/transcribe.js";
 import { runTts } from "./subcommands/tts.js";
 import { runVideo } from "./subcommands/video.js";
@@ -15,7 +16,7 @@ loadEnvironment();
 
 const program = new Command();
 
-const packageVersion = "0.1.4";
+const packageVersion = "0.1.5";
 
 const failureFromError = (error: unknown, capability?: string, model?: string): CommandFailure => ({
   ok: false,
@@ -62,6 +63,7 @@ Run a command help page before using a media capability:
   gai image --help
   gai video --help
   gai tts --help
+  gai music --help
   gai transcribe --help
 
 Use --json for machine-readable output. Generated files are written to --out when provided.`
@@ -126,6 +128,29 @@ Examples:
   gai tts --script-file /workspace/output/script.txt --voice Puck --out /workspace/output/podcast.wav --json`
   )
   .action((prompt: string | undefined, options) => runAction(options.json, () => runTts(prompt, options), "tts"));
+
+program
+  .command("music")
+  .description("Generate a short music track")
+  .argument("<prompt>", "music prompt")
+  .option("--out <path>", "output MP3 file path")
+  .option("--style <text>", "style, genre, mood, instrumentation, or production direction")
+  .option("--lyrics <text>", "lyrics or lyrical concept")
+  .option("--lyrics-file <path>", "read lyrics from a text file")
+  .option("--instrumental", "request instrumental music without vocals")
+  .option("--negative <text>", "things to avoid")
+  .option("--model <model>", "override model")
+  .option("--dry-run", "show selected model and output path without calling the API")
+  .option("--json", "print machine-readable JSON")
+  .addHelpText(
+    "after",
+    `
+
+Examples:
+  gai music "uplifting synthwave theme for a product demo" --out /workspace/output/theme.mp3 --json
+  gai music "cozy acoustic loop for a kid-friendly solar system app" --style "warm, playful, instrumental" --instrumental --out /workspace/output/solar-theme.mp3 --json`
+  )
+  .action((prompt: string, options) => runAction(options.json, () => runMusic(prompt, options), "music"));
 
 program
   .command("transcribe")

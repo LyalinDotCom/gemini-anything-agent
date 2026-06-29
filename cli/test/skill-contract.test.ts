@@ -12,11 +12,13 @@ describe("agent skill contract", () => {
     expect(skill).toContain("Images:");
     expect(skill).toContain("Video:");
     expect(skill).toContain("TTS:");
+    expect(skill).toContain("Music:");
     expect(skill).toContain("Transcription:");
     expect(skill).toContain("Do not use this skill for ordinary text");
     expect(skill).toContain("audio transcription");
     expect(agents).toContain("use native managed-agent tools");
     expect(agents).toContain("use `gai transcribe`");
+    expect(agents).toContain("music generation");
     expect(agents).toContain("Do not paste transcript contents");
     expect(agents).toContain("Workspace root: `/workspace`");
     expect(agents).toContain("inspect `/workspace/output`");
@@ -31,6 +33,7 @@ describe("agent skill contract", () => {
     expect(skill).toContain("gai wrapper is missing");
     expect(skill).toContain('bash "$GAI" --help');
     expect(skill).toContain('bash "$GAI" tts --help');
+    expect(skill).toContain('bash "$GAI" music --help');
     expect(skill).toContain('bash "$GAI" transcribe --help');
     expect(skill).toContain("Follow the current help output; it is the source of truth.");
     expect(skill).toContain("do not paste the transcript contents");

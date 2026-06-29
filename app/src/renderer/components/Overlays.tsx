@@ -16,16 +16,20 @@ export const SettingsModal = ({
   runtime,
   hasBridge,
   saving,
+  savingSpecializedTools,
   onClose,
   onSave,
-  onClear
+  onClear,
+  onSetSpecializedToolsEnabled
 }: {
   runtime: RuntimeConfig | null;
   hasBridge: boolean;
   saving: boolean;
+  savingSpecializedTools: boolean;
   onClose: () => void;
   onSave: (key: string) => Promise<boolean>;
   onClear: () => void;
+  onSetSpecializedToolsEnabled: (enabled: boolean) => void;
 }) => {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState("");
@@ -127,6 +131,31 @@ export const SettingsModal = ({
                 <AlertTriangle size={12} /> Web preview — run the Electron app to change the key.
               </p>
             )}
+          </section>
+
+          <section className="settings-card">
+            <h3>Managed agent mode</h3>
+            <div className="settings-row">
+              <div className="settings-row-text">
+                <strong>Use media skill, CLI, and sandbox env</strong>
+                <span>Turn off to test sample prompts against a plain managed agent.</span>
+              </div>
+              <label
+                className={`toggle ${runtime?.specializedToolsEnabled !== false ? "on" : ""} ${
+                  !hasBridge || savingSpecializedTools ? "disabled" : ""
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={runtime?.specializedToolsEnabled !== false}
+                  disabled={!hasBridge || savingSpecializedTools}
+                  onChange={(event) => onSetSpecializedToolsEnabled(event.target.checked)}
+                />
+                <span className="toggle-track">
+                  <span className="toggle-thumb" />
+                </span>
+              </label>
+            </div>
           </section>
         </div>
       </div>

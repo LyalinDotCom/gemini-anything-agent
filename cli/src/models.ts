@@ -1,4 +1,4 @@
-export type Capability = "agy" | "image" | "video" | "tts" | "transcribe";
+export type Capability = "agy" | "image" | "video" | "tts" | "music" | "transcribe";
 
 export type ApiSurface = "interactions" | "generateVideos" | "managed-agent";
 
@@ -73,6 +73,23 @@ export const MODEL_REGISTRY = [
     notes: "Gemini 3.1 Flash TTS preview for speech generation."
   },
   {
+    id: "lyria-3-clip-preview",
+    capability: "music",
+    label: "Music default",
+    status: "preview",
+    apiSurface: "interactions",
+    isDefault: true,
+    notes: "Lyria 3 Clip preview for short 30-second MP3 music generation."
+  },
+  {
+    id: "lyria-3-pro-preview",
+    capability: "music",
+    label: "Music pro",
+    status: "preview",
+    apiSurface: "interactions",
+    notes: "Lyria 3 Pro preview for longer-form song generation."
+  },
+  {
     id: "gemini-3.5-flash",
     capability: "transcribe",
     label: "Transcription default",
@@ -91,7 +108,8 @@ export const DEPRECATED_DEFAULT_DENYLIST = [
   "gemini-2.0-flash",
   "gemini-2.0-flash-lite",
   "gemini-3.1-flash-lite-preview",
-  "gemini-3-pro-preview"
+  "gemini-3-pro-preview",
+  "lyria-2"
 ] as const;
 
 export const defaultImageModel = (): string =>
@@ -99,6 +117,9 @@ export const defaultImageModel = (): string =>
 
 export const defaultTtsModel = (): string =>
   process.env.GEMINI_ANYTHING_TTS_MODEL || "gemini-3.1-flash-tts-preview";
+
+export const defaultMusicModel = (): string =>
+  process.env.GEMINI_ANYTHING_MUSIC_MODEL || "lyria-3-clip-preview";
 
 export const defaultTranscribeModel = (): string =>
   process.env.GEMINI_ANYTHING_TRANSCRIBE_MODEL || "gemini-3.5-flash";

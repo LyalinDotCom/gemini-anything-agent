@@ -11,6 +11,7 @@ npx -y @lyalindotcom/gai@latest --help
 npx -y @lyalindotcom/gai@latest image --help
 npx -y @lyalindotcom/gai@latest video --help
 npx -y @lyalindotcom/gai@latest tts --help
+npx -y @lyalindotcom/gai@latest music --help
 npx -y @lyalindotcom/gai@latest transcribe --help
 ```
 

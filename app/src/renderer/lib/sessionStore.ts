@@ -1,6 +1,6 @@
 import type { Interaction, InteractionCreateRequest, InteractionStreamEvent, ManagedAgent } from "@sdk";
 import type { IpcError, ResolvedEnvironmentMedia } from "../../shared/electron-api";
-import type { Session } from "./builderState";
+import type { ImageAttachmentMeta, Session } from "./builderState";
 
 export const SESSION_HISTORY_KEY = "gemini-anything-agent:sessions:v1";
 const MAX_STORED_SESSIONS = 200;
@@ -51,11 +51,43 @@ const sanitizeInteraction = (value: unknown): Interaction | undefined => {
   return value as Interaction;
 };
 
+const isEnvTarget = (target: string): boolean =>
+  target.replace(/\\/g, "/").split("/").pop() === ".env";
+
+const redactEnvContent = (content: string): string =>
+  content.replace(/^([A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD|PRIVATE_KEY)[A-Z0-9_]*)=.*$/gim, "$1=<configured>");
+
+const redactAgentSnapshotSecrets = (agent: ManagedAgent): ManagedAgent => {
+  const environment = agent.base_environment;
+  if (!isRecord(environment) || !Array.isArray(environment.sources)) {
+    return agent;
+  }
+
+  return {
+    ...agent,
+    base_environment: {
+      ...environment,
+      sources: environment.sources.map((source) =>
+        isRecord(source) &&
+        source.type === "inline" &&
+        typeof source.target === "string" &&
+        typeof source.content === "string" &&
+        isEnvTarget(source.target)
+          ? {
+              ...source,
+              content: redactEnvContent(source.content)
+            }
+          : source
+      )
+    } as ManagedAgent["base_environment"]
+  };
+};
+
 const sanitizeAgentSnapshot = (value: unknown): ManagedAgent | undefined => {
   if (!isRecord(value) || typeof value.id !== "string" || typeof value.base_agent !== "string") {
     return undefined;
   }
-  return value as ManagedAgent;
+  return redactAgentSnapshotSecrets(value as ManagedAgent);
 };
 
 const sanitizeEvents = (value: unknown): InteractionStreamEvent[] | undefined => {
@@ -106,6 +138,26 @@ const sanitizeResolvedMedia = (value: unknown): ResolvedEnvironmentMedia[] | und
   return media.length ? media : undefined;
 };
 
+const sanitizeImageAttachments = (value: unknown): ImageAttachmentMeta[] | undefined => {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const attachments = value.filter((item): item is ImageAttachmentMeta => {
+    if (!isRecord(item)) {
+      return false;
+    }
+    return (
+      typeof item.id === "string" &&
+      typeof item.name === "string" &&
+      typeof item.bytes === "number" &&
+      Number.isFinite(item.bytes) &&
+      typeof item.mimeType === "string" &&
+      (typeof item.path === "undefined" || typeof item.path === "string")
+    );
+  });
+  return attachments.length ? attachments : undefined;
+};
+
 export const sanitizeSessionHistory = (value: unknown): Session[] => {
   if (!Array.isArray(value)) {
     return [];
@@ -148,6 +200,7 @@ export const sanitizeSessionHistory = (value: unknown): Session[] => {
           : undefined,
       error: sanitizeError(item.error),
       resolvedMedia: sanitizeResolvedMedia(item.resolvedMedia),
+      imageAttachments: sanitizeImageAttachments(item.imageAttachments),
       parentLocalId: typeof item.parentLocalId === "string" ? item.parentLocalId : undefined
     });
   }

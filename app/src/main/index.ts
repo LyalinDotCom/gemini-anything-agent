@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "electron";
 import { config as loadEnv } from "dotenv";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   existsSync,
   copyFileSync,
@@ -24,6 +24,7 @@ import {
   GeminiManagedAgentsClient,
   normalizeAgentDefinition,
   type AgentDefinition,
+  type AgentListResponse,
   type Interaction,
   type InteractionCreateRequest,
   type InteractionStreamEvent,
@@ -63,6 +64,9 @@ protocol.registerSchemesAsPrivileged([
 const DEFAULT_AGENT_ID = "gemini-anything-agent";
 const DEFAULT_NPM_PACKAGE = "@lyalindotcom/gai";
 const DEFAULT_NPM_VERSION = "latest";
+
+const snapshotTarPath = (cacheRoot: string): string => join(cacheRoot, `snapshot-${randomUUID()}.tar`);
+const tarEntriesPath = (cacheRoot: string): string => join(cacheRoot, `snapshot-entries-${randomUUID()}.txt`);
 
 const CWD = process.cwd();
 const REPO_ROOT = existsSync(join(CWD, "app", "package.json"))
@@ -203,24 +207,46 @@ const comparableAgentDefinition = (agent: ManagedAgent | AgentDefinition): Agent
     base_environment: agent.base_environment
   });
 
-const redactDefinitionSecrets = (agent: AgentDefinition): AgentDefinition => {
-  const comparable = comparableAgentDefinition(agent);
-  if (typeof comparable.base_environment === "object" && comparable.base_environment?.sources) {
-    comparable.base_environment = {
-      ...comparable.base_environment,
-      sources: comparable.base_environment.sources.map((source) =>
-        source.type === "inline" && source.target === ".env"
+const isEnvTarget = (target: string): boolean =>
+  basename(target.replace(/\\/g, "/")) === ".env";
+
+const redactEnvContent = (content: string): string =>
+  content.replace(/^([A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD|PRIVATE_KEY)[A-Z0-9_]*)=.*$/gim, "$1=<configured>");
+
+const redactEnvironmentSecrets = <T extends AgentDefinition | ManagedAgent>(agent: T): T => {
+  if (typeof agent.base_environment !== "object" || !Array.isArray(agent.base_environment?.sources)) {
+    return agent;
+  }
+
+  return {
+    ...agent,
+    base_environment: {
+      ...agent.base_environment,
+      sources: agent.base_environment.sources.map((source) =>
+        source.type === "inline" && isEnvTarget(source.target)
           ? {
               ...source,
-              content: source.content.replace(/^GEMINI_API_KEY=.*$/m, "GEMINI_API_KEY=<configured>")
+              content: redactEnvContent(source.content)
             }
           : source
       )
-    };
-  }
+    }
+  };
+};
+
+const redactDefinitionSecrets = (agent: AgentDefinition): AgentDefinition => {
+  const comparable = redactEnvironmentSecrets(comparableAgentDefinition(agent));
   delete comparable.description;
   return comparable;
 };
+
+const redactAgentForRenderer = (agent: ManagedAgent): ManagedAgent =>
+  redactEnvironmentSecrets(agent);
+
+const redactAgentListForRenderer = (response: AgentListResponse): AgentListResponse => ({
+  ...response,
+  agents: response.agents?.map(redactAgentForRenderer)
+});
 
 const agentConfigHash = (agent: AgentDefinition): string =>
   createHash("sha256").update(JSON.stringify(redactDefinitionSecrets(agent))).digest("hex").slice(0, 12);
@@ -419,11 +445,41 @@ const requestedPathMatchesTarEntry = (requestedPath: string, tarEntry: string): 
 
 const unique = <T,>(values: T[]): T[] => [...new Set(values)];
 
+const filesHaveSameContent = (left: string, right: string): boolean => {
+  try {
+    const leftStats = statSync(left);
+    const rightStats = statSync(right);
+    if (leftStats.size !== rightStats.size) {
+      return false;
+    }
+    const digest = (path: string): string => createHash("sha256").update(readFileSync(path)).digest("hex");
+    return digest(left) === digest(right);
+  } catch {
+    return false;
+  }
+};
+
+const autoSaveTarget = (directory: string, sourcePath: string): string => {
+  const originalName = basename(sourcePath);
+  const extension = extname(originalName);
+  const stem = extension ? originalName.slice(0, -extension.length) : originalName;
+
+  for (let index = 0; ; index += 1) {
+    const name = index === 0 ? originalName : `${stem}-${index + 1}${extension}`;
+    const candidate = join(directory, name);
+    if (!existsSync(candidate) || filesHaveSameContent(sourcePath, candidate)) {
+      return candidate;
+    }
+  }
+};
+
 const autoSaveMedia = (environmentId: string, sourcePath: string): string => {
   const directory = join(LOCAL_OUTPUT_ROOT, safeCacheSegment(environmentId));
   mkdirSync(directory, { recursive: true });
-  const target = join(directory, basename(sourcePath));
-  copyFileSync(sourcePath, target);
+  const target = autoSaveTarget(directory, sourcePath);
+  if (!existsSync(target)) {
+    copyFileSync(sourcePath, target);
+  }
   return target;
 };
 
@@ -592,6 +648,48 @@ const resolveCachedEnvironmentMedia = (
   return resolvedItems.length === requestedPaths.length ? resolvedItems : undefined;
 };
 
+const extractTarEntries = async (
+  cacheRoot: string,
+  tarPath: string,
+  destinationRoot: string,
+  entries: string[]
+): Promise<void> => {
+  const entriesPath = tarEntriesPath(cacheRoot);
+  writeFileSync(entriesPath, `${entries.join("\n")}\n`, "utf8");
+  try {
+    await execFileAsync("tar", ["-xf", tarPath, "-C", destinationRoot, "-T", entriesPath], {
+      maxBuffer: 5 * 1024 * 1024
+    });
+  } finally {
+    rmSync(entriesPath, { force: true });
+  }
+};
+
+const snapshotCacheLocks = new Map<string, Promise<void>>();
+
+const withEnvironmentSnapshotLock = async <T,>(
+  environmentId: string,
+  task: () => Promise<T>
+): Promise<T> => {
+  const previous = snapshotCacheLocks.get(environmentId) ?? Promise.resolve();
+  let release: () => void = () => undefined;
+  const currentWait = new Promise<void>((resolveWait) => {
+    release = resolveWait;
+  });
+  const currentLock = previous.catch(() => undefined).then(() => currentWait);
+  snapshotCacheLocks.set(environmentId, currentLock);
+
+  await previous.catch(() => undefined);
+  try {
+    return await task();
+  } finally {
+    release();
+    if (snapshotCacheLocks.get(environmentId) === currentLock) {
+      snapshotCacheLocks.delete(environmentId);
+    }
+  }
+};
+
 const listEnvironmentOutputFilesFromSnapshot = async (
   environmentId: string,
   force = false
@@ -601,43 +699,26 @@ const listEnvironmentOutputFilesFromSnapshot = async (
   const nextExtractRoot = join(cacheRoot, "files-next");
   const previousExtractRoot = join(cacheRoot, "files-previous");
   const targetExtractRoot = force ? nextExtractRoot : extractRoot;
-  const tarPath = join(cacheRoot, "snapshot.tar");
+  const tarPath = snapshotTarPath(cacheRoot);
 
-  copyAutoSavedMediaToCache(environmentId, extractRoot);
+  if (!force) {
+    copyAutoSavedMediaToCache(environmentId, extractRoot);
+  }
   const cached = cachedEnvironmentOutputFiles(environmentId, extractRoot);
   if (!force && cached.length > 0) {
     return cached;
   }
 
-  if (force) {
-    rmSync(nextExtractRoot, { recursive: true, force: true });
-    rmSync(previousExtractRoot, { recursive: true, force: true });
-  }
-  mkdirSync(targetExtractRoot, { recursive: true });
-  rmSync(tarPath, { force: true });
-
-  try {
-    const buffer = await createClient().downloadEnvironmentSnapshot(environmentId);
-    writeFileSync(tarPath, Buffer.from(buffer));
-
-    const listed = await execFileAsync("tar", ["-tf", tarPath], { maxBuffer: 5 * 1024 * 1024 });
-    const selectedEntries = unique(
-      listed.stdout
-        .split("\n")
-        .map((entry) => entry.trim())
-        .map(normalizedRelativeTarPath)
-        .filter((entry): entry is string => Boolean(entry && outputRelativePathForEntry(entry)))
-    );
-
-    if (selectedEntries.length === 0) {
-      return cachedEnvironmentOutputFiles(environmentId, extractRoot);
+  return withEnvironmentSnapshotLock(environmentId, async () => {
+    if (!force) {
+      copyAutoSavedMediaToCache(environmentId, extractRoot);
+      const cachedAfterLock = cachedEnvironmentOutputFiles(environmentId, extractRoot);
+      if (cachedAfterLock.length > 0) {
+        return cachedAfterLock;
+      }
     }
 
-    await execFileAsync("tar", ["-xf", tarPath, "-C", targetExtractRoot, ...selectedEntries], {
-      maxBuffer: 5 * 1024 * 1024
-    });
-
-    if (force) {
+    const replaceExtractRootFromNext = () => {
       if (existsSync(extractRoot)) {
         renameSync(extractRoot, previousExtractRoot);
       }
@@ -651,22 +732,58 @@ const listEnvironmentOutputFilesFromSnapshot = async (
         }
         throw error;
       }
-    }
+    };
 
-    return cachedEnvironmentOutputFiles(environmentId, extractRoot);
-  } catch (error) {
-    const fallback = cachedEnvironmentOutputFiles(environmentId, extractRoot);
-    if (fallback.length > 0) {
-      return fallback;
-    }
-    throw error;
-  } finally {
-    rmSync(tarPath, { force: true });
     if (force) {
       rmSync(nextExtractRoot, { recursive: true, force: true });
       rmSync(previousExtractRoot, { recursive: true, force: true });
     }
-  }
+    mkdirSync(targetExtractRoot, { recursive: true });
+    rmSync(tarPath, { force: true });
+
+    try {
+      const buffer = await createClient().downloadEnvironmentSnapshot(environmentId);
+      writeFileSync(tarPath, Buffer.from(buffer));
+
+      const listed = await execFileAsync("tar", ["-tf", tarPath], { maxBuffer: 5 * 1024 * 1024 });
+      const selectedEntries = unique(
+        listed.stdout
+          .split("\n")
+          .map((entry) => entry.trim())
+          .map(normalizedRelativeTarPath)
+          .filter((entry): entry is string => Boolean(entry && outputRelativePathForEntry(entry)))
+      );
+
+      if (selectedEntries.length === 0) {
+        if (force) {
+          replaceExtractRootFromNext();
+          return [];
+        }
+        return cachedEnvironmentOutputFiles(environmentId, extractRoot);
+      }
+
+      await extractTarEntries(cacheRoot, tarPath, targetExtractRoot, selectedEntries);
+
+      if (force) {
+        replaceExtractRootFromNext();
+      }
+
+      return cachedEnvironmentOutputFiles(environmentId, extractRoot);
+    } catch (error) {
+      copyAutoSavedMediaToCache(environmentId, extractRoot);
+      const fallback = cachedEnvironmentOutputFiles(environmentId, extractRoot);
+      if (fallback.length > 0) {
+        return fallback;
+      }
+      throw error;
+    } finally {
+      rmSync(tarPath, { force: true });
+      if (force) {
+        rmSync(nextExtractRoot, { recursive: true, force: true });
+        rmSync(previousExtractRoot, { recursive: true, force: true });
+      }
+    }
+  });
 };
 
 const registerMediaProtocol = (): void => {
@@ -989,7 +1106,7 @@ handle<[string | undefined], EnsureAnythingAgentResult>(
       const existing = await client.getAgent(agentId);
       if (agentDefinitionsMatch(existing, definition)) {
         return {
-          agent: existing,
+          agent: redactAgentForRenderer(existing),
           created: false,
           sourceTargets
         };
@@ -997,7 +1114,7 @@ handle<[string | undefined], EnsureAnythingAgentResult>(
 
       await client.deleteAgent(agentId);
       return {
-        agent: await client.createAgent(definition),
+        agent: redactAgentForRenderer(await client.createAgent(definition)),
         created: true,
         recreated: true,
         sourceTargets
@@ -1010,7 +1127,7 @@ handle<[string | undefined], EnsureAnythingAgentResult>(
 
     try {
       return {
-        agent: await client.createAgent(definition),
+        agent: redactAgentForRenderer(await client.createAgent(definition)),
         created: true,
         sourceTargets
       };
@@ -1019,7 +1136,7 @@ handle<[string | undefined], EnsureAnythingAgentResult>(
         throw error;
       }
       return {
-        agent: await client.getAgent(agentId),
+        agent: redactAgentForRenderer(await client.getAgent(agentId)),
         created: false,
         sourceTargets
       };
@@ -1029,13 +1146,13 @@ handle<[string | undefined], EnsureAnythingAgentResult>(
 
 handle<[AgentDefinition], Awaited<ReturnType<GeminiManagedAgentsClient["createAgent"]>>>(
   ipcChannels.createAgent,
-  async (agent) => createClient().createAgent(agent)
+  async (agent) => redactAgentForRenderer(await createClient().createAgent(agent))
 );
 
-handle(ipcChannels.listAgents, async () => createClient().listAgents());
+handle(ipcChannels.listAgents, async () => redactAgentListForRenderer(await createClient().listAgents()));
 handle<[string], Awaited<ReturnType<GeminiManagedAgentsClient["getAgent"]>>>(
   ipcChannels.getAgent,
-  async (id) => createClient().getAgent(id)
+  async (id) => redactAgentForRenderer(await createClient().getAgent(id))
 );
 handle<[string], boolean>(ipcChannels.deleteAgent, async (id) => {
   await createClient().deleteAgent(id);
@@ -1224,7 +1341,7 @@ handle<[string, string[]], ResolvedEnvironmentMedia[]>(
 
     const cacheRoot = join(mediaCacheRoot(), safeCacheSegment(environmentId));
     const extractRoot = join(cacheRoot, "files");
-    const tarPath = join(cacheRoot, "snapshot.tar");
+    const tarPath = snapshotTarPath(cacheRoot);
     let cached = resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
     if (!cached) {
       copyAutoSavedMediaToCache(environmentId, extractRoot, requestedPaths);
@@ -1234,75 +1351,84 @@ handle<[string, string[]], ResolvedEnvironmentMedia[]>(
       return cached;
     }
 
-    rmSync(tarPath, { force: true });
-    mkdirSync(extractRoot, { recursive: true });
-
-    try {
-      const buffer = await createClient().downloadEnvironmentSnapshot(environmentId);
-      writeFileSync(tarPath, Buffer.from(buffer));
-
-      const listed = await execFileAsync("tar", ["-tf", tarPath], { maxBuffer: 5 * 1024 * 1024 });
-      const tarEntries = listed.stdout
-        .split("\n")
-        .map((entry) => entry.trim())
-        .map(normalizedRelativeTarPath)
-        .filter((entry): entry is string => {
-          if (!entry) {
-            return false;
-          }
-          return Boolean(mediaTypeForPath(entry));
-        });
-      const selectedEntries = unique(
-        tarEntries.filter((entry) =>
-          requestedPaths.some((requestedPath) => requestedPathMatchesTarEntry(requestedPath, entry))
-        )
-      );
-
-      if (selectedEntries.length === 0) {
-        return [];
+    return withEnvironmentSnapshotLock(environmentId, async () => {
+      let lockedCached = resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
+      if (!lockedCached) {
+        copyAutoSavedMediaToCache(environmentId, extractRoot, requestedPaths);
+        lockedCached = resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
+      }
+      if (lockedCached) {
+        return lockedCached;
       }
 
-      await execFileAsync("tar", ["-xf", tarPath, "-C", extractRoot, ...selectedEntries], {
-        maxBuffer: 5 * 1024 * 1024
-      });
-
-      return requestedPaths.flatMap((requestedPath) => {
-        const entry = selectedEntries.find((candidate) => requestedPathMatchesTarEntry(requestedPath, candidate));
-        const relativeEntry = entry ? normalizedRelativeTarPath(entry) : undefined;
-        if (!relativeEntry) {
-          return [];
-        }
-        const path = resolve(extractRoot, relativeEntry);
-        if (!pathIsInside(path, resolve(extractRoot))) {
-          return [];
-        }
-        if (!existsSync(path) || !statSync(path).isFile()) {
-          return [];
-        }
-        const mediaType = mediaTypeForPath(path);
-        const savedPath = mediaType ? autoSaveMedia(environmentId, path) : undefined;
-        return mediaType
-          ? [
-              {
-                requestedPath,
-                path,
-                savedPath,
-                url: mediaUrl(environmentId, relativeEntry),
-                mediaType
-              }
-            ]
-          : [];
-      });
-    } catch (error) {
-      copyAutoSavedMediaToCache(environmentId, extractRoot, requestedPaths);
-      const fallback = resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
-      if (fallback) {
-        return fallback;
-      }
-      throw error;
-    } finally {
       rmSync(tarPath, { force: true });
-    }
+      mkdirSync(extractRoot, { recursive: true });
+
+      try {
+        const buffer = await createClient().downloadEnvironmentSnapshot(environmentId);
+        writeFileSync(tarPath, Buffer.from(buffer));
+
+        const listed = await execFileAsync("tar", ["-tf", tarPath], { maxBuffer: 5 * 1024 * 1024 });
+        const tarEntries = listed.stdout
+          .split("\n")
+          .map((entry) => entry.trim())
+          .map(normalizedRelativeTarPath)
+          .filter((entry): entry is string => {
+            if (!entry) {
+              return false;
+            }
+            return Boolean(mediaTypeForPath(entry));
+          });
+        const selectedEntries = unique(
+          tarEntries.filter((entry) =>
+            requestedPaths.some((requestedPath) => requestedPathMatchesTarEntry(requestedPath, entry))
+          )
+        );
+
+        if (selectedEntries.length === 0) {
+          return [];
+        }
+
+        await extractTarEntries(cacheRoot, tarPath, extractRoot, selectedEntries);
+
+        return requestedPaths.flatMap((requestedPath) => {
+          const entry = selectedEntries.find((candidate) => requestedPathMatchesTarEntry(requestedPath, candidate));
+          const relativeEntry = entry ? normalizedRelativeTarPath(entry) : undefined;
+          if (!relativeEntry) {
+            return [];
+          }
+          const path = resolve(extractRoot, relativeEntry);
+          if (!pathIsInside(path, resolve(extractRoot))) {
+            return [];
+          }
+          if (!existsSync(path) || !statSync(path).isFile()) {
+            return [];
+          }
+          const mediaType = mediaTypeForPath(path);
+          const savedPath = mediaType ? autoSaveMedia(environmentId, path) : undefined;
+          return mediaType
+            ? [
+                {
+                  requestedPath,
+                  path,
+                  savedPath,
+                  url: mediaUrl(environmentId, relativeEntry),
+                  mediaType
+                }
+              ]
+            : [];
+        });
+      } catch (error) {
+        copyAutoSavedMediaToCache(environmentId, extractRoot, requestedPaths);
+        const fallback = resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
+        if (fallback) {
+          return fallback;
+        }
+        throw error;
+      } finally {
+        rmSync(tarPath, { force: true });
+      }
+    });
   }
 );
 

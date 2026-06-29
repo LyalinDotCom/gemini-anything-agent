@@ -1,37 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Bot } from "lucide-react";
 import {
-  Bot,
-  CheckCircle2,
-  Download,
-  File,
-  Loader2,
-  MessageSquare,
-  PanelLeftClose,
-  PanelLeftOpen,
-  PanelRightOpen,
-  Plus,
-  RefreshCw,
-  Settings,
-  Trash2,
-  XCircle
-} from "lucide-react";
-import {
-  ANTIGRAVITY_BASE_AGENT,
-  extractInteractionOutputText,
-  managedAgentManifest,
   validateInteractionCreate,
   type Interaction,
-  type InteractionCreateRequest,
-  type InteractionInput,
-  type InteractionStreamEvent,
-  type ManagedAgent,
-  type ToolType
+  type ManagedAgent
 } from "@sdk";
 import type {
   EnvironmentOutputFile,
   EnsureAnythingAgentResult,
-  InteractionStreamSnapshot,
-  IpcError,
   ResolvedEnvironmentMedia,
   RuntimeConfig
 } from "../shared/electron-api";
@@ -53,8 +29,51 @@ import {
   withAutoContinuation,
   withAutoEnvironment
 } from "./lib/continuity";
-import { buildTimeline, type TimelineItem } from "./lib/timeline";
 import type { EnvironmentOutputState, SessionMediaState } from "./lib/mediaState";
+import {
+  ALL_AGENT_TOOLS,
+  buildChatInteraction,
+  clearComposeInput,
+  composeFromRequest,
+  composeInputSnapshot,
+  hasComposeInput,
+  imageAttachmentsFromCompose,
+  imagePartsFromRequest,
+  mergeImageParts,
+  promptForInput,
+  restoreComposeInput,
+  type PendingComposeInput
+} from "./lib/interactionInput";
+import {
+  buildConversations,
+  NEW_CONVERSATION_DRAFT,
+  NEW_CONVERSATION_ID,
+  type ConversationSummary
+} from "./lib/conversations";
+import {
+  cachedMediaStateForSession,
+  extractMediaPaths,
+  mediaItemsCoverPaths,
+  mergeResolvedMedia,
+  outputMediaItemsForPaths,
+  shouldAutoResolveMedia,
+  textFileNameForLabel
+} from "./lib/mediaResolver";
+import {
+  completedAtForInteraction,
+  fallbackAgent,
+  interactionIsTerminal,
+  latestStreamEventId,
+  mediaSearchTextForSession,
+  mergeStreamEvents,
+  patchSeedFromStreamEvent,
+  patchSeedFromStreamSnapshot,
+  sessionCanReconnect,
+  shouldResumeBackgroundSession,
+  terminalCompletedAt,
+  timelineItemsForSession
+} from "./lib/sessionState";
+import { bridgeUnavailable, FALLBACK_RUNTIME } from "./lib/runtimeConfig";
 import { outputMediaItem } from "./lib/outputFiles";
 import { Composer } from "./components/Composer";
 import { Transcript } from "./components/Transcript";
@@ -62,533 +81,15 @@ import { SettingsModal } from "./components/Overlays";
 import { MediaLightbox, SessionMedia } from "./components/GeneratedMedia";
 import { OutputFilesPanel } from "./components/OutputFilesPanel";
 import { SamplePromptGallery } from "./components/SamplePromptGallery";
-
-type StatusEvent = {
-  id: string;
-  level: "info" | "success" | "error";
-  title: string;
-  detail?: string;
-};
-
-type PendingComposeInput = Pick<ComposeState, "inputMode" | "input" | "parts">;
-
-type ConversationSummary = {
-  id: string;
-  title: string;
-  sessions: Session[];
-  latestAt: number;
-  environmentId?: string;
-  draft?: boolean;
-  running?: boolean;
-};
-
-const FALLBACK_RUNTIME: RuntimeConfig = {
-  hasApiKey: false,
-  apiRevision: managedAgentManifest.api.apiRevision,
-  baseUrl: managedAgentManifest.api.baseUrl,
-  envPath: ".env",
-  docsLastChecked: "2026-06-22",
-  agentId: "gemini-anything-agent",
-  npmPackage: "@lyalindotcom/gai",
-  npmVersion: "latest"
-};
-
-const ALL_AGENT_TOOLS: ToolType[] = ["code_execution", "google_search", "url_context"];
-const NEW_CONVERSATION_ID = "new";
-const NEW_CONVERSATION_DRAFT: ConversationSummary = {
-  id: NEW_CONVERSATION_ID,
-  title: "New chat",
-  sessions: [],
-  latestAt: 0,
-  draft: true,
-  running: false
-};
-
-const bridgeUnavailable: IpcError = {
-  name: "BridgeUnavailable",
-  message: "Run the Electron app with npm run dev for live managed-agent calls."
-};
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  Boolean(value) && typeof value === "object" && !Array.isArray(value);
-
-const composeInputSnapshot = (state: ComposeState): PendingComposeInput => ({
-  inputMode: state.inputMode,
-  input: state.input,
-  parts: state.parts.map((part) => ({ ...part }))
-});
-
-const clearComposeInput = (state: ComposeState): ComposeState => ({
-  ...state,
-  input: "",
-  parts: []
-});
-
-const restoreComposeInput = (
-  state: ComposeState,
-  snapshot: PendingComposeInput
-): ComposeState => ({
-  ...state,
-  inputMode: snapshot.inputMode,
-  input: snapshot.input,
-  parts: snapshot.parts.map((part) => ({ ...part }))
-});
-
-const composeToInput = (compose: ComposeState): InteractionInput => {
-  const images = compose.parts.filter((part): part is ImagePartDraft => part.kind === "image");
-  const text = compose.input.trim();
-  if (images.length === 0) {
-    return compose.input;
-  }
-  return [
-    ...(text ? [{ type: "text" as const, text: compose.input }] : []),
-    ...images.map((part) => ({ type: "image" as const, data: part.data, mime_type: part.mimeType }))
-  ];
-};
-
-const hasComposeInput = (compose: ComposeState): boolean =>
-  compose.input.trim().length > 0 || compose.parts.some((part) => part.kind === "image");
-
-const buildChatInteraction = (
-  agentId: string,
-  compose: ComposeState
-): InteractionCreateRequest => {
-  const request: InteractionCreateRequest = {
-    agent: agentId,
-    input: composeToInput(compose),
-    environment: "remote",
-    store: compose.store
-  };
-
-  if (compose.background && compose.store) {
-    request.background = true;
-  }
-  if (compose.serviceTier !== "standard") {
-    request.service_tier = compose.serviceTier;
-  }
-  if (compose.thinkingSummaries !== "none") {
-    request.agent_config = {
-      type: "dynamic",
-      thinking_summaries: compose.thinkingSummaries
-    };
-  }
-  if (compose.previousInteractionId.trim()) {
-    request.previous_interaction_id = compose.previousInteractionId.trim();
-  }
-  if (compose.overrideSystemInstruction && compose.systemInstruction.trim()) {
-    request.system_instruction = compose.systemInstruction.trim();
-  }
-  if (compose.overrideTools) {
-    request.tools = ALL_AGENT_TOOLS.map((type) => ({ type }));
-  }
-  if (compose.overrideEnvironment && compose.environmentId.trim()) {
-    request.environment = compose.environmentId.trim();
-  }
-
-  return request;
-};
-
-const promptForInput = (input: InteractionCreateRequest["input"]): string => {
-  if (typeof input === "string") {
-    return input;
-  }
-  return input
-    .map((part) => (part.type === "text" ? part.text : `[${part.mime_type} image]`))
-    .join("\n")
-    .trim();
-};
-
-const composeFromRequest = (request: InteractionCreateRequest): ComposeState => {
-  const input = typeof request.input === "string"
-    ? request.input
-    : request.input
-        .filter((part) => part.type === "text")
-        .map((part) => part.text)
-        .join("\n");
-  const parts = Array.isArray(request.input)
-    ? request.input.flatMap((part, index): ImagePartDraft[] =>
-        part.type === "image"
-          ? [
-              {
-                id: uid(),
-                kind: "image",
-                data: part.data,
-                mimeType: part.mime_type,
-                name: `attached-image-${index + 1}`,
-                bytes: Math.round((part.data.length * 3) / 4)
-              }
-            ]
-          : []
-      )
-    : [];
-  const environmentId =
-    typeof request.environment === "string" && request.environment !== "remote" ? request.environment : "";
-
-  return {
-    ...initialCompose,
-    inputMode: parts.length ? "parts" : "string",
-    input,
-    parts,
-    store: request.store ?? initialCompose.store,
-    autoContinue: !request.previous_interaction_id,
-    reuseEnvironment: request.environment === "remote",
-    background: request.background ?? initialCompose.background,
-    serviceTier: request.service_tier ?? initialCompose.serviceTier,
-    thinkingSummaries: request.agent_config?.thinking_summaries ?? initialCompose.thinkingSummaries,
-    previousInteractionId: request.previous_interaction_id ?? "",
-    overrideSystemInstruction: Boolean(request.system_instruction),
-    systemInstruction: request.system_instruction ?? "",
-    overrideTools: Boolean(request.tools?.length),
-    overrideEnvironment: Boolean(environmentId),
-    environmentId
-  };
-};
-
-const firstPromptLine = (input: InteractionCreateRequest["input"]): string => {
-  const prompt = promptForInput(input).trim().replace(/\s+/g, " ");
-  if (!prompt) {
-    return "Untitled conversation";
-  }
-  return prompt.length > 54 ? `${prompt.slice(0, 53)}...` : prompt;
-};
-
-const formatConversationTime = (value: number): string =>
-  new Date(value).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit"
-  });
-
-const MEDIA_PATH_PATTERN =
-  /(?:\/workspace\/|workspace\/|\/tmp\/|outputs\/)[^\s`"'()[\]{}<>]+\.(?:png|jpe?g|webp|gif|avif|svg|mp4|webm|mov|m4v|wav|mp3|m4a|aac|ogg|flac)(?:[?#][^\s`"'()[\]{}<>]+)?/gi;
-
-const cleanMediaPath = (value: string): string =>
-  value.replace(/[),.;:!?]+$/g, "").replace(/[?#].*$/, "");
-
-const TRANSCRIPT_REQUEST_PATTERN = /\b(transcrib(?:e|ed|ing)?|transcript|captions?|subtitles?|srt)\b/i;
-const MEDIA_PRODUCING_REQUEST_PATTERN =
-  /\b(?:image|picture|photo|video|tts|voiceover|narration|convert|mp3|generate\s+(?:an?\s+)?(?:image|video|audio)|create\s+(?:an?\s+)?(?:image|video|audio|podcast)|make\s+(?:an?\s+)?(?:image|video|audio|podcast))\b/i;
-
-const extractMediaPaths = (text: string | undefined): string[] => {
-  if (!text) {
-    return [];
-  }
-  return [...new Set([...text.matchAll(MEDIA_PATH_PATTERN)].map((match) => cleanMediaPath(match[0])))];
-};
-
-const shouldAutoResolveMedia = (session: Session): boolean => {
-  const prompt = promptForInput(session.request.input);
-  const transcriptionOnly =
-    TRANSCRIPT_REQUEST_PATTERN.test(prompt) && !MEDIA_PRODUCING_REQUEST_PATTERN.test(prompt);
-  return !transcriptionOnly;
-};
-
-const mediaPathMatches = (item: ResolvedEnvironmentMedia, requestedPath: string): boolean => {
-  const requested = cleanMediaPath(requestedPath).replace(/^[/\\]+/, "").replace(/\\/g, "/");
-  const requestedWithoutWorkspace = requested.replace(/^workspace\//, "");
-  const candidates = [item.requestedPath, item.path, item.savedPath]
-    .filter((value): value is string => Boolean(value))
-    .map((value) => cleanMediaPath(value).replace(/^[/\\]+/, "").replace(/\\/g, "/"));
-  return candidates.some((candidate) => {
-    const withoutWorkspace = candidate.replace(/^workspace\//, "");
-    return (
-      candidate === requested ||
-      withoutWorkspace === requestedWithoutWorkspace ||
-      candidate.endsWith(`/${requested}`) ||
-      withoutWorkspace.endsWith(`/${requestedWithoutWorkspace}`)
-    );
-  });
-};
-
-const mediaItemsCoverPaths = (items: ResolvedEnvironmentMedia[] | undefined, paths: string[]): boolean =>
-  Boolean(items?.length) && paths.every((path) => items!.some((item) => mediaPathMatches(item, path)));
-
-const mergeResolvedMedia = (
-  current: ResolvedEnvironmentMedia[] | undefined,
-  incoming: ResolvedEnvironmentMedia[]
-): ResolvedEnvironmentMedia[] => {
-  const merged = [...(current ?? [])];
-  for (const item of incoming) {
-    const index = merged.findIndex(
-      (candidate) =>
-        candidate.requestedPath === item.requestedPath ||
-        (candidate.savedPath && item.savedPath && candidate.savedPath === item.savedPath) ||
-        candidate.url === item.url
-    );
-    if (index >= 0) {
-      merged[index] = item;
-    } else {
-      merged.push(item);
-    }
-  }
-  return merged;
-};
-
-const cachedMediaStateForSession = (session: Session): SessionMediaState | undefined =>
-  session.resolvedMedia?.length
-    ? {
-        loading: false,
-        items: session.resolvedMedia
-      }
-    : undefined;
-
-const textFileNameForLabel = (label: string): string => {
-  const stem = label
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80) || "agent-output";
-  return stem.endsWith(".md") || stem.endsWith(".txt") ? stem : `${stem}.md`;
-};
-
-const SessionControls = ({
-  session,
-  reconnecting,
-  canReconnect,
-  canRetry,
-  canCancel,
-  onReconnect,
-  onRetry,
-  onCancel
-}: {
-  session: Session;
-  reconnecting: boolean;
-  canReconnect: boolean;
-  canRetry: boolean;
-  canCancel: boolean;
-  onReconnect: () => void;
-  onRetry: () => void;
-  onCancel: () => void;
-}) => {
-  const interactionId = session.seed?.id;
-  const showReconnect = Boolean(interactionId && canReconnect);
-  if (reconnecting || session.streaming || (!showReconnect && !canRetry)) {
-    return null;
-  }
-
-  return (
-    <div className="session-controls">
-      {showReconnect && (
-        <button
-          type="button"
-          className="ghost-button sm"
-          disabled={reconnecting}
-          title="Reconnect to this interaction stream and refresh status"
-          onClick={onReconnect}
-        >
-          <RefreshCw size={12} className={reconnecting ? "spin" : undefined} />
-          {reconnecting ? "Reconnecting" : "Reconnect"}
-        </button>
-      )}
-      {canRetry && (
-        <button
-          type="button"
-          className="ghost-button sm"
-          title="Restore this turn's prompt and options in the composer"
-          onClick={onRetry}
-        >
-          <RefreshCw size={12} />
-          Retry prompt
-        </button>
-      )}
-      {session.streaming && (
-        <button
-          type="button"
-          className="ghost-button sm danger"
-          disabled={!canCancel}
-          title="Cancel this remote interaction"
-          onClick={onCancel}
-        >
-          <XCircle size={12} />
-          Cancel
-        </button>
-      )}
-    </div>
-  );
-};
-
-const conversationRootId = (
-  session: Session,
-  byId: Map<string, Session>
-): string => {
-  let current = session;
-  const seen = new Set<string>();
-  while (current.parentLocalId && byId.has(current.parentLocalId) && !seen.has(current.localId)) {
-    seen.add(current.localId);
-    current = byId.get(current.parentLocalId)!;
-  }
-  return current.localId;
-};
-
-const buildConversations = (agentSessions: Session[]): ConversationSummary[] => {
-  const byId = new Map(agentSessions.map((session) => [session.localId, session]));
-  const grouped = new Map<string, Session[]>();
-  for (const session of agentSessions) {
-    const rootId = conversationRootId(session, byId);
-    grouped.set(rootId, [...(grouped.get(rootId) ?? []), session]);
-  }
-
-  return [...grouped.entries()]
-    .map(([id, group]) => {
-      const sorted = [...group].sort((left, right) => left.startedAt - right.startedAt);
-      const latestAt = sorted.reduce((max, session) => Math.max(max, session.startedAt), 0);
-      return {
-        id,
-        title: firstPromptLine(sorted[0]?.request.input ?? ""),
-        sessions: sorted,
-        latestAt,
-        environmentId: [...sorted].reverse().map(sessionEnvironmentId).find((value): value is string => Boolean(value)),
-        running: sorted.some((session) => session.streaming)
-      };
-    })
-    .sort((left, right) => right.latestAt - left.latestAt);
-};
-
-const timelineItemsForSession = (session: Session): TimelineItem[] => {
-  const items = buildTimeline(session.seed, session.events);
-  if (!session.error) {
-    return items;
-  }
-  return [
-    ...items,
-    {
-      id: "error",
-      kind: "error",
-      title: session.error.name,
-      body: session.error.message,
-      summary: session.error.message,
-      status: "error"
-    }
-  ];
-};
-
-const mediaSearchTextForSession = (session: Session): string =>
-  [
-    extractInteractionOutputText(session.seed),
-    ...timelineItemsForSession(session).flatMap((item) => [
-      item.summary,
-      item.body,
-      ...(item.details?.flatMap((detail) => [detail.summary, detail.body]) ?? [])
-    ])
-  ]
-    .filter((value): value is string => Boolean(value))
-    .join("\n");
-
-const patchSeedFromStreamEvent = (
-  seed: Interaction | undefined,
-  event: InteractionStreamEvent
-): Interaction | undefined => {
-  if (event.interaction) {
-    return { ...(seed ?? {}), ...event.interaction };
-  }
-  if (event.interaction_id || event.status) {
-    const id = event.interaction_id ?? seed?.id;
-    if (id) {
-      return {
-        ...(seed ?? { id }),
-        id,
-        status: event.status ?? seed?.status
-      };
-    }
-  }
-  if (event.event_type === "step.start" && isRecord(event.step)) {
-    const id = seed?.id;
-    if (id) {
-      return {
-        ...seed,
-        id,
-        steps: [...(Array.isArray(seed.steps) ? seed.steps : []), event.step]
-      };
-    }
-  }
-  return seed;
-};
-
-const patchSeedFromStreamSnapshot = (
-  seed: Interaction | undefined,
-  snapshot: InteractionStreamSnapshot
-): Interaction | undefined => {
-  const fromEvents = snapshot.events.reduce<Interaction | undefined>(
-    (current, event) => patchSeedFromStreamEvent(current, event),
-    seed
-  );
-  if (snapshot.latestInteraction) {
-    return { ...(fromEvents ?? {}), ...snapshot.latestInteraction };
-  }
-  return fromEvents;
-};
-
-const NON_TERMINAL_INTERACTION_STATUS = new Set([
-  "queued",
-  "running",
-  "in_progress",
-  "in-progress",
-  "pending",
-  "processing",
-  "started"
-]);
-
-const interactionIsTerminal = (interaction: Interaction): boolean => {
-  if (extractInteractionOutputText(interaction)) {
-    return true;
-  }
-  const status = interaction.status?.toLowerCase();
-  return Boolean(status && !NON_TERMINAL_INTERACTION_STATUS.has(status));
-};
-
-const terminalCompletedAt = (session: Session, completedAt = Date.now()): number | undefined =>
-  session.completedAt ?? completedAt;
-
-const completedAtForInteraction = (
-  session: Session,
-  interaction: Interaction | undefined,
-  completedAt = Date.now()
-): number | undefined =>
-  interaction && interactionIsTerminal(interaction)
-    ? terminalCompletedAt(session, completedAt)
-    : session.completedAt;
-
-const streamEventKey = (event: InteractionStreamEvent): string =>
-  event.event_id ?? `${event.event_type}:${event.index ?? ""}:${JSON.stringify(event).slice(0, 500)}`;
-
-const mergeStreamEvents = (
-  current: InteractionStreamEvent[] | undefined,
-  incoming: InteractionStreamEvent[]
-): InteractionStreamEvent[] => {
-  const merged = [...(current ?? [])];
-  const seen = new Set(merged.map(streamEventKey));
-  for (const event of incoming) {
-    const key = streamEventKey(event);
-    if (!seen.has(key)) {
-      merged.push(event);
-      seen.add(key);
-    }
-  }
-  return merged.slice(-300);
-};
-
-const latestStreamEventId = (events: InteractionStreamEvent[] | undefined): string | undefined =>
-  [...(events ?? [])].reverse().find((event) => event.event_id)?.event_id;
-
-const shouldResumeBackgroundSession = (session: Session): boolean =>
-  session.request.background === true &&
-  Boolean(session.seed?.id) &&
-  !session.streaming &&
-  !session.error &&
-  !interactionIsTerminal(session.seed!);
-
-const sessionCanReconnect = (session: Session): boolean =>
-  Boolean(session.seed?.id) &&
-  !session.streaming &&
-  (Boolean(session.error) || !interactionIsTerminal(session.seed!));
-
-const fallbackAgent = (agentId: string): ManagedAgent => ({
-  id: agentId,
-  base_agent: ANTIGRAVITY_BASE_AGENT,
-  description: "Preconfigured Gemini Anything managed agent."
-});
+import { SessionControls } from "./components/SessionControls";
+import { ConversationSidebar } from "./components/ConversationSidebar";
+import {
+  AppStatusBar,
+  ChatHeader,
+  OutputPanelToggle,
+  TopBar,
+  type StatusEvent
+} from "./components/AppChrome";
 
 const snapshotAgentForRun = async (
   agentId: string,
@@ -619,6 +120,7 @@ export const App = () => {
   const [mediaBySession, setMediaBySession] = useState<Record<string, SessionMediaState>>({});
   const [activeMedia, setActiveMedia] = useState<ResolvedEnvironmentMedia | null>(null);
   const [outputFilesByEnvironment, setOutputFilesByEnvironment] = useState<Record<string, EnvironmentOutputState>>({});
+  const [optimisticSentImages, setOptimisticSentImages] = useState<Record<string, ImagePartDraft[]>>({});
   const [startingConversationIds, setStartingConversationIds] = useState<Record<string, boolean>>({});
   const [cancelingSessionIds, setCancelingSessionIds] = useState<Record<string, boolean>>({});
   const activeResumeIds = useRef<Set<string>>(new Set());
@@ -675,6 +177,14 @@ export const App = () => {
   const chatSessions = useMemo(
     () => [...selectedSessions].sort((left, right) => left.startedAt - right.startedAt),
     [selectedSessions]
+  );
+  const sentImageParts = useMemo(
+    () =>
+      mergeImageParts([
+        ...chatSessions.flatMap((session) => imagePartsFromRequest(session.request, session.imageAttachments)),
+        ...(optimisticSentImages[activeConversationId] ?? [])
+      ]),
+    [activeConversationId, chatSessions, optimisticSentImages]
   );
   const baseInteraction = useMemo(
     () => buildChatInteraction(agentId, compose),
@@ -832,7 +342,7 @@ export const App = () => {
     for (const session of chatSessions) {
       void resolveMediaForSession(session);
     }
-  }, [chatSessions]);
+  }, [chatSessions, latestRunId, outputFilesByEnvironment]);
 
   useEffect(() => {
     if (!latestEnvironmentId || selectedConversationRunning || !window.managedAgents?.listEnvironmentOutputFiles) {
@@ -912,12 +422,80 @@ export const App = () => {
     });
   };
 
+  const setOptimisticSentImagesForKeys = (keys: string[], images: ImagePartDraft[]) => {
+    if (images.length === 0) {
+      return;
+    }
+    setOptimisticSentImages((current) => {
+      const next = { ...current };
+      for (const key of keys) {
+        next[key] = mergeImageParts([...(next[key] ?? []), ...images]);
+      }
+      return next;
+    });
+  };
+
+  const clearOptimisticSentImagesForKeys = (keys: string[]) => {
+    setOptimisticSentImages((current) => {
+      const next = { ...current };
+      for (const key of keys) {
+        delete next[key];
+      }
+      return next;
+    });
+  };
+
+  const pruneConversationBookkeeping = (conversation: ConversationSummary) => {
+    const deletedIds = new Set(conversation.sessions.map((session) => session.localId));
+    const deletedEnvironmentIds = new Set(
+      conversation.sessions.map(sessionEnvironmentId).filter((value): value is string => Boolean(value))
+    );
+    const remainingEnvironmentIds = new Set(
+      sessions
+        .filter((session) => !deletedIds.has(session.localId))
+        .map(sessionEnvironmentId)
+        .filter((value): value is string => Boolean(value))
+    );
+
+    setMediaBySession((current) =>
+      Object.fromEntries(Object.entries(current).filter(([localId]) => !deletedIds.has(localId)))
+    );
+    setOutputFilesByEnvironment((current) =>
+      Object.fromEntries(
+        Object.entries(current).filter(
+          ([environmentId]) => !deletedEnvironmentIds.has(environmentId) || remainingEnvironmentIds.has(environmentId)
+        )
+      )
+    );
+
+    requestedMediaKeys.current = new Set(
+      [...requestedMediaKeys.current].filter((key) => {
+        const [localId, environmentId] = key.split(":", 3);
+        return (
+          !deletedIds.has(localId) &&
+          (!deletedEnvironmentIds.has(environmentId) || remainingEnvironmentIds.has(environmentId))
+        );
+      })
+    );
+    outputRefreshSignatures.current = Object.fromEntries(
+      Object.entries(outputRefreshSignatures.current).filter(
+        ([environmentId]) => !deletedEnvironmentIds.has(environmentId) || remainingEnvironmentIds.has(environmentId)
+      )
+    );
+    for (const environmentId of deletedEnvironmentIds) {
+      if (!remainingEnvironmentIds.has(environmentId)) {
+        autoOpenedOutputEnvironments.current.delete(environmentId);
+      }
+    }
+  };
+
   const restorePendingRunInput = (localId: string, conversationId?: string) => {
     const snapshot = pendingRunInputs.current.get(localId);
     if (!snapshot) {
       return;
     }
     pendingRunInputs.current.delete(localId);
+    clearOptimisticSentImagesForKeys([localId, ...(conversationId ? [conversationId] : [])]);
     if (conversationId && activeConversationIdRef.current !== conversationId) {
       return;
     }
@@ -1009,7 +587,10 @@ export const App = () => {
     const streamId = uid();
     const parent = selectedSessions.find((session) => session.seed?.id === request.previous_interaction_id);
     const startsNewConversation = !parent;
+    const pendingImageParts = compose.parts.filter((part): part is ImagePartDraft => part.kind === "image");
+    const imageAttachments = imageAttachmentsFromCompose(compose);
     pendingRunInputs.current.set(localId, composeInputSnapshot(compose));
+    setOptimisticSentImagesForKeys([sourceConversationId, localId], pendingImageParts);
     setConversationStarting(sourceConversationId, true);
     setCompose((current) => clearComposeInput(current));
     setLatestRunId(localId);
@@ -1023,6 +604,7 @@ export const App = () => {
 
     if (ensuredAgent.created || ensuredAgent.recreated) {
       request.environment = "remote";
+      delete request.previous_interaction_id;
     }
 
     const agentSnapshot = await snapshotAgentForRun(request.agent, fallbackAgent(request.agent));
@@ -1032,6 +614,7 @@ export const App = () => {
       agentSnapshot,
       request,
       startedAt: Date.now(),
+      imageAttachments,
       parentLocalId: parent?.localId
     };
 
@@ -1480,6 +1063,37 @@ export const App = () => {
     }
   }
 
+  function mediaStateForSession(session: Session): SessionMediaState | undefined {
+    const runtimeState = mediaBySession[session.localId];
+    const persistedState = cachedMediaStateForSession(session);
+    if (session.streaming) {
+      return runtimeState ?? persistedState;
+    }
+
+    const environmentId = sessionEnvironmentId(session);
+    const outputState = environmentId ? outputFilesByEnvironment[environmentId] : undefined;
+    const paths = extractMediaPaths(mediaSearchTextForSession(session));
+    const outputItems = outputMediaItemsForPaths(outputState?.items, paths);
+    const mergedItems = mergeResolvedMedia(
+      mergeResolvedMedia(persistedState?.items, outputItems),
+      runtimeState?.items ?? []
+    );
+
+    if (mergedItems.length > 0) {
+      return {
+        loading: false,
+        items: mergedItems,
+        progress: 100
+      };
+    }
+
+    if (runtimeState?.loading && !session.streaming && session.localId !== latestRunId) {
+      return persistedState;
+    }
+
+    return runtimeState ?? persistedState;
+  }
+
   async function loadOutputFiles(environmentId: string, force = false) {
     if (!window.managedAgents?.listEnvironmentOutputFiles) {
       return;
@@ -1554,12 +1168,41 @@ export const App = () => {
       return;
     }
     const environmentId = sessionEnvironmentId(session);
+    if (!environmentId || session.streaming) {
+      return;
+    }
     const paths = extractMediaPaths(mediaSearchTextForSession(session));
-    if (!environmentId || paths.length === 0 || session.streaming) {
+    if (paths.length === 0) {
       return;
     }
     const requestKey = `${session.localId}:${environmentId}:${paths.join("|")}`;
     const cachedItems = session.resolvedMedia ?? mediaBySession[session.localId]?.items;
+    const outputItems = outputMediaItemsForPaths(outputFilesByEnvironment[environmentId]?.items, paths);
+    if (!force && outputItems.length > 0) {
+      requestedMediaKeys.current.add(requestKey);
+      const items = mergeResolvedMedia(cachedItems, outputItems);
+      setMediaBySession((current) => ({
+        ...current,
+        [session.localId]: {
+          loading: false,
+          items,
+          progress: 100
+        }
+      }));
+      if (!mediaItemsCoverPaths(session.resolvedMedia, paths)) {
+        setSessions((current) =>
+          current.map((currentSession) =>
+            currentSession.localId === session.localId
+              ? {
+                  ...currentSession,
+                  resolvedMedia: mergeResolvedMedia(currentSession.resolvedMedia, outputItems)
+                }
+              : currentSession
+          )
+        );
+      }
+      return;
+    }
     if (!force && mediaItemsCoverPaths(cachedItems, paths)) {
       requestedMediaKeys.current.add(requestKey);
       setMediaBySession((current) => ({
@@ -1581,13 +1224,14 @@ export const App = () => {
 
     requestedMediaKeys.current.add(requestKey);
     const existingItems = cachedItems ?? [];
+    const showInlineLoading = existingItems.length === 0 && (force || session.streaming || session.localId === latestRunId);
     setMediaBySession((current) => ({
       ...current,
       [session.localId]: {
-        loading: existingItems.length === 0,
+        loading: showInlineLoading,
         items: force ? existingItems : (current[session.localId]?.items ?? existingItems),
-        progress: existingItems.length === 0 ? 35 : 100,
-        stage: existingItems.length === 0 ? "Downloading generated media from the managed workspace..." : undefined
+        progress: showInlineLoading ? 35 : 100,
+        stage: showInlineLoading ? "Downloading generated media from the managed workspace..." : undefined
       }
     }));
 
@@ -1635,7 +1279,9 @@ export const App = () => {
       return;
     }
     const ids = new Set(selectedConversation.sessions.map((session) => session.localId));
+    pruneConversationBookkeeping(selectedConversation);
     setSessions((current) => current.filter((session) => !ids.has(session.localId)));
+    clearOptimisticSentImagesForKeys([selectedConversation.id, NEW_CONVERSATION_ID]);
     setCompose(initialCompose);
     setLatestRunId(null);
     setActiveConversationId(NEW_CONVERSATION_ID);
@@ -1644,6 +1290,7 @@ export const App = () => {
 
   function startNewConversation() {
     setActiveConversationId(NEW_CONVERSATION_ID);
+    clearOptimisticSentImagesForKeys([NEW_CONVERSATION_ID]);
     setCompose(initialCompose);
     setLatestRunId(null);
     pushStatus({ level: "info", title: "New conversation", detail: "Next message starts fresh." });
@@ -1671,9 +1318,12 @@ export const App = () => {
       return;
     }
     const ids = new Set(conversation.sessions.map((session) => session.localId));
+    pruneConversationBookkeeping(conversation);
     setSessions((current) => current.filter((session) => !ids.has(session.localId)));
+    clearOptimisticSentImagesForKeys([conversation.id]);
     if (activeConversationId === conversation.id) {
       setActiveConversationId(NEW_CONVERSATION_ID);
+      clearOptimisticSentImagesForKeys([NEW_CONVERSATION_ID]);
       setCompose(initialCompose);
       setLatestRunId(null);
     }
@@ -1708,139 +1358,36 @@ export const App = () => {
 
   return (
     <div className="app chat-app">
-      <header className="topbar">
-        <div className="brand">
-          <h1>Gemini Anything Agent</h1>
-        </div>
-
-        <div className="topbar-actions">
-          <span className={`agent-status ${hasKey ? "ok" : "warn"}`}>
-            <span className="status-dot" />
-            {hasKey ? "Ready" : "Key missing"}
-          </span>
-        </div>
-      </header>
+      <TopBar hasKey={hasKey} />
 
       <main
         className={`shell chat-shell ${sidebarCollapsed ? "conversation-collapsed" : ""} ${
           outputPanelVisible ? "has-output-panel" : ""
         }`}
       >
-        <aside
-          className={`conversation-sidebar ${sidebarCollapsed ? "collapsed" : ""}`}
-          aria-label="Conversations"
-        >
-          <div className="conversation-head">
-            <h2>Conversations</h2>
-            <button
-              type="button"
-              className="head-icon sidebar-collapse"
-              title={sidebarCollapsed ? "Expand conversations" : "Collapse conversations"}
-              onClick={() => setSidebarCollapsed((value) => !value)}
-            >
-              {sidebarCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
-            </button>
-            <button
-              type="button"
-              className="sidebar-new"
-              title="New conversation"
-              aria-label="New conversation"
-              disabled={!appReady}
-              onClick={startNewConversation}
-            >
-              <Plus size={15} />
-            </button>
-          </div>
-
-          <div className="conversation-list">
-            {visibleConversations.length === 0 ? (
-              <div className="conversation-empty">No saved local conversations yet.</div>
-            ) : (
-              visibleConversations.map((conversation) => (
-                <div
-                  className={`conversation-row ${conversation.draft ? "draft" : ""} ${
-                    conversation.id === activeConversationId ? "active" : ""
-                  } ${conversation.running ? "running" : ""}`}
-                  key={conversation.id}
-                >
-                  <button
-                    type="button"
-                    className="conversation-select"
-                    aria-current={conversation.id === activeConversationId ? "true" : undefined}
-                    disabled={!appReady}
-                    onClick={() => selectConversation(conversation.id)}
-                  >
-                    {conversation.running ? (
-                      <Loader2 className="spin conversation-running-icon" size={14} />
-                    ) : (
-                      <MessageSquare size={14} />
-                    )}
-                    <span>
-                      <strong>{conversation.title}</strong>
-                      <em>
-                        {conversation.draft
-                          ? "Draft"
-                          : `${conversation.sessions.length} turn${conversation.sessions.length === 1 ? "" : "s"} · ${formatConversationTime(conversation.latestAt)}`}
-                      </em>
-                    </span>
-                  </button>
-                  {!conversation.draft && (
-                    <button
-                      type="button"
-                      className="conversation-delete"
-                      disabled={!appReady || conversation.running}
-                      title="Delete local conversation"
-                      onClick={() => deleteConversation(conversation)}
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  )}
-                </div>
-              ))
-            )}
-          </div>
-          <div className="conversation-footer">
-            <button
-              type="button"
-              className="sidebar-settings"
-              title="Settings"
-              aria-label="Settings"
-              onClick={() => setSettingsOpen(true)}
-            >
-              <Settings size={15} />
-              <span>Settings</span>
-            </button>
-          </div>
-        </aside>
+        <ConversationSidebar
+          collapsed={sidebarCollapsed}
+          appReady={appReady}
+          activeConversationId={activeConversationId}
+          conversations={visibleConversations}
+          onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
+          onNewConversation={startNewConversation}
+          onSelectConversation={selectConversation}
+          onDeleteConversation={deleteConversation}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
 
         <section className="chat-main" aria-label="Managed agent chat">
-          <div className="chat-main-head">
-            <span className="chat-main-title">
-              {selectedConversation ? selectedConversation.title : "New chat"}
-            </span>
-            {selectedConversationRunning && <span className="live-dot">working…</span>}
-            <span className="chat-main-head-spacer" />
-            <button
-              type="button"
-              className="head-icon"
-              title={latestEnvironmentId ? `Snapshot ${latestEnvironmentId}` : "No environment yet"}
-              aria-label="Download environment snapshot"
-              disabled={!appReady || !latestEnvironmentId || selectedConversationRunning || busy === "snapshot"}
-              onClick={() => latestEnvironmentId && void snapshotEnvironment(latestEnvironmentId)}
-            >
-              <Download size={15} />
-            </button>
-            <button
-              type="button"
-              className="head-icon danger"
-              title="Delete this conversation locally"
-              aria-label="Delete this conversation"
-              disabled={!appReady || !selectedConversation || selectedConversationRunning}
-              onClick={resetConversation}
-            >
-              <Trash2 size={15} />
-            </button>
-          </div>
+          <ChatHeader
+            title={selectedConversation ? selectedConversation.title : "New chat"}
+            running={selectedConversationRunning}
+            appReady={appReady}
+            environmentId={latestEnvironmentId}
+            snapshotting={busy === "snapshot"}
+            canDelete={Boolean(selectedConversation)}
+            onSnapshot={() => latestEnvironmentId && void snapshotEnvironment(latestEnvironmentId)}
+            onDelete={resetConversation}
+          />
           <div className="chat-scroll" ref={chatScrollRef} onScroll={updateScrollStickiness}>
             {chatSessions.length === 0 ? (
               activeConversationId === NEW_CONVERSATION_ID ? (
@@ -1894,7 +1441,7 @@ export const App = () => {
                     onCancel={() => void cancelSession(session)}
                   />
                   <SessionMedia
-                    state={mediaBySession[session.localId] ?? cachedMediaStateForSession(session)}
+                    state={mediaStateForSession(session)}
                     onSave={saveMedia}
                     onRetry={() => void resolveMediaForSession(session, true)}
                     onOpen={setActiveMedia}
@@ -1911,6 +1458,7 @@ export const App = () => {
               overrideToolTypes={ALL_AGENT_TOOLS}
               autoPreviousInteractionId={autoContinuation?.seed?.id}
               autoEnvironmentId={autoEnvironment ? sessionEnvironmentId(autoEnvironment) : undefined}
+              sentImageParts={sentImageParts}
               running={selectedConversationStarting}
               locked={!appReady || selectedConversationRunning}
               canRun={canRun}
@@ -1918,35 +1466,17 @@ export const App = () => {
               cancelDisabled={!runningSession || Boolean(cancelingSessionIds[runningSession.localId])}
               onRun={() => void runInteraction()}
               onCancel={() => runningSession && void cancelSession(runningSession)}
+              onAttachmentError={(message) => pushStatus({ level: "error", title: "Attachment failed", detail: message })}
             />
           </div>
         </section>
 
         {!outputPanelOpen && (
-          <button
-            type="button"
-            className="output-panel-toggle"
-            title={
-              activeOutputFileCount > 0
-                ? `Show output files (${activeOutputFileCount} available)`
-                : "Show output files"
-            }
-            aria-label={
-              activeOutputFileCount > 0
-                ? `Show output files (${activeOutputFileCount} available)`
-                : "Show output files"
-            }
-            aria-pressed={false}
-            disabled={!appReady}
+          <OutputPanelToggle
+            fileCount={activeOutputFileCount}
+            appReady={appReady}
             onClick={toggleOutputPanel}
-          >
-            <PanelRightOpen size={16} />
-            {activeOutputFileCount > 0 && (
-              <span className="output-panel-toggle-badge" aria-hidden="true">
-                <File size={10} />
-              </span>
-            )}
-          </button>
+          />
         )}
 
         {outputPanelOpen && (
@@ -1974,21 +1504,7 @@ export const App = () => {
 
       <MediaLightbox item={activeMedia} onClose={() => setActiveMedia(null)} />
 
-      <footer className={`status-bar ${status?.level ?? ""}`} aria-live="polite">
-        {status ? (
-          <div className="status-message" key={status.id}>
-            {status.level === "error" ? <XCircle size={14} /> : <CheckCircle2 size={14} />}
-            <strong>{status.title}</strong>
-            {status.detail && <span>{status.detail}</span>}
-          </div>
-        ) : (
-          <span className="status-empty">
-            {hasBridge
-              ? `Managed agent ${agentId}`
-              : "Web preview: run the Electron app for live managed-agent calls."}
-          </span>
-        )}
-      </footer>
+      <AppStatusBar status={status} hasBridge={hasBridge} agentId={agentId} />
     </div>
   );
 };

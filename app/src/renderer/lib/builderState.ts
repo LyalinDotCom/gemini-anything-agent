@@ -78,10 +78,19 @@ export type ImagePartDraft = {
   data: string;
   mimeType: string;
   name: string;
+  path?: string;
   bytes: number;
 };
 
 export type InputPartDraft = TextPartDraft | ImagePartDraft;
+
+export type ImageAttachmentMeta = {
+  id: string;
+  name: string;
+  path?: string;
+  bytes: number;
+  mimeType: string;
+};
 
 /**
  * State for the Run Console's Compose bar. The agent id is always taken from the
@@ -124,6 +133,8 @@ export type Session = {
   error?: IpcError;
   /** Media already resolved and auto-saved locally for this run. */
   resolvedMedia?: ResolvedEnvironmentMedia[];
+  /** Local UI metadata for image inputs sent with this run. Image bytes live in request.input. */
+  imageAttachments?: ImageAttachmentMeta[];
   /** Set when this run was started via "Continue" from another session. */
   parentLocalId?: string;
 };

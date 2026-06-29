@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Download, Maximize2, X } from "lucide-react";
 import type { ResolvedEnvironmentMedia } from "../../shared/electron-api";
 import type { SessionMediaState } from "../lib/mediaState";
@@ -14,6 +15,24 @@ export const SessionMedia = ({
   onRetry: () => void;
   onOpen: (item: ResolvedEnvironmentMedia) => void;
 }) => {
+  const [failedUrls, setFailedUrls] = useState<Set<string>>(new Set());
+  const itemUrlKey = state?.items.map((item) => item.url).join("\n") ?? "";
+
+  useEffect(() => {
+    setFailedUrls((current) => {
+      if (!state?.items.length || current.size === 0) {
+        return current.size === 0 ? current : new Set();
+      }
+      const available = new Set(state.items.map((item) => item.url));
+      const next = new Set([...current].filter((url) => available.has(url)));
+      return next.size === current.size ? current : next;
+    });
+  }, [itemUrlKey, state?.items]);
+
+  const markFailed = (url: string) => {
+    setFailedUrls((current) => new Set(current).add(url));
+  };
+
   if (!state || (!state.loading && state.items.length === 0 && !state.error)) {
     return null;
   }
@@ -38,6 +57,7 @@ export const SessionMedia = ({
       )}
       {state.items.map((item, index) => {
         const opensFromCard = item.mediaType !== "audio";
+        const failed = failedUrls.has(item.url);
         return (
           <figure
             className={`media-card media-${item.mediaType} ${opensFromCard ? "can-open" : ""}`}
@@ -52,10 +72,23 @@ export const SessionMedia = ({
               }
             }}
           >
-            {item.mediaType === "image" ? (
-              <img src={item.url} alt={item.requestedPath} loading="lazy" onClick={() => onOpen(item)} />
+            {failed ? (
+              <div className="media-preview-error" role="status">
+                <span>Preview could not be loaded.</span>
+                <button type="button" className="ghost-button sm" onClick={onRetry}>
+                  Redownload
+                </button>
+              </div>
+            ) : item.mediaType === "image" ? (
+              <img
+                src={item.url}
+                alt={item.requestedPath}
+                loading="lazy"
+                onError={() => markFailed(item.url)}
+                onClick={() => onOpen(item)}
+              />
             ) : item.mediaType === "video" ? (
-              <video src={item.url} controls preload="metadata" />
+              <video src={item.url} controls preload="metadata" onError={() => markFailed(item.url)} />
             ) : (
               <BufferedAudio src={item.url} />
             )}
@@ -95,6 +128,12 @@ export const MediaLightbox = ({
   item: ResolvedEnvironmentMedia | null;
   onClose: () => void;
 }) => {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [item?.url]);
+
   if (!item) {
     return null;
   }
@@ -113,10 +152,14 @@ export const MediaLightbox = ({
           </button>
         </header>
         <div className="media-lightbox-body">
-          {item.mediaType === "image" ? (
-            <img src={item.url} alt={item.requestedPath} />
+          {failed ? (
+            <div className="media-preview-error" role="status">
+              <span>Preview could not be loaded.</span>
+            </div>
+          ) : item.mediaType === "image" ? (
+            <img src={item.url} alt={item.requestedPath} onError={() => setFailed(true)} />
           ) : item.mediaType === "video" ? (
-            <video src={item.url} controls autoPlay />
+            <video src={item.url} controls autoPlay onError={() => setFailed(true)} />
           ) : (
             <BufferedAudio src={item.url} autoPlay />
           )}

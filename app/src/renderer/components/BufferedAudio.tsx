@@ -87,6 +87,7 @@ export const BufferedAudio = ({ src, autoPlay = false, className }: BufferedAudi
   useEffect(() => {
     let canceled = false;
     let nextObjectUrl: string | undefined;
+    const controller = new AbortController();
     setObjectUrl(undefined);
     setLoading(true);
     setDurationHint(undefined);
@@ -96,7 +97,7 @@ export const BufferedAudio = ({ src, autoPlay = false, className }: BufferedAudi
     setLoadFailed(false);
     autoPlayHandledRef.current = false;
 
-    fetch(src)
+    fetch(src, { signal: controller.signal })
       .then((response) => {
         if (!response.ok) {
           throw new Error(`Audio request failed with ${response.status}`);
@@ -116,7 +117,10 @@ export const BufferedAudio = ({ src, autoPlay = false, className }: BufferedAudi
         setObjectUrl(nextObjectUrl);
         setLoading(false);
       })
-      .catch(() => {
+      .catch((error) => {
+        if (controller.signal.aborted || (error instanceof DOMException && error.name === "AbortError")) {
+          return;
+        }
         if (!canceled) {
           setObjectUrl(undefined);
           setLoading(false);
@@ -126,6 +130,7 @@ export const BufferedAudio = ({ src, autoPlay = false, className }: BufferedAudi
 
     return () => {
       canceled = true;
+      controller.abort();
       if (nextObjectUrl) {
         URL.revokeObjectURL(nextObjectUrl);
       }

@@ -33,6 +33,11 @@ import {
   withAutoContinuation,
   withAutoEnvironment
 } from "../src/renderer/lib/continuity";
+import {
+  extractMediaPaths,
+  mediaPathMatches,
+  shouldAutoResolveMedia
+} from "../src/renderer/lib/mediaResolver";
 
 const KEY_FOR: Partial<Record<CapabilityKey, string>> = {
   brain: "system_instruction",
@@ -361,12 +366,59 @@ describe("session history storage", () => {
       removeItem: (key: string) => backing.delete(key)
     };
 
-    writeStoredSessions([{ ...session("agent-a", 1), completedAt: 1201 }], storage);
+    writeStoredSessions([
+      {
+        ...session("agent-a", 1),
+        completedAt: 1201,
+        imageAttachments: [{ id: "img-1", name: "cat.png", bytes: 42, mimeType: "image/png", path: "/tmp/cat.png" }]
+      }
+    ], storage);
     expect(backing.has(SESSION_HISTORY_KEY)).toBe(true);
     const [stored] = readStoredSessions(storage);
     expect(stored.agentId).toBe("agent-a");
     expect(stored.agentSnapshot?.system_instruction).toBe("Historic saved instruction");
     expect(stored.completedAt).toBe(1201);
+    expect(stored.imageAttachments?.[0].name).toBe("cat.png");
+    expect(stored.imageAttachments?.[0].path).toBe("/tmp/cat.png");
+  });
+
+  it("redacts secret-looking .env values from stored agent snapshots", () => {
+    const backing = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => backing.get(key) ?? null,
+      setItem: (key: string, value: string) => backing.set(key, value),
+      removeItem: (key: string) => backing.delete(key)
+    };
+
+    writeStoredSessions([
+      {
+        ...session("agent-a", 1),
+        agentSnapshot: {
+          id: "agent-a",
+          base_agent: "antigravity-preview-05-2026",
+          base_environment: {
+            type: "remote",
+            sources: [
+              {
+                type: "inline",
+                target: ".env",
+                content: "GEMINI_API_KEY=real-key\nGEMINI_ANYTHING_NPM_VERSION=latest\n"
+              }
+            ]
+          }
+        }
+      }
+    ], storage);
+
+    expect(backing.get(SESSION_HISTORY_KEY)).not.toContain("real-key");
+    const [stored] = readStoredSessions(storage);
+    const sources =
+      typeof stored.agentSnapshot?.base_environment === "object"
+        ? stored.agentSnapshot.base_environment.sources ?? []
+        : [];
+    const envSource = sources.find((source) => source.type === "inline" && source.target === ".env");
+    expect(envSource?.type === "inline" ? envSource.content : "").toContain("GEMINI_API_KEY=<configured>");
+    expect(envSource?.type === "inline" ? envSource.content : "").toContain("GEMINI_ANYTHING_NPM_VERSION=latest");
   });
 
   it("drops stored runs without an agent snapshot", () => {
@@ -418,6 +470,51 @@ describe("session history storage", () => {
 
     expect(renamed.map((item) => item.agentId)).toEqual(["agent-c", "agent-b"]);
     expect(renamed[0].request.agent).toBe("agent-a");
+  });
+});
+
+describe("renderer media resolver", () => {
+  const mediaSession = (input: string): Session => ({
+    localId: "media-session",
+    agentId: "agent-a",
+    agentSnapshot: {
+      id: "agent-a",
+      base_agent: "antigravity-preview-05-2026"
+    },
+    request: {
+      agent: "agent-a",
+      environment: "remote",
+      input
+    },
+    startedAt: 1
+  });
+
+  it("extracts unique generated media paths and trims surrounding punctuation", () => {
+    expect(
+      extractMediaPaths(
+        "Saved `/workspace/output/cat.png`, also /workspace/output/cat.png. Video: workspace/output/clip.mp4?download=1"
+      )
+    ).toEqual(["/workspace/output/cat.png", "workspace/output/clip.mp4"]);
+  });
+
+  it("does not auto-download media for transcript-only requests", () => {
+    expect(shouldAutoResolveMedia(mediaSession("transcribe this audio file with timestamps"))).toBe(false);
+    expect(shouldAutoResolveMedia(mediaSession("make a podcast and transcribe it"))).toBe(true);
+    expect(shouldAutoResolveMedia(mediaSession("generate an image of a cat"))).toBe(true);
+  });
+
+  it("matches sandbox, cache, and saved media paths for one artifact", () => {
+    const item = {
+      requestedPath: "/workspace/output/cat.png",
+      path: "/cache/environment/workspace/output/cat.png",
+      savedPath: "/local/outputs/cat.png",
+      url: "gemini-media://env/workspace/output/cat.png",
+      mediaType: "image" as const
+    };
+
+    expect(mediaPathMatches(item, "workspace/output/cat.png")).toBe(true);
+    expect(mediaPathMatches(item, "/local/outputs/cat.png")).toBe(true);
+    expect(mediaPathMatches(item, "/workspace/output/dog.png")).toBe(false);
   });
 });
 

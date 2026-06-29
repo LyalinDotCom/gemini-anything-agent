@@ -150,6 +150,7 @@ export type ManagedAgentsBridge = {
     files: AgentProjectFileSnapshot[]
   ) => Promise<IpcResult<AgentProjectSnapshot>>;
   openAgentProject: (agentId: string) => Promise<IpcResult<boolean>>;
+  getPathForFile?: (file: File) => string;
   openExternal: (url: string) => Promise<IpcResult<boolean>>;
 };
 

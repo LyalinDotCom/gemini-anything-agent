@@ -71,16 +71,6 @@ type SendOptions = {
   timeoutMs?: number;
 };
 
-const resolveApiKey = (provided?: string): string | undefined => {
-  if (provided) {
-    return provided;
-  }
-  if (typeof process !== "undefined") {
-    return process.env.GEMINI_API_KEY;
-  }
-  return undefined;
-};
-
 export class GeminiManagedAgentsClient {
   private readonly apiKey?: string;
   private readonly baseUrl: string;
@@ -89,7 +79,7 @@ export class GeminiManagedAgentsClient {
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: GeminiClientOptions = {}) {
-    this.apiKey = resolveApiKey(options.apiKey);
+    this.apiKey = options.apiKey;
     this.baseUrl = trimTrailingSlash(options.baseUrl ?? GEMINI_API_BASE_URL);
     this.apiRevision = options.apiRevision ?? GEMINI_API_REVISION;
     this.timeoutMs = options.timeoutMs ?? 300_000;
@@ -142,7 +132,7 @@ export class GeminiManagedAgentsClient {
       { ...validation.value, stream: true },
       {
         ...options,
-        timeoutMs: validation.value.background ? 0 : options.timeoutMs
+        timeoutMs: 0
       }
     );
 
@@ -179,10 +169,12 @@ export class GeminiManagedAgentsClient {
     return this.request<Interaction>("POST", `/interactions/${encodeURIComponent(id)}/cancel`);
   }
 
-  async downloadEnvironmentSnapshot(environmentId: string): Promise<ArrayBuffer> {
+  async downloadEnvironmentSnapshot(environmentId: string, options: SendOptions = {}): Promise<ArrayBuffer> {
     return this.requestBinary(
       "GET",
-      `/files/environment-${encodeURIComponent(environmentId)}:download?alt=media`
+      `/files/environment-${encodeURIComponent(environmentId)}:download?alt=media`,
+      undefined,
+      options
     );
   }
 
@@ -212,8 +204,13 @@ export class GeminiManagedAgentsClient {
     return parseBody(text) as T;
   }
 
-  private async requestBinary(method: string, path: string, body?: unknown): Promise<ArrayBuffer> {
-    const response = await this.send(method, path, body);
+  private async requestBinary(
+    method: string,
+    path: string,
+    body?: unknown,
+    options: SendOptions = {}
+  ): Promise<ArrayBuffer> {
+    const response = await this.send(method, path, body, options);
     if (!response.ok) {
       const text = await response.text();
       throw new GeminiApiError(response.status, this.errorMessage(response.status, text), parseBody(text));

@@ -275,6 +275,52 @@ describe("managed agents SDK", () => {
     expect(events[0].interaction?.usage?.total_tokens).toBe(12);
   });
 
+  it("does not arm the default request timeout for foreground streams", async () => {
+    vi.useFakeTimers();
+    const outer = new AbortController();
+    let fetchSignal: AbortSignal | undefined;
+    const fetchMock = vi.fn<typeof fetch>(
+      async (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          fetchSignal = init?.signal as AbortSignal | undefined;
+          fetchSignal?.addEventListener("abort", () => reject(fetchSignal?.reason), { once: true });
+        })
+    );
+    const client = new GeminiManagedAgentsClient({
+      apiKey: "test-key",
+      fetch: fetchMock,
+      timeoutMs: 1
+    });
+
+    const stream = (async () => {
+      const events = [];
+      for await (const event of client.createInteractionStream({
+        agent: "agent-lab-test",
+        input: "hello",
+        environment: "remote",
+        store: false
+      }, { signal: outer.signal })) {
+        events.push(event);
+      }
+      return events;
+    })();
+
+    try {
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      await vi.advanceTimersByTimeAsync(10);
+      expect(fetchSignal?.aborted).toBe(false);
+      outer.abort(new Error("stream cancelled"));
+      await expect(stream).rejects.toMatchObject({
+        name: "GeminiApiConnectionError",
+        details: expect.objectContaining({
+          causeMessage: "stream cancelled"
+        })
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("resumes a background interaction stream from the last event id", async () => {
     const encoder = new TextEncoder();
     const fetchMock = vi.fn<typeof fetch>(async () =>
@@ -336,6 +382,34 @@ describe("managed agents SDK", () => {
     expect(interaction.status).toBe("cancelled");
   });
 
+  it("passes abort signals to environment snapshot downloads", async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn<typeof fetch>(
+      async (_url, init) =>
+        new Promise<Response>((resolve, reject) => {
+          const signal = init?.signal as AbortSignal | undefined;
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+          controller.abort(new Error("snapshot cancelled"));
+          resolve(new Response(new Uint8Array([1, 2, 3])));
+        })
+    );
+    const client = new GeminiManagedAgentsClient({
+      apiKey: "test-key",
+      fetch: fetchMock,
+      timeoutMs: 1_000
+    });
+
+    await expect(client.downloadEnvironmentSnapshot("env-test", { signal: controller.signal })).rejects.toMatchObject({
+      name: "GeminiApiConnectionError",
+      details: expect.objectContaining({
+        method: "GET",
+        causeMessage: "snapshot cancelled"
+      })
+    });
+    const [, init] = fetchMock.mock.calls[0] as Parameters<typeof fetch>;
+    expect((init?.signal as AbortSignal).aborted).toBe(true);
+  });
+
   it("fails before network calls when the API key is missing", async () => {
     const fetchMock = vi.fn();
     const client = new GeminiManagedAgentsClient({
@@ -346,6 +420,27 @@ describe("managed agents SDK", () => {
 
     await expect(client.listAgents()).rejects.toBeInstanceOf(GeminiApiKeyMissingError);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not read GEMINI_API_KEY from process.env", async () => {
+    const previous = process.env.GEMINI_API_KEY;
+    process.env.GEMINI_API_KEY = "ambient-key";
+    try {
+      const fetchMock = vi.fn();
+      const client = new GeminiManagedAgentsClient({
+        fetch: fetchMock,
+        timeoutMs: 1_000
+      });
+
+      await expect(client.listAgents()).rejects.toBeInstanceOf(GeminiApiKeyMissingError);
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      if (previous === undefined) {
+        delete process.env.GEMINI_API_KEY;
+      } else {
+        process.env.GEMINI_API_KEY = previous;
+      }
+    }
   });
 
   it("wraps transport failures with endpoint context", async () => {

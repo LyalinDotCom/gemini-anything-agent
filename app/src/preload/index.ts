@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
   IpcResult,
   EnvironmentOutputFile,
@@ -80,6 +80,7 @@ const bridge: ManagedAgentsBridge = {
   saveAgentProject: (agentId: string, files: AgentProjectFileSnapshot[]) =>
     invoke<AgentProjectSnapshot>(ipcChannels.saveAgentProject, agentId, files),
   openAgentProject: (agentId: string) => invoke<boolean>(ipcChannels.openAgentProject, agentId),
+  getPathForFile: (file: File) => webUtils.getPathForFile(file),
   openExternal: (url: string) => invoke<boolean>(ipcChannels.openExternal, url)
 };
 

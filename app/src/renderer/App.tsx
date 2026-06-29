@@ -132,6 +132,7 @@ export const App = () => {
   const pendingRunInputs = useRef<Map<string, PendingComposeInput>>(new Map());
   const requestedMediaKeys = useRef<Set<string>>(new Set());
   const completedOutputHydrationKeys = useRef<Set<string>>(new Set());
+  const runtimeOutputHydrationSessionIds = useRef<Set<string>>(new Set());
   const mediaRetryCounts = useRef<Record<string, number>>({});
   const mediaRetryTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const outputRetryCounts = useRef<Record<string, number>>({});
@@ -330,6 +331,7 @@ export const App = () => {
     activeResumeIds.current.clear();
     requestedMediaKeys.current.clear();
     completedOutputHydrationKeys.current.clear();
+    runtimeOutputHydrationSessionIds.current.clear();
     clearAllRetryTimers();
     outputRefreshSignatures.current = {};
     autoOpenedOutputEnvironments.current.clear();
@@ -358,23 +360,33 @@ export const App = () => {
 
   useEffect(() => {
     for (const session of agentSessions) {
+      if (!runtimeOutputHydrationSessionIds.current.has(session.localId)) {
+        continue;
+      }
       const environmentId = sessionEnvironmentId(session);
-      if (!environmentId || session.streaming || !session.completedAt) {
+      if (session.streaming || !session.completedAt) {
+        continue;
+      }
+      if (!environmentId) {
+        runtimeOutputHydrationSessionIds.current.delete(session.localId);
         continue;
       }
       const outputText = mediaSearchTextForSession(session);
       const expectedOutputPaths = extractWorkspaceOutputPaths(outputText);
       const mediaPaths = extractMediaPaths(outputText);
       if (expectedOutputPaths.length === 0 && mediaPaths.length === 0) {
+        runtimeOutputHydrationSessionIds.current.delete(session.localId);
         continue;
       }
 
       const hydrationKey = `${session.localId}:${session.completedAt}`;
       if (completedOutputHydrationKeys.current.has(hydrationKey)) {
+        runtimeOutputHydrationSessionIds.current.delete(session.localId);
         continue;
       }
 
       completedOutputHydrationKeys.current.add(hydrationKey);
+      runtimeOutputHydrationSessionIds.current.delete(session.localId);
       void loadOutputFiles(environmentId, true, { retryUntilPaths: expectedOutputPaths });
       if (mediaPaths.length > 0 && shouldAutoResolveMedia(session)) {
         void resolveMediaForSession(session, true);
@@ -493,6 +505,12 @@ export const App = () => {
     mediaRetryCounts.current = {};
     outputRetryTimers.current = {};
     outputRetryCounts.current = {};
+  }
+
+  function forgetCompletedOutputHydration(sessionId: string) {
+    completedOutputHydrationKeys.current = new Set(
+      [...completedOutputHydrationKeys.current].filter((key) => !key.startsWith(`${sessionId}:`))
+    );
   }
 
   function shouldRetrySessionOutputHydration(session: Session): boolean {
@@ -725,6 +743,8 @@ export const App = () => {
     const pendingImageParts = compose.parts.filter((part): part is ImagePartDraft => part.kind === "image");
     const imageAttachments = imageAttachmentsFromCompose(compose);
     pendingRunInputs.current.set(localId, composeInputSnapshot(compose));
+    runtimeOutputHydrationSessionIds.current.add(localId);
+    forgetCompletedOutputHydration(localId);
     setOptimisticSentImagesForKeys([sourceConversationId, localId], pendingImageParts);
     setConversationStarting(sourceConversationId, true);
     setCompose((current) => clearComposeInput(current));
@@ -733,6 +753,7 @@ export const App = () => {
     const ensuredAgent = await ensureAgentBeforeRun(bridge, agentId);
     if (!ensuredAgent) {
       restorePendingRunInput(localId, sourceConversationId);
+      runtimeOutputHydrationSessionIds.current.delete(localId);
       setConversationStarting(sourceConversationId, false);
       return;
     }
@@ -906,6 +927,8 @@ export const App = () => {
     const streamId = uid();
     const lastEventId = latestStreamEventId(sessionToResume.events);
     activeResumeIds.current.add(sessionToResume.localId);
+    runtimeOutputHydrationSessionIds.current.add(sessionToResume.localId);
+    forgetCompletedOutputHydration(sessionToResume.localId);
     setSessions((current) =>
       current.map((session) =>
         session.localId === sessionToResume.localId

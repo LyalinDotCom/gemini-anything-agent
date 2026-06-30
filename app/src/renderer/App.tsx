@@ -82,6 +82,7 @@ import { Transcript } from "./components/Transcript";
 import { SettingsModal } from "./components/Overlays";
 import { MediaLightbox, SessionMedia } from "./components/GeneratedMedia";
 import { OutputFilesPanel } from "./components/OutputFilesPanel";
+import { HtmlPreview } from "./components/HtmlPreview";
 import { SamplePromptGallery } from "./components/SamplePromptGallery";
 import { SessionControls } from "./components/SessionControls";
 import { ConversationSidebar } from "./components/ConversationSidebar";
@@ -124,6 +125,7 @@ export const App = () => {
   const [outputPanelOpen, setOutputPanelOpen] = useState(false);
   const [mediaBySession, setMediaBySession] = useState<Record<string, SessionMediaState>>({});
   const [activeMedia, setActiveMedia] = useState<ResolvedEnvironmentMedia | null>(null);
+  const [activeHtmlPreview, setActiveHtmlPreview] = useState<EnvironmentOutputFile | null>(null);
   const [outputFilesByEnvironment, setOutputFilesByEnvironment] = useState<Record<string, EnvironmentOutputState>>({});
   const [optimisticSentImages, setOptimisticSentImages] = useState<Record<string, ImagePartDraft[]>>({});
   const [startingConversationIds, setStartingConversationIds] = useState<Record<string, boolean>>({});
@@ -307,6 +309,7 @@ export const App = () => {
 
   useEffect(() => {
     shouldStickToBottom.current = true;
+    setActiveHtmlPreview(null);
     scrollChatToBottom(true);
   }, [activeConversationId]);
 
@@ -1358,17 +1361,36 @@ export const App = () => {
     }
   }
 
-  async function openOutputFile(file: EnvironmentOutputFile) {
+  function previewOutputFile(file: EnvironmentOutputFile) {
     const media = outputMediaItem(file);
     if (media) {
       setActiveMedia(media);
       return;
     }
+    if (file.fileType === "html" && file.url) {
+      setActiveHtmlPreview(file);
+      return;
+    }
+    void openOutputFileExternally(file);
+  }
+
+  async function openOutputFileExternally(file: EnvironmentOutputFile) {
     if (!window.managedAgents?.openEnvironmentOutputFile) {
       pushStatus({ level: "error", title: "Open unavailable", detail: "Run the Electron app to open output files." });
       return;
     }
     const result = await window.managedAgents.openEnvironmentOutputFile(file.path);
+    if (!result.ok) {
+      pushStatus({ level: "error", title: result.error.name, detail: result.error.message });
+    }
+  }
+
+  async function openPreviewLinkExternally(url: string) {
+    if (!window.managedAgents?.openExternal) {
+      pushStatus({ level: "error", title: "Open link unavailable", detail: "Run the Electron app to open links." });
+      return;
+    }
+    const result = await window.managedAgents.openExternal(url);
     if (!result.ok) {
       pushStatus({ level: "error", title: result.error.name, detail: result.error.message });
     }
@@ -1603,7 +1625,10 @@ export const App = () => {
           onOpenSettings={() => setSettingsOpen(true)}
         />
 
-        <section className="chat-main" aria-label="Managed agent chat">
+        <section
+          className={`chat-main ${activeHtmlPreview?.url ? "previewing-html" : ""}`}
+          aria-label="Managed agent chat"
+        >
           <ChatHeader
             title={selectedConversation ? selectedConversation.title : "New chat"}
             running={selectedConversationRunning}
@@ -1614,87 +1639,97 @@ export const App = () => {
             onSnapshot={() => latestEnvironmentId && void snapshotEnvironment(latestEnvironmentId)}
             onDelete={resetConversation}
           />
-          <div className="chat-scroll" ref={chatScrollRef} onScroll={updateScrollStickiness}>
-            {chatSessions.length === 0 ? (
-              activeConversationId === NEW_CONVERSATION_ID ? (
-                <div className="chat-empty has-samples">
-                  <SamplePromptGallery
-                    disabled={!appReady || selectedConversationRunning}
-                    onSelect={loadSamplePrompt}
-                  />
-                </div>
-              ) : (
-                <div className="chat-empty">
-                  <span className="chat-empty-mark">
-                    <Bot size={28} />
-                  </span>
-                  <strong>No local turns in this conversation</strong>
-                  <span className="chat-empty-subtitle">
-                    Session and environment continuity are on by default.
-                  </span>
-                </div>
-              )
-            ) : (
-              chatSessions.map((session) => (
-                <div className="conversation-turn" key={session.localId}>
-                  <Transcript
-                    prompt={promptForInput(session.request.input)}
-                    startedAt={session.startedAt}
-                    items={timelineItemsForSession(session)}
-                    streaming={Boolean(session.streaming)}
-                    embedded
-                    empty="Waiting for the agent..."
-                    onCopy={copyText}
-                    onSaveText={saveText}
-                  />
-                  <SessionControls
-                    session={session}
-                    reconnecting={activeResumeIds.current.has(session.localId)}
-                    canReconnect={Boolean(
-                      appReady &&
-                        window.managedAgents?.resumeInteractionStream &&
-                        sessionCanReconnect(session) &&
-                        !activeResumeIds.current.has(session.localId)
-                    )}
-                    canRetry={Boolean(appReady && session.error && !selectedConversationRunning)}
-                    canCancel={Boolean(
-                      session.streaming &&
-                        !cancelingSessionIds[session.localId] &&
-                        (session.seed?.id || session.streamId)
-                    )}
-                    onReconnect={() => void reconnectSessionStream(session)}
-                    onRetry={() => restoreSessionPromptForRetry(session)}
-                    onCancel={() => void cancelSession(session)}
-                  />
-                  <SessionMedia
-                    state={mediaStateForSession(session)}
-                    onSave={saveMedia}
-                    onRetry={() => void resolveMediaForSession(session, true)}
-                    onOpen={setActiveMedia}
-                  />
-                </div>
-              ))
-            )}
-          </div>
-
-          <div className="chat-compose">
-            <Composer
-              compose={compose}
-              setCompose={setCompose}
-              overrideToolTypes={ALL_AGENT_TOOLS}
-              autoPreviousInteractionId={autoContinuation?.seed?.id}
-              autoEnvironmentId={autoEnvironment ? sessionEnvironmentId(autoEnvironment) : undefined}
-              sentImageParts={sentImageParts}
-              running={selectedConversationStarting}
-              locked={!appReady || selectedConversationRunning}
-              canRun={canRun}
-              canCancel={Boolean(runningSession)}
-              cancelDisabled={!runningSession || Boolean(cancelingSessionIds[runningSession.localId])}
-              onRun={() => void runInteraction()}
-              onCancel={() => runningSession && void cancelSession(runningSession)}
-              onAttachmentError={(message) => pushStatus({ level: "error", title: "Attachment failed", detail: message })}
+          {activeHtmlPreview?.url ? (
+            <HtmlPreview
+              file={activeHtmlPreview}
+              onClose={() => setActiveHtmlPreview(null)}
+              onOpenExternal={(url) => void openPreviewLinkExternally(url)}
             />
-          </div>
+          ) : (
+            <>
+              <div className="chat-scroll" ref={chatScrollRef} onScroll={updateScrollStickiness}>
+                {chatSessions.length === 0 ? (
+                  activeConversationId === NEW_CONVERSATION_ID ? (
+                    <div className="chat-empty has-samples">
+                      <SamplePromptGallery
+                        disabled={!appReady || selectedConversationRunning}
+                        onSelect={loadSamplePrompt}
+                      />
+                    </div>
+                  ) : (
+                    <div className="chat-empty">
+                      <span className="chat-empty-mark">
+                        <Bot size={28} />
+                      </span>
+                      <strong>No local turns in this conversation</strong>
+                      <span className="chat-empty-subtitle">
+                        Session and environment continuity are on by default.
+                      </span>
+                    </div>
+                  )
+                ) : (
+                  chatSessions.map((session) => (
+                    <div className="conversation-turn" key={session.localId}>
+                      <Transcript
+                        prompt={promptForInput(session.request.input)}
+                        startedAt={session.startedAt}
+                        items={timelineItemsForSession(session)}
+                        streaming={Boolean(session.streaming)}
+                        embedded
+                        empty="Waiting for the agent..."
+                        onCopy={copyText}
+                        onSaveText={saveText}
+                      />
+                      <SessionControls
+                        session={session}
+                        reconnecting={activeResumeIds.current.has(session.localId)}
+                        canReconnect={Boolean(
+                          appReady &&
+                            window.managedAgents?.resumeInteractionStream &&
+                            sessionCanReconnect(session) &&
+                            !activeResumeIds.current.has(session.localId)
+                        )}
+                        canRetry={Boolean(appReady && session.error && !selectedConversationRunning)}
+                        canCancel={Boolean(
+                          session.streaming &&
+                            !cancelingSessionIds[session.localId] &&
+                            (session.seed?.id || session.streamId)
+                        )}
+                        onReconnect={() => void reconnectSessionStream(session)}
+                        onRetry={() => restoreSessionPromptForRetry(session)}
+                        onCancel={() => void cancelSession(session)}
+                      />
+                      <SessionMedia
+                        state={mediaStateForSession(session)}
+                        onSave={saveMedia}
+                        onRetry={() => void resolveMediaForSession(session, true)}
+                        onOpen={setActiveMedia}
+                      />
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="chat-compose">
+                <Composer
+                  compose={compose}
+                  setCompose={setCompose}
+                  overrideToolTypes={ALL_AGENT_TOOLS}
+                  autoPreviousInteractionId={autoContinuation?.seed?.id}
+                  autoEnvironmentId={autoEnvironment ? sessionEnvironmentId(autoEnvironment) : undefined}
+                  sentImageParts={sentImageParts}
+                  running={selectedConversationStarting}
+                  locked={!appReady || selectedConversationRunning}
+                  canRun={canRun}
+                  canCancel={Boolean(runningSession)}
+                  cancelDisabled={!runningSession || Boolean(cancelingSessionIds[runningSession.localId])}
+                  onRun={() => void runInteraction()}
+                  onCancel={() => runningSession && void cancelSession(runningSession)}
+                  onAttachmentError={(message) => pushStatus({ level: "error", title: "Attachment failed", detail: message })}
+                />
+              </div>
+            </>
+          )}
         </section>
 
         {!outputPanelOpen && (
@@ -1711,7 +1746,8 @@ export const App = () => {
             environmentId={latestEnvironmentId}
             onRefresh={() => latestEnvironmentId && void loadOutputFiles(latestEnvironmentId, true)}
             onSave={(file) => void saveOutputFile(file)}
-            onOpen={(file) => void openOutputFile(file)}
+            onPreview={previewOutputFile}
+            onOpenExternal={(file) => void openOutputFileExternally(file)}
             onClose={() => setOutputPanelOpen(false)}
           />
         )}

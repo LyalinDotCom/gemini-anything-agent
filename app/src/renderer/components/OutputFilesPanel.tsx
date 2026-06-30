@@ -7,8 +7,8 @@ import {
   FolderOpen,
   ImageIcon,
   Loader2,
-  Maximize2,
   Music2,
+  MousePointerClick,
   RefreshCw,
   Video,
   X
@@ -41,14 +41,16 @@ export const OutputFilesPanel = ({
   environmentId,
   onRefresh,
   onSave,
-  onOpen,
+  onPreview,
+  onOpenExternal,
   onClose
 }: {
   state: EnvironmentOutputState | undefined;
   environmentId: string | undefined;
   onRefresh: () => void;
   onSave: (file: EnvironmentOutputFile) => void;
-  onOpen: (file: EnvironmentOutputFile) => void;
+  onPreview: (file: EnvironmentOutputFile) => void;
+  onOpenExternal: (file: EnvironmentOutputFile) => void;
   onClose: () => void;
 }) => {
   const panelState = state ?? { loading: false, items: [] };
@@ -106,26 +108,58 @@ export const OutputFilesPanel = ({
         )}
         {panelState.items.map((file, index) => {
           const media = outputMediaItem(file);
+          const htmlPreview = file.fileType === "html" && file.url;
+          const canPreview = Boolean(media || htmlPreview);
+          const previewLabel = media ? "Open player" : htmlPreview ? "Preview HTML" : "Open file";
+          const previewFromName = () => {
+            if (canPreview) {
+              onPreview(file);
+            }
+          };
           return (
             <div className="output-file-row" key={`${file.path}:${file.modifiedAt}:${index}`}>
               <span className={`output-file-icon file-${file.fileType}`}>
                 <OutputFileIcon file={file} />
               </span>
-              <div className="output-file-main">
+              <div
+                className={`output-file-main ${canPreview ? "can-preview" : ""}`}
+                title={canPreview ? `${file.sandboxPath}\nClick to preview` : file.sandboxPath}
+                role={canPreview ? "button" : undefined}
+                tabIndex={canPreview ? 0 : undefined}
+                onClick={previewFromName}
+                onKeyDown={(event) => {
+                  if (!canPreview || (event.key !== "Enter" && event.key !== " ")) {
+                    return;
+                  }
+                  event.preventDefault();
+                  onPreview(file);
+                }}
+              >
                 <strong title={file.sandboxPath}>{file.relativePath}</strong>
                 <span>
                   {outputFileLabel(file)} · {formatFileSize(file.bytes)}
                 </span>
               </div>
               <div className="output-file-actions">
+                {canPreview && (
+                  <button
+                    type="button"
+                    className="icon-action"
+                    title={previewLabel}
+                    aria-label={previewLabel}
+                    onClick={() => onPreview(file)}
+                  >
+                    <MousePointerClick size={13} />
+                  </button>
+                )}
                 <button
                   type="button"
                   className="icon-action"
-                  title={media ? "Open player" : "Open file"}
-                  aria-label={media ? "Open player" : "Open file"}
-                  onClick={() => onOpen(file)}
+                  title="Open externally"
+                  aria-label="Open externally"
+                  onClick={() => onOpenExternal(file)}
                 >
-                  {media ? <Maximize2 size={13} /> : <ExternalLink size={13} />}
+                  <ExternalLink size={13} />
                 </button>
                 <button
                   type="button"

@@ -410,6 +410,22 @@ const MEDIA_EXTENSIONS = new Map<string, ResolvedEnvironmentMedia["mediaType"]>(
 const mediaTypeForPath = (path: string): ResolvedEnvironmentMedia["mediaType"] | undefined =>
   MEDIA_EXTENSIONS.get(extname(path).toLowerCase());
 
+const SERVABLE_OUTPUT_EXTENSIONS = new Set([
+  ...MEDIA_EXTENSIONS.keys(),
+  ".html",
+  ".htm",
+  ".css",
+  ".js",
+  ".mjs",
+  ".json",
+  ".txt",
+  ".map",
+  ".wasm"
+]);
+
+const canServeOutputPath = (path: string): boolean =>
+  SERVABLE_OUTPUT_EXTENSIONS.has(extname(path).toLowerCase());
+
 const MEDIA_MIME_TYPES = new Map<string, string>([
   [".png", "image/png"],
   [".jpg", "image/jpeg"],
@@ -427,7 +443,16 @@ const MEDIA_MIME_TYPES = new Map<string, string>([
   [".m4a", "audio/mp4"],
   [".aac", "audio/aac"],
   [".ogg", "audio/ogg"],
-  [".flac", "audio/flac"]
+  [".flac", "audio/flac"],
+  [".html", "text/html; charset=utf-8"],
+  [".htm", "text/html; charset=utf-8"],
+  [".css", "text/css; charset=utf-8"],
+  [".js", "text/javascript; charset=utf-8"],
+  [".mjs", "text/javascript; charset=utf-8"],
+  [".json", "application/json; charset=utf-8"],
+  [".txt", "text/plain; charset=utf-8"],
+  [".map", "application/json; charset=utf-8"],
+  [".wasm", "application/wasm"]
 ]);
 
 const mediaMimeTypeForPath = (path: string): string =>
@@ -781,6 +806,7 @@ const cachedEnvironmentOutputFiles = (
 
       const stats = statSync(fullPath);
       const mediaType = mediaTypeForPath(fullPath);
+      const fileType = outputFileTypeForPath(fullPath);
       const version = `${Math.round(stats.mtimeMs)}-${stats.size}`;
       const file: EnvironmentOutputFile = {
         sandboxPath: `/workspace/output/${outputRelativePath}`,
@@ -789,9 +815,9 @@ const cachedEnvironmentOutputFiles = (
         path: fullPath,
         bytes: stats.size,
         modifiedAt: stats.mtimeMs,
-        fileType: outputFileTypeForPath(fullPath),
+        fileType,
         mediaType,
-        url: mediaType ? mediaUrl(environmentId, relativeEntry, version) : undefined
+        url: mediaType || fileType === "html" ? mediaUrl(environmentId, relativeEntry, version) : undefined
       };
       return [file];
     })
@@ -976,7 +1002,7 @@ const registerMediaProtocol = (): void => {
     const url = new URL(request.url);
     const environmentSegment = safeCacheSegment(url.hostname);
     const relativeEntry = normalizedRelativeTarPath(decodeURIComponent(url.pathname.slice(1)));
-    if (!relativeEntry || !mediaTypeForPath(relativeEntry)) {
+    if (!relativeEntry || !canServeOutputPath(relativeEntry)) {
       return new Response("Not found", { status: 404 });
     }
 
@@ -1230,6 +1256,7 @@ const createWindow = (): void => {
       preload: join(__dirname, "../preload/index.mjs"),
       contextIsolation: true,
       nodeIntegration: false,
+      webviewTag: true,
       // The preload is built as ESM (.mjs); Electron only loads ESM preloads
       // when the renderer is unsandboxed. contextIsolation stays on for safety.
       sandbox: false

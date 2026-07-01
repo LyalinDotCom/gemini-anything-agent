@@ -36,10 +36,12 @@ import {
   ipcChannels,
   type AgentProjectFileSnapshot,
   type AgentProjectSnapshot,
+  type ChatSessionStoreSnapshot,
   type EnvironmentOutputFile,
   type EnsureAnythingAgentResult,
   type IpcError,
   type IpcResult,
+  type PersistedSession,
   type ResolvedEnvironmentMedia,
   type SaveResolvedMediaResult,
   type SaveTextResult,
@@ -47,6 +49,7 @@ import {
   type SetSpecializedToolsResult,
   type SnapshotDownloadResult
 } from "../shared/electron-api";
+import { chatStoreRootPath, loadChatSessionsFromDisk, saveChatSessionsToDisk } from "./chatStore";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
@@ -95,6 +98,7 @@ const APP_ICON_PATH = process.platform === "darwin"
   ? join(APP_ROOT, "assets", "app-icon.icns")
   : APP_ICON_PNG_PATH;
 const LOCAL_OUTPUT_ROOT = join(REPO_ROOT, "outputs", "managed-agent");
+const LOCAL_CHAT_ROOT = chatStoreRootPath(REPO_ROOT);
 const mediaCacheRoot = (): string => join(app.getPath("userData"), "environment-media");
 const localSettingsPath = (): string => join(app.getPath("userData"), "settings.json");
 
@@ -1278,6 +1282,7 @@ handle(ipcChannels.runtimeConfig, () => ({
   apiRevision: process.env.GEMINI_API_REVISION ?? GEMINI_API_REVISION,
   baseUrl: process.env.GEMINI_API_BASE_URL ?? GEMINI_API_BASE_URL,
   envPath: ENV_PATH,
+  chatStorePath: LOCAL_CHAT_ROOT,
   docsLastChecked: "2026-06-22",
   agentId: envValueOrDefault(process.env.GEMINI_ANYTHING_AGENT_ID, DEFAULT_AGENT_ID),
   npmPackage: envValueOrDefault(process.env.GEMINI_ANYTHING_NPM_PACKAGE, DEFAULT_NPM_PACKAGE),
@@ -1728,6 +1733,19 @@ handle<[string, string | undefined], SaveTextResult>(ipcChannels.saveText, async
 
   writeFileSync(result.filePath, content, "utf8");
   return { saved: true, path: result.filePath, bytes: statSync(result.filePath).size };
+});
+
+handle(ipcChannels.loadStoredSessions, (): ChatSessionStoreSnapshot => ({
+  rootPath: LOCAL_CHAT_ROOT,
+  sessions: loadChatSessionsFromDisk(LOCAL_CHAT_ROOT)
+}));
+
+handle<[PersistedSession[]], ChatSessionStoreSnapshot>(ipcChannels.saveStoredSessions, (sessions) => {
+  saveChatSessionsToDisk(LOCAL_CHAT_ROOT, sessions);
+  return {
+    rootPath: LOCAL_CHAT_ROOT,
+    sessions: loadChatSessionsFromDisk(LOCAL_CHAT_ROOT)
+  };
 });
 
 handle<[string], AgentProjectSnapshot>(ipcChannels.loadAgentProject, async (agentId) =>

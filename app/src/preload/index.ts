@@ -4,9 +4,11 @@ import type {
   EnvironmentOutputFile,
   AgentProjectSnapshot,
   AgentProjectFileSnapshot,
+  ChatSessionStoreSnapshot,
   EnsureAnythingAgentResult,
   InteractionStreamSnapshot,
   ManagedAgentsBridge,
+  PersistedSession,
   ResolvedEnvironmentMedia,
   RuntimeConfig,
   SaveResolvedMediaResult,
@@ -78,6 +80,10 @@ const bridge: ManagedAgentsBridge = {
     invoke<boolean>(ipcChannels.openEnvironmentOutputFile, path),
   saveText: (content: string, defaultFileName?: string) =>
     invoke<SaveTextResult>(ipcChannels.saveText, content, defaultFileName),
+  loadStoredSessions: () =>
+    invoke<ChatSessionStoreSnapshot>(ipcChannels.loadStoredSessions),
+  saveStoredSessions: (sessions: PersistedSession[]) =>
+    invoke<ChatSessionStoreSnapshot>(ipcChannels.saveStoredSessions, sessions),
   loadAgentProject: (agentId: string) =>
     invoke<AgentProjectSnapshot>(ipcChannels.loadAgentProject, agentId),
   saveAgentProject: (agentId: string, files: AgentProjectFileSnapshot[]) =>

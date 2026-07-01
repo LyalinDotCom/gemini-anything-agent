@@ -1,11 +1,15 @@
 import type { Interaction, InteractionCreateRequest, InteractionStreamEvent, ManagedAgent } from "@sdk";
-import type { IpcError, ResolvedEnvironmentMedia } from "../../shared/electron-api";
+import type { IpcError, PersistedSession, ResolvedEnvironmentMedia } from "../../shared/electron-api";
 import type { ImageAttachmentMeta, Session } from "./builderState";
 
-export const SESSION_HISTORY_KEY = "gemini-anything-agent:sessions:v1";
+export const SESSION_HISTORY_KEY = "gemini-anything-agent:sessions:v3";
+export const LEGACY_SESSION_HISTORY_KEYS = [
+  "gemini-anything-agent:sessions:v1",
+  "gemini-anything-agent:sessions:v2",
+  SESSION_HISTORY_KEY
+];
 const MAX_STORED_SESSIONS = 200;
 
-type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 type InputPart = Extract<InteractionCreateRequest["input"], unknown[]>[number];
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -210,45 +214,38 @@ export const sanitizeSessionHistory = (value: unknown): Session[] => {
     .slice(0, MAX_STORED_SESSIONS);
 };
 
-const getBrowserStorage = (): StorageLike | undefined => {
+export const clearLegacyBrowserSessionHistory = (): void => {
   if (typeof window === "undefined") {
-    return undefined;
+    return;
   }
   try {
-    return window.localStorage;
+    for (const key of LEGACY_SESSION_HISTORY_KEYS) {
+      window.localStorage.removeItem(key);
+    }
   } catch {
-    return undefined;
+    // Ignore cleanup failures; the app no longer reads browser storage.
   }
 };
 
-export const readStoredSessions = (storage = getBrowserStorage()): Session[] => {
-  if (!storage) {
+export const readStoredSessions = async (): Promise<Session[]> => {
+  if (typeof window === "undefined" || !window.managedAgents?.loadStoredSessions) {
     return [];
   }
   try {
-    const raw = storage.getItem(SESSION_HISTORY_KEY);
-    return raw ? sanitizeSessionHistory(JSON.parse(raw)) : [];
+    const result = await window.managedAgents.loadStoredSessions();
+    return result.ok ? sanitizeSessionHistory(result.value.sessions) : [];
   } catch {
     return [];
   }
 };
 
 export const writeStoredSessions = (
-  sessions: Session[],
-  storage = getBrowserStorage()
+  sessions: Session[]
 ): void => {
-  if (!storage) {
+  if (typeof window === "undefined" || !window.managedAgents?.saveStoredSessions) {
     return;
   }
-  try {
-    storage.setItem(SESSION_HISTORY_KEY, JSON.stringify(sanitizeSessionHistory(sessions)));
-  } catch {
-    try {
-      storage.removeItem(SESSION_HISTORY_KEY);
-    } catch {
-      // Ignore storage failures; run history is helpful state, not required app state.
-    }
-  }
+  void window.managedAgents.saveStoredSessions(sanitizeSessionHistory(sessions) as PersistedSession[]);
 };
 
 export const removeSessionsForAgent = (sessions: Session[], agentId: string): Session[] =>

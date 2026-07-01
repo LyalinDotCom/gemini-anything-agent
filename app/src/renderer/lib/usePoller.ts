@@ -38,14 +38,11 @@ export const isTerminal = (interaction: Interaction | undefined): boolean => {
   if (!interaction) {
     return false;
   }
-  if (extractInteractionOutputText(interaction)) {
-    return true;
-  }
   const raw = interaction.status?.toLowerCase();
-  if (!raw) {
-    return false;
+  if (raw) {
+    return !NON_TERMINAL.has(raw);
   }
-  return !NON_TERMINAL.has(raw);
+  return Boolean(extractInteractionOutputText(interaction));
 };
 
 const DELAYS = [1000, 1500, 2000, 3000, 5000];

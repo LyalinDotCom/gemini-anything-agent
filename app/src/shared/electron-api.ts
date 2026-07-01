@@ -15,6 +15,8 @@ export type RuntimeConfig = {
   baseUrl: string;
   /** Absolute path of the .env file the key is written to. */
   envPath: string;
+  /** Absolute path where chat folders and diagnostic logs are written. */
+  chatStorePath: string;
   docsLastChecked: string;
   agentId: string;
   npmPackage: string;
@@ -98,6 +100,36 @@ export type IpcError = {
   details?: unknown;
 };
 
+export type PersistedImageAttachment = {
+  id: string;
+  name: string;
+  path?: string;
+  bytes: number;
+  mimeType: string;
+};
+
+export type PersistedSession = {
+  localId: string;
+  agentId: string;
+  agentSnapshot?: ManagedAgent;
+  request: InteractionCreateRequest;
+  seed?: Interaction;
+  events?: InteractionStreamEvent[];
+  streaming?: boolean;
+  streamId?: string;
+  startedAt: number;
+  completedAt?: number;
+  error?: IpcError;
+  resolvedMedia?: ResolvedEnvironmentMedia[];
+  imageAttachments?: PersistedImageAttachment[];
+  parentLocalId?: string;
+};
+
+export type ChatSessionStoreSnapshot = {
+  rootPath: string;
+  sessions: PersistedSession[];
+};
+
 export type IpcResult<T> =
   | {
       ok: true;
@@ -151,6 +183,8 @@ export type ManagedAgentsBridge = {
   saveEnvironmentOutputFile?: (path: string) => Promise<IpcResult<SaveResolvedMediaResult>>;
   openEnvironmentOutputFile?: (path: string) => Promise<IpcResult<boolean>>;
   saveText: (content: string, defaultFileName?: string) => Promise<IpcResult<SaveTextResult>>;
+  loadStoredSessions: () => Promise<IpcResult<ChatSessionStoreSnapshot>>;
+  saveStoredSessions: (sessions: PersistedSession[]) => Promise<IpcResult<ChatSessionStoreSnapshot>>;
   loadAgentProject: (agentId: string) => Promise<IpcResult<AgentProjectSnapshot>>;
   saveAgentProject: (
     agentId: string,
@@ -186,6 +220,8 @@ export const ipcChannels = {
   saveEnvironmentOutputFile: "managed-agents:save-environment-output-file",
   openEnvironmentOutputFile: "managed-agents:open-environment-output-file",
   saveText: "managed-agents:save-text",
+  loadStoredSessions: "managed-agents:load-stored-sessions",
+  saveStoredSessions: "managed-agents:save-stored-sessions",
   loadAgentProject: "managed-agents:load-agent-project",
   saveAgentProject: "managed-agents:save-agent-project",
   openAgentProject: "managed-agents:open-agent-project",

@@ -6,6 +6,7 @@ export const FALLBACK_RUNTIME: RuntimeConfig = {
   apiRevision: managedAgentManifest.api.apiRevision,
   baseUrl: managedAgentManifest.api.baseUrl,
   envPath: ".env",
+  chatStorePath: "chats",
   docsLastChecked: "2026-06-22",
   agentId: "gemini-anything-agent",
   npmPackage: "@lyalindotcom/gai",

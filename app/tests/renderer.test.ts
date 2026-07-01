@@ -19,12 +19,9 @@ import {
 } from "../src/renderer/lib/projectFiles";
 import { skillLibrary, skillTemplateToProjectFile } from "../src/renderer/lib/skillLibrary";
 import {
-  SESSION_HISTORY_KEY,
-  readStoredSessions,
   renameSessionsForAgent,
   removeSessionsForAgent,
-  sanitizeSessionHistory,
-  writeStoredSessions
+  sanitizeSessionHistory
 } from "../src/renderer/lib/sessionStore";
 import {
   latestContinuableSession,
@@ -362,22 +359,13 @@ describe("session history storage", () => {
   });
 
   it("round-trips run history through storage", () => {
-    const backing = new Map<string, string>();
-    const storage = {
-      getItem: (key: string) => backing.get(key) ?? null,
-      setItem: (key: string, value: string) => backing.set(key, value),
-      removeItem: (key: string) => backing.delete(key)
-    };
-
-    writeStoredSessions([
+    const [stored] = sanitizeSessionHistory([
       {
         ...session("agent-a", 1),
         completedAt: 1201,
         imageAttachments: [{ id: "img-1", name: "cat.png", bytes: 42, mimeType: "image/png", path: "/tmp/cat.png" }]
       }
-    ], storage);
-    expect(backing.has(SESSION_HISTORY_KEY)).toBe(true);
-    const [stored] = readStoredSessions(storage);
+    ]);
     expect(stored.agentId).toBe("agent-a");
     expect(stored.agentSnapshot?.system_instruction).toBe("Historic saved instruction");
     expect(stored.completedAt).toBe(1201);
@@ -386,14 +374,7 @@ describe("session history storage", () => {
   });
 
   it("redacts secret-looking .env values from stored agent snapshots", () => {
-    const backing = new Map<string, string>();
-    const storage = {
-      getItem: (key: string) => backing.get(key) ?? null,
-      setItem: (key: string, value: string) => backing.set(key, value),
-      removeItem: (key: string) => backing.delete(key)
-    };
-
-    writeStoredSessions([
+    const [stored] = sanitizeSessionHistory([
       {
         ...session("agent-a", 1),
         agentSnapshot: {
@@ -411,10 +392,9 @@ describe("session history storage", () => {
           }
         }
       }
-    ], storage);
+    ]);
 
-    expect(backing.get(SESSION_HISTORY_KEY)).not.toContain("real-key");
-    const [stored] = readStoredSessions(storage);
+    expect(JSON.stringify(stored)).not.toContain("real-key");
     const sources =
       typeof stored.agentSnapshot?.base_environment === "object"
         ? stored.agentSnapshot.base_environment.sources ?? []
@@ -430,14 +410,7 @@ describe("session history storage", () => {
   });
 
   it("preserves streamed events in stored run history", () => {
-    const backing = new Map<string, string>();
-    const storage = {
-      getItem: (key: string) => backing.get(key) ?? null,
-      setItem: (key: string, value: string) => backing.set(key, value),
-      removeItem: (key: string) => backing.delete(key)
-    };
-
-    writeStoredSessions([
+    const [stored] = sanitizeSessionHistory([
       {
         ...session("agent-a", 1),
         events: [
@@ -447,9 +420,8 @@ describe("session history storage", () => {
         streaming: true,
         streamId: "local-stream"
       }
-    ], storage);
+    ]);
 
-    const [stored] = readStoredSessions(storage);
     expect(stored.streaming).toBe(false);
     expect(stored.streamId).toBeUndefined();
     expect(stored.events?.map((event) => event.event_type)).toEqual([

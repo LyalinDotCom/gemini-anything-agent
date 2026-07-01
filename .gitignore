@@ -42,4 +42,5 @@ notes/agent-bug-reports/
 *.log
 .DS_Store
 .gemini-anything-agent/
+chats/
 agent-projects/

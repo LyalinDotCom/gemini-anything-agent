@@ -96,12 +96,22 @@ const NON_TERMINAL_INTERACTION_STATUS = new Set([
   "started"
 ]);
 
+const FAILED_INTERACTION_STATUS = new Set(["failed", "error", "cancelled", "canceled", "expired"]);
+
 export const interactionIsTerminal = (interaction: Interaction): boolean => {
-  if (extractInteractionOutputText(interaction)) {
-    return true;
-  }
   const status = interaction.status?.toLowerCase();
-  return Boolean(status && !NON_TERMINAL_INTERACTION_STATUS.has(status));
+  if (status) {
+    return !NON_TERMINAL_INTERACTION_STATUS.has(status);
+  }
+  return Boolean(extractInteractionOutputText(interaction));
+};
+
+export const interactionIsSuccessfulTerminal = (interaction: Interaction): boolean => {
+  const status = interaction.status?.toLowerCase();
+  if (status) {
+    return !NON_TERMINAL_INTERACTION_STATUS.has(status) && !FAILED_INTERACTION_STATUS.has(status);
+  }
+  return Boolean(extractInteractionOutputText(interaction));
 };
 
 export const terminalCompletedAt = (session: Session, completedAt = Date.now()): number | undefined =>

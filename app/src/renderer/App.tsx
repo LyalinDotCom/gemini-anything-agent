@@ -19,6 +19,7 @@ import {
   type Session
 } from "./lib/builderState";
 import {
+  clearLegacyBrowserSessionHistory,
   readStoredSessions,
   writeStoredSessions
 } from "./lib/sessionStore";
@@ -26,8 +27,7 @@ import {
   latestContinuableSession,
   latestReusableEnvironmentSession,
   sessionEnvironmentId,
-  withAutoContinuation,
-  withAutoEnvironment
+  withAutoContinuity
 } from "./lib/continuity";
 import type { EnvironmentOutputState, SessionMediaState } from "./lib/mediaState";
 import {
@@ -115,7 +115,8 @@ const OUTPUT_RETRY_DELAYS_MS = [1200, 2500, 5000, 9000];
 export const App = () => {
   const [runtime, setRuntime] = useState<RuntimeConfig | null>(null);
   const [compose, setCompose] = useState<ComposeState>(initialCompose);
-  const [sessions, setSessions] = useState<Session[]>(() => readStoredSessions());
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [status, setStatus] = useState<StatusEvent | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -152,7 +153,7 @@ export const App = () => {
   const hasKey = Boolean(runtime?.hasApiKey);
   const runtimeLoaded = runtime !== null;
   const keyMissing = hasBridge && runtimeLoaded && !hasKey;
-  const appReady = hasBridge && hasKey;
+  const appReady = hasBridge && hasKey && sessionsLoaded;
   const agentSessions = useMemo(
     () => sessions.filter((session) => session.agentId === agentId),
     [agentId, sessions]
@@ -228,13 +229,12 @@ export const App = () => {
       selectedSessions
     ]
   );
-  const interactionWithContinuation = useMemo(
-    () => withAutoContinuation(baseInteraction, selectedSessions, compose.autoContinue),
-    [baseInteraction, compose.autoContinue, selectedSessions]
-  );
   const interaction = useMemo(
-    () => withAutoEnvironment(interactionWithContinuation, selectedSessions, compose.reuseEnvironment),
-    [compose.reuseEnvironment, interactionWithContinuation, selectedSessions]
+    () => withAutoContinuity(baseInteraction, selectedSessions, {
+      autoContinue: compose.autoContinue,
+      reuseEnvironment: compose.reuseEnvironment
+    }),
+    [baseInteraction, compose.autoContinue, compose.reuseEnvironment, selectedSessions]
   );
   const runningSession = useMemo(
     () => selectedSessions.find((session) => session.streaming),
@@ -300,12 +300,30 @@ export const App = () => {
   }, []);
 
   useEffect(() => {
+    let canceled = false;
+    clearLegacyBrowserSessionHistory();
+    void readStoredSessions().then((storedSessions) => {
+      if (canceled) {
+        return;
+      }
+      setSessions(storedSessions);
+      setSessionsLoaded(true);
+    });
+    return () => {
+      canceled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     activeConversationIdRef.current = activeConversationId;
   }, [activeConversationId]);
 
   useEffect(() => {
+    if (!sessionsLoaded) {
+      return;
+    }
     writeStoredSessions(sessions);
-  }, [sessions]);
+  }, [sessions, sessionsLoaded]);
 
   useEffect(() => {
     shouldStickToBottom.current = true;
@@ -781,7 +799,11 @@ export const App = () => {
       const createInteractionStream = bridge.createInteractionStream;
       const onInteractionStreamEvent = bridge.onInteractionStreamEvent;
       const getInteractionStreamSnapshot = bridge.getInteractionStreamSnapshot;
-      if (createInteractionStream && (onInteractionStreamEvent || getInteractionStreamSnapshot)) {
+      const shouldCreateWithStream =
+        request.background !== true &&
+        createInteractionStream &&
+        (onInteractionStreamEvent || getInteractionStreamSnapshot);
+      if (shouldCreateWithStream) {
         const unsubscribe = onInteractionStreamEvent?.(streamId, (event) => {
           setSessions((current) =>
             current.map((session) =>

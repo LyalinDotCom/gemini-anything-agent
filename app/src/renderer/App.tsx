@@ -46,8 +46,8 @@ import {
 } from "./lib/interactionInput";
 import {
   buildConversations,
-  NEW_CONVERSATION_DRAFT,
   NEW_CONVERSATION_ID,
+  visibleConversationsWithDraft,
   type ConversationSummary
 } from "./lib/conversations";
 import {
@@ -83,6 +83,7 @@ import { SettingsModal } from "./components/Overlays";
 import { MediaLightbox, SessionMedia } from "./components/GeneratedMedia";
 import { OutputFilesPanel } from "./components/OutputFilesPanel";
 import { HtmlPreview } from "./components/HtmlPreview";
+import { TextPreview } from "./components/TextPreview";
 import { SamplePromptGallery } from "./components/SamplePromptGallery";
 import { SessionControls } from "./components/SessionControls";
 import { ConversationSidebar } from "./components/ConversationSidebar";
@@ -122,11 +123,13 @@ export const App = () => {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [latestRunId, setLatestRunId] = useState<string | null>(null);
   const [activeConversationId, setActiveConversationId] = useState<string>(NEW_CONVERSATION_ID);
+  const [newConversationDraftVisible, setNewConversationDraftVisible] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [outputPanelOpen, setOutputPanelOpen] = useState(false);
+  const [outputPanelOpen, setOutputPanelOpen] = useState(true);
   const [mediaBySession, setMediaBySession] = useState<Record<string, SessionMediaState>>({});
   const [activeMedia, setActiveMedia] = useState<ResolvedEnvironmentMedia | null>(null);
   const [activeHtmlPreview, setActiveHtmlPreview] = useState<EnvironmentOutputFile | null>(null);
+  const [activeTextPreview, setActiveTextPreview] = useState<EnvironmentOutputFile | null>(null);
   const [outputFilesByEnvironment, setOutputFilesByEnvironment] = useState<Record<string, EnvironmentOutputState>>({});
   const [optimisticSentImages, setOptimisticSentImages] = useState<Record<string, ImagePartDraft[]>>({});
   const [startingConversationIds, setStartingConversationIds] = useState<Record<string, boolean>>({});
@@ -163,25 +166,14 @@ export const App = () => {
     [agentSessions]
   );
   const visibleConversations = useMemo(
-    () => {
-      const showDraft =
-        activeConversationId === NEW_CONVERSATION_ID ||
-        Boolean(startingConversationIds[NEW_CONVERSATION_ID]);
-      const conversationsWithStarting = conversations.map((conversation) => ({
-        ...conversation,
-        running: Boolean(conversation.running || startingConversationIds[conversation.id])
-      }));
-      return showDraft
-        ? [
-            {
-              ...NEW_CONVERSATION_DRAFT,
-              running: Boolean(startingConversationIds[NEW_CONVERSATION_ID])
-            },
-            ...conversationsWithStarting
-          ]
-        : conversationsWithStarting;
-    },
-    [activeConversationId, conversations, startingConversationIds]
+    () =>
+      visibleConversationsWithDraft({
+        activeConversationId,
+        conversations,
+        draftVisible: newConversationDraftVisible,
+        startingConversationIds
+      }),
+    [activeConversationId, conversations, newConversationDraftVisible, startingConversationIds]
   );
   const selectedConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === activeConversationId),
@@ -328,6 +320,7 @@ export const App = () => {
   useEffect(() => {
     shouldStickToBottom.current = true;
     setActiveHtmlPreview(null);
+    setActiveTextPreview(null);
     scrollChatToBottom(true);
   }, [activeConversationId]);
 
@@ -342,10 +335,11 @@ export const App = () => {
     setSettingsOpen(true);
     setCompose(initialCompose);
     setActiveConversationId(NEW_CONVERSATION_ID);
+    setNewConversationDraftVisible(true);
     setLatestRunId(null);
     setStartingConversationIds({});
     setCancelingSessionIds({});
-    setOutputPanelOpen(false);
+    setOutputPanelOpen(true);
     setMediaBySession({});
     setOutputFilesByEnvironment({});
     pendingRunInputs.current.clear();
@@ -761,6 +755,8 @@ export const App = () => {
     const streamId = uid();
     const parent = selectedSessions.find((session) => session.seed?.id === request.previous_interaction_id);
     const startsNewConversation = !parent;
+    const consumesNewConversationDraft =
+      startsNewConversation && sourceConversationId === NEW_CONVERSATION_ID;
     const pendingImageParts = compose.parts.filter((part): part is ImagePartDraft => part.kind === "image");
     const imageAttachments = imageAttachmentsFromCompose(compose);
     pendingRunInputs.current.set(localId, composeInputSnapshot(compose));
@@ -820,6 +816,9 @@ export const App = () => {
 
         setSessions((current) => [{ ...base, events: [], streaming: true, streamId }, ...current]);
         setConversationStarting(sourceConversationId, false);
+        if (consumesNewConversationDraft) {
+          setNewConversationDraftVisible(false);
+        }
         if (startsNewConversation) {
           setActiveConversationId((current) => (current === sourceConversationId ? localId : current));
         }
@@ -920,6 +919,9 @@ export const App = () => {
           ...current
         ]);
         setConversationStarting(sourceConversationId, false);
+        if (consumesNewConversationDraft) {
+          setNewConversationDraftVisible(false);
+        }
         if (startsNewConversation) {
           setActiveConversationId((current) => (current === sourceConversationId ? localId : current));
         }
@@ -930,6 +932,9 @@ export const App = () => {
         restorePendingRunInput(localId, sourceConversationId);
         setSessions((current) => [{ ...base, error: result.error, completedAt: Date.now() }, ...current]);
         setConversationStarting(sourceConversationId, false);
+        if (consumesNewConversationDraft) {
+          setNewConversationDraftVisible(false);
+        }
         if (startsNewConversation) {
           setActiveConversationId((current) => (current === sourceConversationId ? localId : current));
         }
@@ -1390,7 +1395,13 @@ export const App = () => {
       return;
     }
     if (file.fileType === "html" && file.url) {
+      setActiveTextPreview(null);
       setActiveHtmlPreview(file);
+      return;
+    }
+    if ((file.fileType === "markdown" || file.fileType === "text") && file.url) {
+      setActiveHtmlPreview(null);
+      setActiveTextPreview(file);
       return;
     }
     void openOutputFileExternally(file);
@@ -1555,11 +1566,13 @@ export const App = () => {
     setCompose(initialCompose);
     setLatestRunId(null);
     setActiveConversationId(NEW_CONVERSATION_ID);
+    setNewConversationDraftVisible(true);
     pushStatus({ level: "success", title: "Conversation deleted locally", detail: selectedConversation.title });
   }
 
   function startNewConversation() {
     setActiveConversationId(NEW_CONVERSATION_ID);
+    setNewConversationDraftVisible(true);
     clearOptimisticSentImagesForKeys([NEW_CONVERSATION_ID]);
     setCompose(initialCompose);
     setLatestRunId(null);
@@ -1569,6 +1582,7 @@ export const App = () => {
   function selectConversation(conversationId: string) {
     if (conversationId === NEW_CONVERSATION_ID) {
       setActiveConversationId(NEW_CONVERSATION_ID);
+      setNewConversationDraftVisible(true);
       setLatestRunId(null);
       return;
     }
@@ -1593,6 +1607,7 @@ export const App = () => {
     clearOptimisticSentImagesForKeys([conversation.id]);
     if (activeConversationId === conversation.id) {
       setActiveConversationId(NEW_CONVERSATION_ID);
+      setNewConversationDraftVisible(true);
       clearOptimisticSentImagesForKeys([NEW_CONVERSATION_ID]);
       setCompose(initialCompose);
       setLatestRunId(null);
@@ -1648,7 +1663,7 @@ export const App = () => {
         />
 
         <section
-          className={`chat-main ${activeHtmlPreview?.url ? "previewing-html" : ""}`}
+          className={`chat-main ${activeHtmlPreview?.url || activeTextPreview?.url ? "previewing-output" : ""}`}
           aria-label="Managed agent chat"
         >
           <ChatHeader
@@ -1665,6 +1680,12 @@ export const App = () => {
             <HtmlPreview
               file={activeHtmlPreview}
               onClose={() => setActiveHtmlPreview(null)}
+              onOpenExternal={(url) => void openPreviewLinkExternally(url)}
+            />
+          ) : activeTextPreview?.url ? (
+            <TextPreview
+              file={activeTextPreview}
+              onClose={() => setActiveTextPreview(null)}
               onOpenExternal={(url) => void openPreviewLinkExternally(url)}
             />
           ) : (

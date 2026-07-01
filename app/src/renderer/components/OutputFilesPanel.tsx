@@ -109,8 +109,18 @@ export const OutputFilesPanel = ({
         {panelState.items.map((file, index) => {
           const media = outputMediaItem(file);
           const htmlPreview = file.fileType === "html" && file.url;
-          const canPreview = Boolean(media || htmlPreview);
-          const previewLabel = media ? "Open player" : htmlPreview ? "Preview HTML" : "Open file";
+          const markdownPreview = file.fileType === "markdown" && file.url;
+          const textPreview = file.fileType === "text" && file.url;
+          const canPreview = Boolean(media || htmlPreview || markdownPreview || textPreview);
+          const previewLabel = media
+            ? "Open player"
+            : htmlPreview
+              ? "Preview HTML"
+              : markdownPreview
+                ? "Preview Markdown"
+                : textPreview
+                  ? "Preview text"
+                  : "Open file";
           const previewFromName = () => {
             if (canPreview) {
               onPreview(file);

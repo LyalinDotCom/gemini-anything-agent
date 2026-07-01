@@ -42,6 +42,7 @@ import {
   type IpcError,
   type IpcResult,
   type PersistedSession,
+  type ReadEnvironmentOutputTextResult,
   type ResolvedEnvironmentMedia,
   type SaveResolvedMediaResult,
   type SaveTextResult,
@@ -418,11 +419,27 @@ const SERVABLE_OUTPUT_EXTENSIONS = new Set([
   ...MEDIA_EXTENSIONS.keys(),
   ".html",
   ".htm",
+  ".md",
+  ".markdown",
   ".css",
   ".js",
   ".mjs",
   ".json",
   ".txt",
+  ".jsonl",
+  ".csv",
+  ".tsv",
+  ".srt",
+  ".vtt",
+  ".log",
+  ".ts",
+  ".tsx",
+  ".jsx",
+  ".xml",
+  ".yaml",
+  ".yml",
+  ".py",
+  ".sh",
   ".map",
   ".wasm"
 ]);
@@ -450,11 +467,27 @@ const MEDIA_MIME_TYPES = new Map<string, string>([
   [".flac", "audio/flac"],
   [".html", "text/html; charset=utf-8"],
   [".htm", "text/html; charset=utf-8"],
+  [".md", "text/markdown; charset=utf-8"],
+  [".markdown", "text/markdown; charset=utf-8"],
   [".css", "text/css; charset=utf-8"],
   [".js", "text/javascript; charset=utf-8"],
   [".mjs", "text/javascript; charset=utf-8"],
   [".json", "application/json; charset=utf-8"],
   [".txt", "text/plain; charset=utf-8"],
+  [".jsonl", "application/x-ndjson; charset=utf-8"],
+  [".csv", "text/csv; charset=utf-8"],
+  [".tsv", "text/tab-separated-values; charset=utf-8"],
+  [".srt", "application/x-subrip; charset=utf-8"],
+  [".vtt", "text/vtt; charset=utf-8"],
+  [".log", "text/plain; charset=utf-8"],
+  [".ts", "text/plain; charset=utf-8"],
+  [".tsx", "text/plain; charset=utf-8"],
+  [".jsx", "text/plain; charset=utf-8"],
+  [".xml", "application/xml; charset=utf-8"],
+  [".yaml", "application/yaml; charset=utf-8"],
+  [".yml", "application/yaml; charset=utf-8"],
+  [".py", "text/x-python; charset=utf-8"],
+  [".sh", "text/x-shellscript; charset=utf-8"],
   [".map", "application/json; charset=utf-8"],
   [".wasm", "application/wasm"]
 ]);
@@ -584,6 +617,9 @@ const outputFileTypeForPath = (path: string): EnvironmentOutputFile["fileType"] 
   const extension = extname(path).toLowerCase();
   if (extension === ".html" || extension === ".htm") {
     return "html";
+  }
+  if (extension === ".md" || extension === ".markdown") {
+    return "markdown";
   }
   if (TEXT_EXTENSIONS.has(extension)) {
     return "text";
@@ -821,7 +857,9 @@ const cachedEnvironmentOutputFiles = (
         modifiedAt: stats.mtimeMs,
         fileType,
         mediaType,
-        url: mediaType || fileType === "html" ? mediaUrl(environmentId, relativeEntry, version) : undefined
+        url: mediaType || fileType === "html" || fileType === "markdown" || fileType === "text"
+          ? mediaUrl(environmentId, relativeEntry, version)
+          : undefined
       };
       return [file];
     })
@@ -1718,6 +1756,28 @@ handle<[string], boolean>(ipcChannels.openEnvironmentOutputFile, async (sourcePa
     throw new Error(message);
   }
   return true;
+});
+
+handle<[string], ReadEnvironmentOutputTextResult>(ipcChannels.readEnvironmentOutputText, async (sourcePath) => {
+  const source = resolve(sourcePath);
+  const cacheRoot = resolve(mediaCacheRoot());
+  const outputRoot = resolve(LOCAL_OUTPUT_ROOT);
+  const insideKnownOutputRoot = pathIsInside(source, cacheRoot) || pathIsInside(source, outputRoot);
+  if (!insideKnownOutputRoot || !existsSync(source) || !statSync(source).isFile()) {
+    throw new Error("Output text file is not available in the app cache.");
+  }
+
+  const fileType = outputFileTypeForPath(source);
+  if (fileType !== "markdown" && fileType !== "text") {
+    throw new Error("Output file is not readable text.");
+  }
+
+  return {
+    path: source,
+    content: readFileSync(source, "utf8"),
+    bytes: statSync(source).size,
+    fileType
+  };
 });
 
 handle<[string, string | undefined], SaveTextResult>(ipcChannels.saveText, async (content, defaultFileName) => {

@@ -12,7 +12,7 @@ The diagram asset was generated through this project using the Gemini 3.1 Flash 
 
 Gemini Anything Agent has three pieces:
 
-- **Electron chat app**: the local UI, conversation list, output panel, previews, and managed-agent client.
+- **Electron chat app**: the local UI, conversation list, sample prompts, output panel, previews, and managed-agent client.
 - **Gemini Managed Agent**: the remote Linux sandbox that handles the work and keeps conversation/environment continuity.
 - **`@lyalindotcom/gai` CLI**: the media wrapper around the GenAI SDK for image, video, TTS, music, and transcription.
 
@@ -39,7 +39,7 @@ When the user asks, "make me an image of a cat," this is what happens:
 8. `gai` calls the Gemini image model through the GenAI SDK.
 9. The image is written to `/workspace/output`.
 10. The app downloads and caches the output locally.
-11. The chat shows an inline preview, and the output panel exposes the saved file.
+11. The chat shows an inline preview, and the output panel exposes the saved file. HTML opens in an in-app browser; Markdown and text files open in a read-only in-app viewer.
 
 The important design choice is that generated artifacts live in `/workspace/output`. The app can treat that folder as the handoff surface between the remote agent and the local UI.
 
@@ -239,7 +239,7 @@ That is what makes a follow-up like "make the same image more cinematic" or "dow
 
 ## Why This Shape Works
 
-The managed agent is good at deciding, sequencing, inspecting files, and doing normal work. The CLI is good at hiding specialized media API details. The Electron app is good at local UX: chat history, previews, downloads, file panels, and cache behavior.
+The managed agent is good at deciding, sequencing, inspecting files, and doing normal work. The CLI is good at hiding specialized media API details. The Electron app is good at local UX: chat history, sample prompts, previews, downloads, file panels, and cache behavior.
 
 Keeping those roles separate gives you a cleaner sample:
 

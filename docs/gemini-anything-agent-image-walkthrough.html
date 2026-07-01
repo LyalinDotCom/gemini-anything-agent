@@ -684,7 +684,7 @@
                   </svg>
                 </div>
                 <h3>Electron app</h3>
-                <p>Owns the local UX: conversations, previews, output files, local cache, and agent deployment.</p>
+                <p>Owns the local UX: conversations, sample prompts, previews, output files, local cache, and agent deployment.</p>
               </div>
               <div class="role-card">
                 <div class="role-icon" aria-hidden="true">
@@ -726,7 +726,7 @@
               <div class="flow-step"><div><strong>The user message goes to the managed agent.</strong><span>Conversation continuity and environment continuity are sent when available.</span></div></div>
               <div class="flow-step"><div><strong>The agent decides this is media work.</strong><span>Its instructions tell it to use native tools for normal work and <code>/.agents/bin/gai</code> for new media generation.</span></div></div>
               <div class="flow-step"><div><strong>The CLI creates the image.</strong><span>The command writes the generated file to <code>/workspace/output</code>.</span></div></div>
-              <div class="flow-step"><div><strong>The app downloads and caches outputs.</strong><span>Images, videos, audio, text, HTML, and other files appear in the local output panel without repeating downloads that are already cached.</span></div></div>
+              <div class="flow-step"><div><strong>The app downloads and caches outputs.</strong><span>Images, videos, audio, HTML, Markdown, and text files appear in the local output panel without repeating downloads that are already cached.</span></div></div>
             </div>
           </section>
 
@@ -925,7 +925,7 @@ const response = await fetch(`${API_BASE}/interactions`, {
 });</code></pre>
             </div>
 
-            <p>The result is not just a text answer. The agent can leave files in <code>/workspace/output</code>, and the local app turns that folder into a browsable output panel with previews and downloads.</p>
+            <p>The result is not just a text answer. The agent can leave files in <code>/workspace/output</code>, and the local app turns that folder into a browsable output panel with previews and downloads. HTML opens inside the app in a webview, while Markdown and text outputs open in a read-only viewer.</p>
           </section>
 
           <section id="boundaries">

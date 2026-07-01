@@ -61,7 +61,7 @@ export type EnvironmentOutputFile = {
   path: string;
   bytes: number;
   modifiedAt: number;
-  fileType: "image" | "video" | "audio" | "html" | "text" | "document" | "archive" | "other";
+  fileType: "image" | "video" | "audio" | "html" | "markdown" | "text" | "document" | "archive" | "other";
   mediaType?: ResolvedEnvironmentMedia["mediaType"];
   url?: string;
 };
@@ -73,6 +73,13 @@ export type SaveResolvedMediaResult =
 export type SaveTextResult =
   | { saved: true; path: string; bytes: number }
   | { saved: false; canceled: true };
+
+export type ReadEnvironmentOutputTextResult = {
+  path: string;
+  content: string;
+  bytes: number;
+  fileType: "markdown" | "text";
+};
 
 export type InteractionStreamSnapshot = {
   events: InteractionStreamEvent[];
@@ -182,6 +189,7 @@ export type ManagedAgentsBridge = {
   ) => Promise<IpcResult<EnvironmentOutputFile[]>>;
   saveEnvironmentOutputFile?: (path: string) => Promise<IpcResult<SaveResolvedMediaResult>>;
   openEnvironmentOutputFile?: (path: string) => Promise<IpcResult<boolean>>;
+  readEnvironmentOutputText?: (path: string) => Promise<IpcResult<ReadEnvironmentOutputTextResult>>;
   saveText: (content: string, defaultFileName?: string) => Promise<IpcResult<SaveTextResult>>;
   loadStoredSessions: () => Promise<IpcResult<ChatSessionStoreSnapshot>>;
   saveStoredSessions: (sessions: PersistedSession[]) => Promise<IpcResult<ChatSessionStoreSnapshot>>;
@@ -219,6 +227,7 @@ export const ipcChannels = {
   listEnvironmentOutputFiles: "managed-agents:list-environment-output-files",
   saveEnvironmentOutputFile: "managed-agents:save-environment-output-file",
   openEnvironmentOutputFile: "managed-agents:open-environment-output-file",
+  readEnvironmentOutputText: "managed-agents:read-environment-output-text",
   saveText: "managed-agents:save-text",
   loadStoredSessions: "managed-agents:load-stored-sessions",
   saveStoredSessions: "managed-agents:save-stored-sessions",

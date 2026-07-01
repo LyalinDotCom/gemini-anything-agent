@@ -70,7 +70,7 @@ Path: `app/`
 - One managed agent.
 - Local conversation list.
 - New chats show as `New chat` in the sidebar.
-- Inline previews for image, video, and audio.
+- Inline previews for image, video, audio, HTML, Markdown, and text outputs.
 
 ### Managed Agent
 

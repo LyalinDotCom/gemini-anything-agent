@@ -9,6 +9,7 @@ import type {
   InteractionStreamSnapshot,
   ManagedAgentsBridge,
   PersistedSession,
+  ReadEnvironmentOutputTextResult,
   ResolvedEnvironmentMedia,
   RuntimeConfig,
   SaveResolvedMediaResult,
@@ -78,6 +79,8 @@ const bridge: ManagedAgentsBridge = {
     invoke<SaveResolvedMediaResult>(ipcChannels.saveEnvironmentOutputFile, path),
   openEnvironmentOutputFile: (path: string) =>
     invoke<boolean>(ipcChannels.openEnvironmentOutputFile, path),
+  readEnvironmentOutputText: (path: string) =>
+    invoke<ReadEnvironmentOutputTextResult>(ipcChannels.readEnvironmentOutputText, path),
   saveText: (content: string, defaultFileName?: string) =>
     invoke<SaveTextResult>(ipcChannels.saveText, content, defaultFileName),
   loadStoredSessions: () =>

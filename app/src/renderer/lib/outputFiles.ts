@@ -14,6 +14,8 @@ export const outputFileLabel = (file: EnvironmentOutputFile): string => {
   switch (file.fileType) {
     case "html":
       return "HTML";
+    case "markdown":
+      return "Markdown";
     case "text":
       return "Text";
     case "document":

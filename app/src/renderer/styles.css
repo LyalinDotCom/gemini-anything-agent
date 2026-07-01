@@ -4115,7 +4115,7 @@ button:disabled {
   box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.07), 0 1px 4px rgba(0, 0, 0, 0.1);
 }
 
-.chat-app .chat-main.previewing-html {
+.chat-app .chat-main.previewing-output {
   grid-template-rows: 46px minmax(0, 1fr);
 }
 
@@ -4507,6 +4507,64 @@ button:disabled {
   color: #ff3b30;
   box-shadow: 0 0 0 0.5px rgba(255, 59, 48, 0.2), 0 8px 24px rgba(0, 0, 0, 0.14);
   font-size: 12px;
+}
+
+.chat-app .markdown-preview-body {
+  overflow: auto;
+  background: #fbfbfc;
+}
+
+.chat-app .markdown-preview-document,
+.chat-app .text-preview-document {
+  width: min(920px, calc(100% - 36px));
+  margin: 18px auto;
+  padding: 22px 24px;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.08), 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+.chat-app .text-preview-document {
+  min-height: calc(100% - 36px);
+  overflow: auto;
+  color: var(--b-ink);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-app .text-preview-document code {
+  font: inherit;
+}
+
+.chat-app .markdown-preview-document pre {
+  max-width: 100%;
+  overflow: auto;
+  color: var(--b-ink);
+  background: #f5f6f8;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-app .markdown-preview-document pre code {
+  color: inherit;
+}
+
+.chat-app .markdown-preview-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 100%;
+  color: var(--b-muted);
+  font-size: 12px;
+}
+
+.chat-app .markdown-preview-state.error {
+  color: #ff3b30;
 }
 
 /* ---- transcript: bubbles + Sequoia inset activity card ---- */

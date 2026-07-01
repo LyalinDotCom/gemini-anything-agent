@@ -3,6 +3,7 @@ import sampleCatVideoUrl from "../assets/sample-prompts/cat-video.png";
 import sampleHackerNewsUrl from "../assets/sample-prompts/hacker-news-podcast.png";
 import sampleHtmlAppUrl from "../assets/sample-prompts/html-app.png";
 import sampleMusicTrackUrl from "../assets/sample-prompts/music-track.png";
+import sampleStoryLabUrl from "../assets/sample-prompts/story-lab.png";
 import sampleTranscriptUrl from "../assets/sample-prompts/transcript.png";
 import sampleWavMp3Url from "../assets/sample-prompts/wav-mp3.png";
 
@@ -61,6 +62,13 @@ const SAMPLE_PROMPTS: SamplePrompt[] = [
     thumbnail: sampleHtmlAppUrl,
     prompt:
       "Create a kid-friendly animated solar system as one self-contained HTML file. Include the Sun, all eight planets, labels, pause/play, and a speed slider."
+  },
+  {
+    title: "Story App",
+    detail: "Image, music, and TTS.",
+    thumbnail: sampleStoryLabUrl,
+    prompt:
+      "Create a simple kid-friendly storybook web app about a tiny island adventure. Generate one hero image, one short instrumental music loop, and one short narrated welcome audio clip, then build a single HTML file that uses those assets with play buttons and a small interactive scene."
   }
 ];
 

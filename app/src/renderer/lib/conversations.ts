@@ -24,6 +24,37 @@ export const NEW_CONVERSATION_DRAFT: ConversationSummary = {
   running: false
 };
 
+export const visibleConversationsWithDraft = ({
+  activeConversationId,
+  conversations,
+  draftVisible,
+  startingConversationIds
+}: {
+  activeConversationId: string;
+  conversations: ConversationSummary[];
+  draftVisible: boolean;
+  startingConversationIds: Record<string, boolean>;
+}): ConversationSummary[] => {
+  const showDraft =
+    draftVisible ||
+    activeConversationId === NEW_CONVERSATION_ID ||
+    Boolean(startingConversationIds[NEW_CONVERSATION_ID]);
+  const conversationsWithStarting = conversations.map((conversation) => ({
+    ...conversation,
+    running: Boolean(conversation.running || startingConversationIds[conversation.id])
+  }));
+
+  return showDraft
+    ? [
+        {
+          ...NEW_CONVERSATION_DRAFT,
+          running: Boolean(startingConversationIds[NEW_CONVERSATION_ID])
+        },
+        ...conversationsWithStarting
+      ]
+    : conversationsWithStarting;
+};
+
 export const firstPromptLine = (input: InteractionCreateRequest["input"]): string => {
   const prompt = promptForInput(input).trim().replace(/\s+/g, " ");
   if (!prompt) {

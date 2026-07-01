@@ -24,6 +24,11 @@ import {
   sanitizeSessionHistory
 } from "../src/renderer/lib/sessionStore";
 import {
+  NEW_CONVERSATION_ID,
+  visibleConversationsWithDraft,
+  type ConversationSummary
+} from "../src/renderer/lib/conversations";
+import {
   latestContinuableSession,
   latestReusableEnvironmentSession,
   sessionEnvironmentId,
@@ -37,7 +42,7 @@ import {
   mentionsWorkspaceOutput,
   shouldAutoResolveMedia
 } from "../src/renderer/lib/mediaResolver";
-import { outputFileMatchesPath, outputFilesCoverPaths } from "../src/renderer/lib/outputFiles";
+import { outputFileLabel, outputFileMatchesPath, outputFilesCoverPaths } from "../src/renderer/lib/outputFiles";
 
 const KEY_FOR: Partial<Record<CapabilityKey, string>> = {
   brain: "system_instruction",
@@ -320,6 +325,38 @@ describe("renderer payload compiler", () => {
   });
 });
 
+describe("conversation list drafts", () => {
+  const savedConversation = (id: string): ConversationSummary => ({
+    id,
+    title: `Saved ${id}`,
+    sessions: [],
+    latestAt: Date.now()
+  });
+
+  it("keeps a created new-chat draft visible after switching away from it", () => {
+    const visible = visibleConversationsWithDraft({
+      activeConversationId: "saved-1",
+      conversations: [savedConversation("saved-1")],
+      draftVisible: true,
+      startingConversationIds: {}
+    });
+
+    expect(visible.map((conversation) => conversation.id)).toEqual([NEW_CONVERSATION_ID, "saved-1"]);
+    expect(visible[0].draft).toBe(true);
+  });
+
+  it("does not recreate a consumed new-chat draft until the app asks for one", () => {
+    const visible = visibleConversationsWithDraft({
+      activeConversationId: "run-1",
+      conversations: [savedConversation("run-1")],
+      draftVisible: false,
+      startingConversationIds: {}
+    });
+
+    expect(visible.map((conversation) => conversation.id)).toEqual(["run-1"]);
+  });
+});
+
 describe("session history storage", () => {
   const session = (agentId: string, startedAt: number, localId = `${agentId}-${startedAt}`): Session => ({
     localId,
@@ -538,6 +575,19 @@ describe("renderer media resolver", () => {
     expect(outputFileMatchesPath(files[0], "workspace/output/cozy_cat_string.jpg")).toBe(true);
     expect(outputFilesCoverPaths(files, ["/workspace/output/cozy_cat_string.jpg"])).toBe(true);
     expect(outputFilesCoverPaths(files, ["/workspace/output/missing.jpg"])).toBe(false);
+  });
+
+  it("labels markdown output files distinctly from plain text", () => {
+    expect(outputFileLabel({
+      sandboxPath: "/workspace/output/transcript.md",
+      relativePath: "transcript.md",
+      name: "transcript.md",
+      path: "/cache/environment/workspace/output/transcript.md",
+      bytes: 123,
+      modifiedAt: 1,
+      fileType: "markdown",
+      url: "gemini-media://env/workspace/output/transcript.md"
+    })).toBe("Markdown");
   });
 });
 

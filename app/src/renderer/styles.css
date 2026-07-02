@@ -4664,6 +4664,16 @@ button:disabled {
   color: #ff3b30;
 }
 
+.chat-app .chat-turn-duration {
+  align-self: flex-end;
+  margin: 2px 6px 4px 0;
+  color: var(--b-muted);
+  text-align: right;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+
 .chat-app .markdown-preview-missing-image {
   display: inline-block;
   padding: 2px 8px;

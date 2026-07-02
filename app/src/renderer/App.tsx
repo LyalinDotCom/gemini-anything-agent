@@ -217,6 +217,21 @@ export const App = () => {
     () => [...selectedSessions].sort((left, right) => left.startedAt - right.startedAt),
     [selectedSessions]
   );
+  // Duration of the latest completed turn, derived from persisted timestamps
+  // so it survives restarts along with the chat history.
+  const lastTurnDuration = useMemo(() => {
+    const last = chatSessions[chatSessions.length - 1];
+    if (!last || last.streaming || !last.completedAt || last.completedAt <= last.startedAt) {
+      return undefined;
+    }
+    const totalSeconds = Math.round((last.completedAt - last.startedAt) / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    const pad = (part: number) => String(part).padStart(2, "0");
+    return `Last turn ${hours}:${pad(minutes)}:${pad(seconds)}`;
+  }, [chatSessions]);
+
   const sentImageParts = useMemo(
     () =>
       mergeImageParts([
@@ -1976,6 +1991,11 @@ export const App = () => {
                       />
                     </div>
                   ))
+                )}
+                {lastTurnDuration && (
+                  <div className="chat-turn-duration" title="Execution time of the last turn">
+                    {lastTurnDuration}
+                  </div>
                 )}
               </div>
 

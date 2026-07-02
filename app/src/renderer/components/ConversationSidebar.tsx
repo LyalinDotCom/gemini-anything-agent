@@ -153,6 +153,12 @@ export const ConversationSidebar = ({
                       event.dataTransfer.effectAllowed = "move";
                       event.dataTransfer.setData("text/plain", conversation.id);
                       setDragId(conversation.id);
+                      // The drag swallows the click, which can leave the row's
+                      // button stuck in a :focus-visible ring until something
+                      // else takes focus.
+                      if (document.activeElement instanceof HTMLElement) {
+                        document.activeElement.blur();
+                      }
                     }}
                     onDragOver={(event) => handleRowDragOver(event, conversation.id)}
                     onDragEnd={endDrag}

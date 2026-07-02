@@ -2,12 +2,6 @@ import type { Interaction, InteractionCreateRequest, InteractionStreamEvent, Man
 import type { IpcError, PersistedSession, ResolvedEnvironmentMedia } from "../../shared/electron-api";
 import type { ImageAttachmentMeta, Session } from "./builderState";
 
-export const SESSION_HISTORY_KEY = "gemini-anything-agent:sessions:v3";
-export const LEGACY_SESSION_HISTORY_KEYS = [
-  "gemini-anything-agent:sessions:v1",
-  "gemini-anything-agent:sessions:v2",
-  SESSION_HISTORY_KEY
-];
 const MAX_STORED_SESSIONS = 200;
 
 type InputPart = Extract<InteractionCreateRequest["input"], unknown[]>[number];
@@ -250,19 +244,6 @@ const pruneToWholeConversations = (sessionsNewestFirst: Session[]): Session[] =>
     kept.push(session);
   }
   return kept;
-};
-
-export const clearLegacyBrowserSessionHistory = (): void => {
-  if (typeof window === "undefined") {
-    return;
-  }
-  try {
-    for (const key of LEGACY_SESSION_HISTORY_KEYS) {
-      window.localStorage.removeItem(key);
-    }
-  } catch {
-    // Ignore cleanup failures; the app no longer reads browser storage.
-  }
 };
 
 export type StoredSessionsReadResult = {

@@ -53,7 +53,12 @@ import {
   type SetSpecializedToolsResult,
   type SnapshotDownloadResult
 } from "../shared/electron-api";
-import { chatStoreRootPath, loadChatSessionsFromDisk, saveChatSessionsToDisk } from "./chatStore";
+import {
+  chatStoreRootPath,
+  loadChatSessionsFromDisk,
+  queueConversationDiagnostics,
+  saveChatSessionsToDisk
+} from "./chatStore";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
@@ -714,18 +719,16 @@ const fileDigest = async (path: string): Promise<string> => {
   return hash.digest("hex");
 };
 
+// Throws when either file cannot be read: the caller must distinguish
+// "contents differ" from "couldn't compare right now".
 const filesHaveSameContent = async (left: string, right: string): Promise<boolean> => {
-  try {
-    const leftStats = statSync(left);
-    const rightStats = statSync(right);
-    if (leftStats.size !== rightStats.size) {
-      return false;
-    }
-    const [leftDigest, rightDigest] = await Promise.all([fileDigest(left), fileDigest(right)]);
-    return leftDigest === rightDigest;
-  } catch {
+  const leftStats = statSync(left);
+  const rightStats = statSync(right);
+  if (leftStats.size !== rightStats.size) {
     return false;
   }
+  const [leftDigest, rightDigest] = await Promise.all([fileDigest(left), fileDigest(right)]);
+  return leftDigest === rightDigest;
 };
 
 const autoSaveTarget = async (directory: string, sourcePath: string): Promise<string> => {
@@ -736,7 +739,17 @@ const autoSaveTarget = async (directory: string, sourcePath: string): Promise<st
   for (let index = 0; ; index += 1) {
     const name = index === 0 ? originalName : `${stem}-${index + 1}${extension}`;
     const candidate = join(directory, name);
-    if (!existsSync(candidate) || (await filesHaveSameContent(sourcePath, candidate))) {
+    if (!existsSync(candidate)) {
+      return candidate;
+    }
+    try {
+      if (await filesHaveSameContent(sourcePath, candidate)) {
+        return candidate;
+      }
+    } catch {
+      // Transient read failure (cache file mid-extract or mid-swap): reuse
+      // the existing name without overwriting. Treating this as "different"
+      // used to fork spurious "-2" duplicates of identical content.
       return candidate;
     }
   }
@@ -747,7 +760,16 @@ const autoSaveMedia = async (environmentId: string, sourcePath: string): Promise
   mkdirSync(directory, { recursive: true });
   const target = await autoSaveTarget(directory, sourcePath);
   if (!existsSync(target)) {
-    await copyFile(sourcePath, target);
+    // Copy via temp + rename so a concurrent save or dedup compare never
+    // observes a half-written file under the final name.
+    const partial = `${target}.${randomUUID()}.partial`;
+    try {
+      await copyFile(sourcePath, partial);
+      renameSync(partial, target);
+    } catch (error) {
+      rmSync(partial, { force: true });
+      throw error;
+    }
   }
   return target;
 };
@@ -1000,9 +1022,10 @@ const listEnvironmentOutputFilesFromSnapshot = async (
   const targetExtractRoot = force ? nextExtractRoot : extractRoot;
   const tarPath = snapshotTarPath(cacheRoot);
 
-  if (!force) {
-    await copyAutoSavedMediaToCache(environmentId, extractRoot);
-  }
+  // Policy: the server snapshot is the source of truth whenever it has
+  // content. Local auto-saves are seeded into the cache ONLY as a fallback
+  // when the server can't provide anything (download failure or an empty
+  // snapshot) — never merged into a server-derived listing.
   const cached = cachedEnvironmentOutputFiles(environmentId, extractRoot);
   if (!force && cached.length > 0) {
     return cached;
@@ -1010,7 +1033,6 @@ const listEnvironmentOutputFilesFromSnapshot = async (
 
   return withEnvironmentSnapshotLock(environmentId, async () => {
     if (!force) {
-      await copyAutoSavedMediaToCache(environmentId, extractRoot);
       const cachedAfterLock = cachedEnvironmentOutputFiles(environmentId, extractRoot);
       if (cachedAfterLock.length > 0) {
         return cachedAfterLock;
@@ -1053,7 +1075,10 @@ const listEnvironmentOutputFilesFromSnapshot = async (
       );
 
       if (selectedEntries.length === 0) {
+        // The server has nothing: keep whatever is already cached and fall
+        // back to locally auto-saved media rather than clearing anything.
         rmSync(nextExtractRoot, { recursive: true, force: true });
+        await copyAutoSavedMediaToCache(environmentId, extractRoot);
         return cachedEnvironmentOutputFiles(environmentId, extractRoot);
       }
 
@@ -1257,6 +1282,24 @@ const rememberStreamEvent = (
     }
   }
   return { event, latestInteraction: buffer.latestInteraction };
+};
+
+// Mirrors the renderer's status sets: anything not known-live is terminal.
+const NON_TERMINAL_INTERACTION_STATUS = new Set([
+  "queued",
+  "running",
+  "in_progress",
+  "in-progress",
+  "pending",
+  "processing",
+  "started",
+  "requires_action",
+  "requires-action"
+]);
+
+const interactionStatusIsTerminal = (interaction: Interaction | undefined): boolean => {
+  const status = interaction?.status?.toLowerCase();
+  return Boolean(status && !NON_TERMINAL_INTERACTION_STATUS.has(status));
 };
 
 const hydrateStreamInteraction = async (
@@ -1540,11 +1583,17 @@ ipcMain.handle(
       }
       return ok(latestInteraction);
     } catch (error) {
-      if (controller.signal.aborted && latestInteraction?.id) {
+      // A dying stream is not the same as a dying run: long streams get cut
+      // by the server (gRPC CANCELLED) or proxies while the interaction keeps
+      // running — or already finished. Hydrate and report success whenever
+      // the interaction itself reached a terminal state.
+      if (latestInteraction?.id) {
         const hydrated = await hydrateStreamInteraction(client, latestInteraction);
         if (hydrated) {
           buffer.latestInteraction = hydrated;
-          return ok(hydrated);
+          if (controller.signal.aborted || interactionStatusIsTerminal(hydrated)) {
+            return ok(hydrated);
+          }
         }
       }
       return fail<Interaction>(error);
@@ -1605,10 +1654,12 @@ ipcMain.handle(
       }
       return ok(latestInteraction);
     } catch (error) {
-      if (controller.signal.aborted) {
-        const hydrated = await hydrateStreamInteraction(client, latestInteraction, interactionId);
-        if (hydrated) {
-          buffer.latestInteraction = hydrated;
+      // Same as the create path: if the interaction is already terminal, the
+      // stream's death is irrelevant — return the finished interaction.
+      const hydrated = await hydrateStreamInteraction(client, latestInteraction, interactionId);
+      if (hydrated) {
+        buffer.latestInteraction = hydrated;
+        if (controller.signal.aborted || interactionStatusIsTerminal(hydrated)) {
           return ok(hydrated);
         }
       }
@@ -1686,21 +1737,15 @@ handle<[string, string[]], ResolvedEnvironmentMedia[]>(
     const cacheRoot = join(mediaCacheRoot(), safeCacheSegment(environmentId));
     const extractRoot = join(cacheRoot, "files");
     const tarPath = snapshotTarPath(cacheRoot);
-    let cached = await resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
-    if (!cached) {
-      await copyAutoSavedMediaToCache(environmentId, extractRoot, requestedPaths);
-      cached = await resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
-    }
+    // Server-wins policy: resolve from the server-derived cache, then the
+    // server itself; locally auto-saved copies only backfill on failure.
+    const cached = await resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
     if (cached) {
       return cached;
     }
 
     return withEnvironmentSnapshotLock(environmentId, async () => {
-      let lockedCached = await resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
-      if (!lockedCached) {
-        await copyAutoSavedMediaToCache(environmentId, extractRoot, requestedPaths);
-        lockedCached = await resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
-      }
+      const lockedCached = await resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
       if (lockedCached) {
         return lockedCached;
       }
@@ -1893,6 +1938,29 @@ handle<[PersistedSession[]], ChatSessionStoreSnapshot>(ipcChannels.saveStoredSes
     sessions
   };
 });
+
+ipcMain.on(
+  ipcChannels.appendConversationDiagnostics,
+  (_event, conversationId: unknown, entry: unknown) => {
+    if (
+      typeof conversationId !== "string" ||
+      !conversationId.trim() ||
+      typeof entry !== "object" ||
+      entry === null
+    ) {
+      return;
+    }
+    const { at, event: eventName, detail } = entry as Record<string, unknown>;
+    if (typeof at !== "string" || typeof eventName !== "string") {
+      return;
+    }
+    queueConversationDiagnostics(conversationId, {
+      at,
+      event: eventName,
+      detail: typeof detail === "string" ? detail : undefined
+    });
+  }
+);
 
 // Blocking variant for window unload: renderer saves are coalesced, so the
 // final pending snapshot must land on disk before the process goes away.

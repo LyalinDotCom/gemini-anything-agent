@@ -1337,10 +1337,12 @@ svg {
 
 .md pre {
   padding: 12px;
-  overflow: auto;
+  overflow-x: auto;
   color: var(--code-ink);
   background: var(--code-bg);
   border-radius: 9px;
+  white-space: pre;
+  tab-size: 4;
 }
 
 .md pre code {
@@ -1355,6 +1357,64 @@ svg {
 .md a {
   color: var(--teal-dark);
   font-weight: 600;
+}
+
+/* GFM structure inside agent replies: tables, rules, task lists. */
+.md table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.md th,
+.md td {
+  padding: 6px 11px;
+  border: 1px solid var(--line-strong);
+  font-size: 12.5px;
+  vertical-align: top;
+}
+
+.md th {
+  background: var(--surface-2);
+  font-weight: 650;
+}
+
+.md tr:nth-child(2n) td {
+  background: var(--surface-1, rgba(0, 0, 0, 0.02));
+}
+
+.md hr {
+  height: 1px;
+  margin: 18px 0;
+  border: none;
+  background: var(--line-strong);
+}
+
+.md li > ul,
+.md li > ol {
+  margin: 4px 0 0;
+}
+
+.md li > p {
+  margin-bottom: 6px;
+}
+
+.md li input[type="checkbox"] {
+  margin-right: 6px;
+}
+
+.md img {
+  max-width: 100%;
+  border-radius: 6px;
+}
+
+.md h5,
+.md h6 {
+  margin: 14px 0 6px;
+  color: var(--muted);
+  font-size: 12.5px;
 }
 
 .media-embed,

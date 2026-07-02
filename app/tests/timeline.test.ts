@@ -434,15 +434,6 @@ describe("stream event merging", () => {
     expect(merged[0].seq).toBe(10);
   });
 
-  it("keeps pre-seq persisted events ahead of newly stamped ones", () => {
-    const legacy: InteractionStreamEvent = { event_type: "step.start", index: 0, event_id: "evt-1" };
-    const merged = mergeStreamEvents([legacy], [
-      { event_type: "step.delta", index: 0, delta: { text: "new" }, seq: 100 }
-    ]);
-
-    expect(merged[0]).toBe(legacy);
-    expect(merged[1].seq).toBe(100);
-  });
 });
 
 describe("interaction recovery semantics", () => {

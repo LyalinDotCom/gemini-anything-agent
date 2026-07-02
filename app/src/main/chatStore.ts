@@ -1,4 +1,5 @@
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -115,6 +116,43 @@ const readConversationFile = (path: string): ConversationFile | undefined => {
 const folderConversationIds = new Map<string, string>();
 const writtenConversations = new Map<string, string>();
 const writtenRuns = new Map<string, string>();
+
+export type ConversationDiagnosticEntry = {
+  at: string;
+  event: string;
+  detail?: string;
+};
+
+// Runtime diagnostics (stream retries, transient errors, lifecycle) queue in
+// memory and flush into each conversation's folder on the next save, since
+// the save flow is what knows which folder a conversation lives in.
+const diagnosticsQueues = new Map<string, string[]>();
+const MAX_QUEUED_DIAGNOSTIC_LINES = 500;
+
+export const queueConversationDiagnostics = (
+  conversationId: string,
+  entry: ConversationDiagnosticEntry
+): void => {
+  const queue = diagnosticsQueues.get(conversationId) ?? [];
+  queue.push(JSON.stringify(entry));
+  if (queue.length > MAX_QUEUED_DIAGNOSTIC_LINES) {
+    queue.splice(0, queue.length - MAX_QUEUED_DIAGNOSTIC_LINES);
+  }
+  diagnosticsQueues.set(conversationId, queue);
+};
+
+const flushConversationDiagnostics = (conversationId: string, folderPath: string): void => {
+  const queue = diagnosticsQueues.get(conversationId);
+  if (!queue?.length) {
+    return;
+  }
+  diagnosticsQueues.delete(conversationId);
+  try {
+    appendFileSync(join(folderPath, "diagnostics.log"), `${queue.join("\n")}\n`, "utf8");
+  } catch {
+    // Diagnostics must never break chat persistence.
+  }
+};
 
 const forgetFolderCaches = (folderPath: string): void => {
   folderConversationIds.delete(folderPath);
@@ -295,6 +333,7 @@ export const saveChatSessionsToDisk = (rootPath: string, sessions: PersistedSess
     if (!activeConversationIds.has(conversationId)) {
       rmSync(folderPath, { recursive: true, force: true });
       forgetFolderCaches(folderPath);
+      diagnosticsQueues.delete(conversationId);
     }
   }
 
@@ -305,6 +344,10 @@ export const saveChatSessionsToDisk = (rootPath: string, sessions: PersistedSess
       continue;
     }
     const folderPath = existing.get(conversationId) ?? join(rootPath, conversationFolderName(root));
+    mkdirSync(folderPath, { recursive: true });
+    // Diagnostics flush regardless of the content dirty-check below — a
+    // stream retry can happen without any chat content changing.
+    flushConversationDiagnostics(conversationId, folderPath);
     const runsPath = join(folderPath, "runs");
     const title = firstPromptLine(root.request.input);
     const conversation: ConversationFile = {
@@ -341,6 +384,7 @@ export const saveChatSessionsToDisk = (rootPath: string, sessions: PersistedSess
         "- `conversation.json` is the full machine-readable chat record.",
         "- `conversation.md` is a human-readable timeline.",
         "- `runs/` contains one folder per agent turn with request, response, stream events, errors, and media metadata.",
+        "- `diagnostics.log` is an append-only runtime log (run lifecycle, stream retries, transient errors) for support and debugging.",
         "",
         `Folder: \`${basename(folderPath)}\``,
         ""

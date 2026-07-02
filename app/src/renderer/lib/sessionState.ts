@@ -135,9 +135,8 @@ export const completedAtForInteraction = (
 
 // Identity priority: the server's event_id first (a resume replay re-sends
 // events with fresh local seq stamps, so seq must not shadow it), then the
-// main-process seq (lets two legitimately identical id-less deltas both
-// survive while push/snapshot double-delivery dedups), then a payload hash
-// for events persisted before seq existed.
+// main-process seq, which lets two legitimately identical id-less deltas
+// both survive while push/snapshot double-delivery dedups.
 const streamEventKey = (event: InteractionStreamEvent): string => {
   if (typeof event.event_id === "string" && event.event_id) {
     return `id:${event.event_id}`;
@@ -161,13 +160,9 @@ export const mergeStreamEvents = (
       seen.add(key);
     }
   }
-  // Canonical order: pre-seq persisted events keep arrival order up front,
-  // seq-stamped events sort by seq (push and snapshot arrivals interleave).
-  const withoutSeq = merged.filter((event) => typeof event.seq !== "number");
-  const withSeq = merged
-    .filter((event) => typeof event.seq === "number")
-    .sort((left, right) => (left.seq as number) - (right.seq as number));
-  return [...withoutSeq, ...withSeq].slice(-300);
+  // Canonical order by seq (push and snapshot arrivals interleave); the sort
+  // is stable, so anything without a seq keeps its arrival order.
+  return merged.sort((left, right) => (left.seq ?? 0) - (right.seq ?? 0)).slice(-300);
 };
 
 export const latestStreamEventId = (events: InteractionStreamEvent[] | undefined): string | undefined =>

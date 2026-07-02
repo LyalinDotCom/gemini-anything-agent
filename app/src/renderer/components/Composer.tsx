@@ -69,6 +69,7 @@ export const Composer = ({
   sentImageParts = [],
   running,
   locked,
+  agentLocked = false,
   canRun,
   canCancel,
   cancelDisabled,
@@ -84,6 +85,8 @@ export const Composer = ({
   sentImageParts?: ImagePartDraft[];
   running: boolean;
   locked: boolean;
+  /** The conversation already has turns: its agent can no longer change. */
+  agentLocked?: boolean;
   canRun: boolean;
   canCancel: boolean;
   cancelDisabled?: boolean;
@@ -107,6 +110,12 @@ export const Composer = ({
     document.addEventListener("mousedown", closeOnOutsideClick);
     return () => document.removeEventListener("mousedown", closeOnOutsideClick);
   }, [agentMenuOpen]);
+
+  useEffect(() => {
+    if (agentLocked) {
+      setAgentMenuOpen(false);
+    }
+  }, [agentLocked]);
   const disabledPreviousInteractionId = useRef<string | undefined>(undefined);
   const disabledEnvironmentId = useRef<string | undefined>(undefined);
   const disabledEnvironmentWasSpecific = useRef(false);
@@ -388,25 +397,29 @@ export const Composer = ({
           <span
             className="composer-agent-label"
             title={
-              deepResearch
-                ? "Deep Research runs in the background and can take up to 60 minutes."
-                : "The managed agent handling this prompt"
+              agentLocked
+                ? "This conversation's agent is fixed after its first run. Start a new chat to use a different agent."
+                : deepResearch
+                  ? "Deep Research runs in the background and can take up to 60 minutes."
+                  : "The managed agent handling this prompt"
             }
           >
             {AGENT_MODE_LABELS[compose.agentMode]}
           </span>
-          <button
-            type="button"
-            className="composer-agent-switch"
-            title="Change agent"
-            aria-label="Change agent"
-            aria-expanded={agentMenuOpen}
-            disabled={locked}
-            onClick={() => setAgentMenuOpen((value) => !value)}
-          >
-            <ChevronsUpDown size={12} />
-          </button>
-          {agentMenuOpen && (
+          {!agentLocked && (
+            <button
+              type="button"
+              className="composer-agent-switch"
+              title="Change agent"
+              aria-label="Change agent"
+              aria-expanded={agentMenuOpen}
+              disabled={locked}
+              onClick={() => setAgentMenuOpen((value) => !value)}
+            >
+              <ChevronsUpDown size={12} />
+            </button>
+          )}
+          {!agentLocked && agentMenuOpen && (
             <div className="composer-agent-menu" role="menu">
               {(Object.keys(AGENT_MODE_LABELS) as AgentMode[]).map((mode) => (
                 <button

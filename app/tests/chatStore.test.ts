@@ -3,7 +3,11 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import type { PersistedSession } from "../src/shared/electron-api";
-import { loadChatSessionsFromDisk, saveChatSessionsToDisk } from "../src/main/chatStore";
+import {
+  loadChatSessionsFromDisk,
+  queueConversationDiagnostics,
+  saveChatSessionsToDisk
+} from "../src/main/chatStore";
 
 const session = (overrides: Partial<PersistedSession> & { localId: string; startedAt: number }): PersistedSession => ({
   agentId: "gemini-anything-agent",
@@ -137,6 +141,45 @@ describe("chat store", () => {
       saveChatSessionsToDisk(root, [first, second]);
       expect(existsSync(stalePath)).toBe(false);
       expect(readdirSync(join(root, folder, "runs"))).toHaveLength(2);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("flushes queued diagnostics into the conversation folder even when content is unchanged", () => {
+    const root = mkdtempSync(join(tmpdir(), "gai-chat-store-"));
+    try {
+      const first = session({ localId: "root", startedAt: Date.UTC(2026, 5, 30, 12, 0, 0) });
+      saveChatSessionsToDisk(root, [first]);
+
+      queueConversationDiagnostics("root", {
+        at: "2026-07-02T10:00:00.000Z",
+        event: "stream.reconnect.scheduled",
+        detail: '{"attempt":1}'
+      });
+      queueConversationDiagnostics("root", {
+        at: "2026-07-02T10:00:05.000Z",
+        event: "stream.resume.completed"
+      });
+
+      // Content unchanged: the dirty-check skips rewriting, but diagnostics
+      // must still land.
+      saveChatSessionsToDisk(root, [first]);
+
+      const [folder] = readdirSync(root);
+      const log = readFileSync(join(root, folder, "diagnostics.log"), "utf8");
+      const lines = log.trim().split("\n").map((line) => JSON.parse(line));
+      expect(lines).toHaveLength(2);
+      expect(lines[0].event).toBe("stream.reconnect.scheduled");
+      expect(lines[1].event).toBe("stream.resume.completed");
+
+      // A later flush appends rather than rewriting.
+      queueConversationDiagnostics("root", {
+        at: "2026-07-02T10:01:00.000Z",
+        event: "run.completed"
+      });
+      saveChatSessionsToDisk(root, [first]);
+      expect(readFileSync(join(root, folder, "diagnostics.log"), "utf8").trim().split("\n")).toHaveLength(3);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

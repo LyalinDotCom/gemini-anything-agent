@@ -195,6 +195,11 @@ export type ManagedAgentsBridge = {
   saveStoredSessions: (sessions: PersistedSession[]) => Promise<IpcResult<ChatSessionStoreSnapshot>>;
   /** Blocking save used on window unload, when an async IPC round-trip may not complete. */
   saveStoredSessionsSync?: (sessions: PersistedSession[]) => boolean;
+  /** Fire-and-forget runtime diagnostics appended to the conversation's folder. */
+  appendConversationDiagnostics?: (
+    conversationId: string,
+    entry: { at: string; event: string; detail?: string }
+  ) => void;
   loadAgentProject: (agentId: string) => Promise<IpcResult<AgentProjectSnapshot>>;
   saveAgentProject: (
     agentId: string,
@@ -234,6 +239,7 @@ export const ipcChannels = {
   loadStoredSessions: "managed-agents:load-stored-sessions",
   saveStoredSessions: "managed-agents:save-stored-sessions",
   saveStoredSessionsSync: "managed-agents:save-stored-sessions-sync",
+  appendConversationDiagnostics: "managed-agents:append-conversation-diagnostics",
   loadAgentProject: "managed-agents:load-agent-project",
   saveAgentProject: "managed-agents:save-agent-project",
   openAgentProject: "managed-agents:open-agent-project",

@@ -94,6 +94,12 @@ const bridge: ManagedAgentsBridge = {
       return false;
     }
   },
+  appendConversationDiagnostics: (
+    conversationId: string,
+    entry: { at: string; event: string; detail?: string }
+  ): void => {
+    ipcRenderer.send(ipcChannels.appendConversationDiagnostics, conversationId, entry);
+  },
   loadAgentProject: (agentId: string) =>
     invoke<AgentProjectSnapshot>(ipcChannels.loadAgentProject, agentId),
   saveAgentProject: (agentId: string, files: AgentProjectFileSnapshot[]) =>

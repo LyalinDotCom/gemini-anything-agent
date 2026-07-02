@@ -20,7 +20,6 @@ import {
   type Session
 } from "./lib/builderState";
 import {
-  clearLegacyBrowserSessionHistory,
   readStoredSessions,
   writeStoredSessions
 } from "./lib/sessionStore";
@@ -33,8 +32,10 @@ import {
 import type { EnvironmentOutputState, SessionMediaState } from "./lib/mediaState";
 import { createStickToBottom } from "./lib/stickToBottom";
 import { readConversationOrder, writeConversationOrder } from "./lib/conversationOrder";
+import { logConversationDiagnostic } from "./lib/diagnostics";
 import {
   ALL_AGENT_TOOLS,
+  agentModeForAgentId,
   buildChatInteraction,
   clearComposeInput,
   composeFromRequest,
@@ -81,7 +82,7 @@ import {
   timelineItemsForSession
 } from "./lib/sessionState";
 import { bridgeUnavailable, FALLBACK_RUNTIME } from "./lib/runtimeConfig";
-import { outputFilesCoverPaths, outputMediaItem } from "./lib/outputFiles";
+import { outputMediaItem } from "./lib/outputFiles";
 import { Composer } from "./components/Composer";
 import { Transcript } from "./components/Transcript";
 import { SettingsModal } from "./components/Overlays";
@@ -115,8 +116,10 @@ const snapshotAgentForRun = async (
   }
 };
 
-const MEDIA_RETRY_DELAYS_MS = [1200, 2500, 5000, 9000];
-const OUTPUT_RETRY_DELAYS_MS = [1200, 2500, 5000, 9000];
+// One short retry only: after a completed run the snapshot is final, so a
+// path that still doesn't resolve is a phantom mention, and every extra
+// attempt costs a full snapshot download.
+const MEDIA_RETRY_DELAYS_MS = [2500];
 // Backoff for reattaching a dropped background stream before surfacing the
 // error and the manual Reconnect button.
 const STREAM_RECONNECT_DELAYS_MS = [2000, 5000, 12000];
@@ -153,9 +156,6 @@ export const App = () => {
   const runtimeOutputHydrationSessionIds = useRef<Set<string>>(new Set());
   const mediaRetryCounts = useRef<Record<string, number>>({});
   const mediaRetryTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
-  const outputRetryCounts = useRef<Record<string, number>>({});
-  const outputRetryTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
-  const outputRefreshSignatures = useRef<Record<string, string>>({});
   const outputFilesRequestSeq = useRef<Record<string, number>>({});
   const autoOpenedOutputEnvironments = useRef<Set<string>>(new Set());
   const ensureAgentPromise = useRef<Promise<EnsureAnythingAgentResult | undefined> | null>(null);
@@ -181,6 +181,11 @@ export const App = () => {
     () => applyManualConversationOrder(buildConversations(agentSessions), conversationOrder),
     [agentSessions, conversationOrder]
   );
+
+  const conversationIdForSession = (localId: string): string | undefined =>
+    conversations.find((conversation) =>
+      conversation.sessions.some((session) => session.localId === localId)
+    )?.id;
 
   function reorderConversation(dragId: string, dropSlot: number) {
     // Snapshot the full current order so every conversation gets a manual
@@ -269,20 +274,6 @@ export const App = () => {
   const latestRunSession = latestRunId
     ? chatSessions.find((session) => session.localId === latestRunId)
     : undefined;
-  const outputRefreshSignature = useMemo(
-    () =>
-      chatSessions
-        .map((session) =>
-          [
-            session.localId,
-            session.completedAt ?? "",
-            session.streaming ? "streaming" : "done",
-            sessionEnvironmentId(session) ?? ""
-          ].join(":")
-        )
-        .join("|"),
-    [chatSessions]
-  );
   const canRun = appReady && !selectedConversationRunning && hasComposeInput(compose);
 
   const updateScrollStickiness = () => {
@@ -316,7 +307,6 @@ export const App = () => {
 
   useEffect(() => {
     let canceled = false;
-    clearLegacyBrowserSessionHistory();
     void readStoredSessions().then((stored) => {
       if (canceled) {
         return;
@@ -351,6 +341,18 @@ export const App = () => {
     setActiveTextPreview(null);
     scrollChatToBottom(true);
   }, [activeConversationId]);
+
+  // The selector must reflect the agent this conversation actually ran with,
+  // not whatever was last picked globally. Draft chats keep the user's choice.
+  const conversationAgentId = chatSessions[chatSessions.length - 1]?.request.agent;
+  const conversationAgentLocked = Boolean(conversationAgentId);
+  useEffect(() => {
+    if (!conversationAgentId) {
+      return;
+    }
+    const mode = agentModeForAgentId(conversationAgentId);
+    setCompose((current) => (current.agentMode === mode ? current : { ...current, agentMode: mode }));
+  }, [conversationAgentId]);
 
   useEffect(() => {
     scrollChatToBottom();
@@ -410,7 +412,6 @@ export const App = () => {
     completedOutputHydrationKeys.current.clear();
     runtimeOutputHydrationSessionIds.current.clear();
     clearAllRetryTimers();
-    outputRefreshSignatures.current = {};
     autoOpenedOutputEnvironments.current.clear();
   }, [keyMissing]);
 
@@ -464,13 +465,21 @@ export const App = () => {
 
       completedOutputHydrationKeys.current.add(hydrationKey);
       runtimeOutputHydrationSessionIds.current.delete(session.localId);
-      void loadOutputFiles(environmentId, true, { retryUntilPaths: expectedOutputPaths });
-      if (mediaPaths.length > 0 && shouldAutoResolveMedia(session)) {
-        void resolveMediaForSession(session, true);
-      }
+      // Run completed → fetch the final snapshot ONCE and process everything
+      // in it. Media resolution runs after the listing so it hits the freshly
+      // extracted cache instead of downloading the snapshot a second time.
+      void (async () => {
+        await loadOutputFiles(environmentId, true);
+        if (mediaPaths.length > 0 && shouldAutoResolveMedia(session)) {
+          void resolveMediaForSession(session, true);
+        }
+      })();
     }
   }, [agentSessions]);
 
+  // Cold-cache listing only: make sure an environment shows its (cached)
+  // files when its conversation is opened. Completion refreshes are handled
+  // above; the Refresh button covers everything else.
   useEffect(() => {
     if (!latestEnvironmentId || selectedConversationRunning || !window.managedAgents?.listEnvironmentOutputFiles) {
       return;
@@ -480,28 +489,16 @@ export const App = () => {
     if (!shouldDiscoverOutputs) {
       return;
     }
-    const previousSignature = outputRefreshSignatures.current[latestEnvironmentId];
-    const completedLatestRun = Boolean(latestRunSession && latestRunSession.completedAt && !latestRunSession.streaming);
-    const force = Boolean(
-      completedLatestRun &&
-        (!previousSignature || previousSignature !== outputRefreshSignature || !outputFilesByEnvironment[latestEnvironmentId]?.checked)
-    );
     const state = outputFilesByEnvironment[latestEnvironmentId];
-    if (state?.loading || (!force && state?.checked)) {
+    if (state?.loading || state?.checked) {
       return;
     }
-    outputRefreshSignatures.current[latestEnvironmentId] = outputRefreshSignature;
-    void loadOutputFiles(
-      latestEnvironmentId,
-      force,
-      latestRunSession ? { retryUntilPaths: extractWorkspaceOutputPaths(mediaSearchTextForSession(latestRunSession)) } : undefined
-    );
+    void loadOutputFiles(latestEnvironmentId, false);
   }, [
     latestEnvironmentId,
     latestRunSession,
     outputPanelOpen,
     outputFilesByEnvironment,
-    outputRefreshSignature,
     selectedConversationRunning
   ]);
 
@@ -572,20 +569,8 @@ export const App = () => {
     delete mediaRetryCounts.current[requestKey];
   }
 
-  function clearOutputRetry(environmentId: string) {
-    const timer = outputRetryTimers.current[environmentId];
-    if (timer) {
-      clearTimeout(timer);
-      delete outputRetryTimers.current[environmentId];
-    }
-    delete outputRetryCounts.current[environmentId];
-  }
-
   function clearAllRetryTimers() {
     for (const timer of Object.values(mediaRetryTimers.current)) {
-      clearTimeout(timer);
-    }
-    for (const timer of Object.values(outputRetryTimers.current)) {
       clearTimeout(timer);
     }
     for (const timer of streamRetryTimers.current.values()) {
@@ -593,8 +578,6 @@ export const App = () => {
     }
     mediaRetryTimers.current = {};
     mediaRetryCounts.current = {};
-    outputRetryTimers.current = {};
-    outputRetryCounts.current = {};
     streamRetryTimers.current.clear();
     streamRetryCounts.current.clear();
   }
@@ -631,24 +614,6 @@ export const App = () => {
       delete mediaRetryTimers.current[requestKey];
       requestedMediaKeys.current.delete(requestKey);
       void resolveMediaForSession(session, true);
-    }, delay);
-    return true;
-  }
-
-  function scheduleOutputRetry(environmentId: string, expectedPaths: string[]): boolean {
-    if (outputRetryTimers.current[environmentId]) {
-      return true;
-    }
-    const attempt = outputRetryCounts.current[environmentId] ?? 0;
-    const delay = OUTPUT_RETRY_DELAYS_MS[attempt];
-    if (!delay) {
-      return false;
-    }
-
-    outputRetryCounts.current[environmentId] = attempt + 1;
-    outputRetryTimers.current[environmentId] = setTimeout(() => {
-      delete outputRetryTimers.current[environmentId];
-      void loadOutputFiles(environmentId, true, { retryUntilPaths: expectedPaths });
     }, delay);
     return true;
   }
@@ -717,16 +682,6 @@ export const App = () => {
         clearMediaRetry(key);
       }
     }
-    for (const environmentId of deletedEnvironmentIds) {
-      if (!remainingEnvironmentIds.has(environmentId)) {
-        clearOutputRetry(environmentId);
-      }
-    }
-    outputRefreshSignatures.current = Object.fromEntries(
-      Object.entries(outputRefreshSignatures.current).filter(
-        ([environmentId]) => !deletedEnvironmentIds.has(environmentId) || remainingEnvironmentIds.has(environmentId)
-      )
-    );
     for (const environmentId of deletedEnvironmentIds) {
       if (!remainingEnvironmentIds.has(environmentId)) {
         autoOpenedOutputEnvironments.current.delete(environmentId);
@@ -836,6 +791,12 @@ export const App = () => {
       startsNewConversation && sourceConversationId === NEW_CONVERSATION_ID;
     const pendingImageParts = compose.parts.filter((part): part is ImagePartDraft => part.kind === "image");
     const imageAttachments = imageAttachmentsFromCompose(compose);
+    const diagnosticsConversationId = startsNewConversation ? localId : sourceConversationId;
+    logConversationDiagnostic(diagnosticsConversationId, "run.started", {
+      localId,
+      agent: request.agent,
+      background: request.background === true
+    });
     pendingRunInputs.current.set(localId, composeInputSnapshot(compose));
     runtimeOutputHydrationSessionIds.current.add(localId);
     forgetCompletedOutputHydration(localId);
@@ -963,6 +924,11 @@ export const App = () => {
         })();
 
         if (result.ok) {
+          logConversationDiagnostic(diagnosticsConversationId, "run.completed", {
+            localId,
+            interactionId: result.value.id,
+            status: result.value.status
+          });
           forgetPendingRunInputIfTerminal(localId, result.value);
           setSessions((current) =>
             current.map((session) =>
@@ -981,6 +947,11 @@ export const App = () => {
             setCompose((current) => ({ ...current, previousInteractionId: "", autoContinue: true }));
           }
         } else {
+          logConversationDiagnostic(diagnosticsConversationId, "run.failed", {
+            localId,
+            name: result.error.name,
+            message: result.error.message
+          });
           restorePendingRunInput(localId, sourceConversationId);
           setSessions((current) =>
             current.map((session) =>
@@ -1002,6 +973,11 @@ export const App = () => {
 
       const result = await bridge.createInteraction(request);
       if (result.ok) {
+        logConversationDiagnostic(diagnosticsConversationId, "run.created", {
+          localId,
+          interactionId: result.value.id,
+          status: result.value.status
+        });
         forgetPendingRunInputIfTerminal(localId, result.value);
         setSessions((current) => [
           { ...base, seed: result.value, completedAt: interactionIsTerminal(result.value) ? Date.now() : undefined },
@@ -1018,6 +994,11 @@ export const App = () => {
           setCompose((current) => ({ ...current, previousInteractionId: "", autoContinue: true }));
         }
       } else {
+        logConversationDiagnostic(diagnosticsConversationId, "run.failed", {
+          localId,
+          name: result.error.name,
+          message: result.error.message
+        });
         restorePendingRunInput(localId, sourceConversationId);
         setSessions((current) => [{ ...base, error: result.error, completedAt: Date.now() }, ...current]);
         setConversationStarting(sourceConversationId, false);
@@ -1129,6 +1110,11 @@ export const App = () => {
 
       if (result.ok) {
         streamRetryCounts.current.delete(sessionToResume.localId);
+        logConversationDiagnostic(
+          conversationIdForSession(sessionToResume.localId),
+          "stream.resume.completed",
+          { localId: sessionToResume.localId, interactionId, status: result.value.status }
+        );
         setSessions((current) =>
           current.map((session) =>
             session.localId === sessionToResume.localId
@@ -1139,6 +1125,36 @@ export const App = () => {
                   streaming: false,
                   streamId: undefined,
                   completedAt: completedAtForInteraction(session, result.value)
+                }
+              : session
+          )
+        );
+      } else if (
+        sessionsRef.current.some(
+          (session) =>
+            session.localId === sessionToResume.localId &&
+            session.seed &&
+            interactionIsTerminal(session.seed)
+        )
+      ) {
+        // The run already finished (streamed events patched the seed terminal
+        // before the stream died) — the stream error is teardown noise, not a
+        // failure the user should see.
+        streamRetryCounts.current.delete(sessionToResume.localId);
+        logConversationDiagnostic(
+          conversationIdForSession(sessionToResume.localId),
+          "stream.error.ignored-run-terminal",
+          { localId: sessionToResume.localId, name: result.error.name, message: result.error.message }
+        );
+        setSessions((current) =>
+          current.map((session) =>
+            session.localId === sessionToResume.localId
+              ? {
+                  ...session,
+                  error: undefined,
+                  streaming: false,
+                  streamId: undefined,
+                  completedAt: completedAtForInteraction(session, session.seed)
                 }
               : session
           )
@@ -1155,6 +1171,11 @@ export const App = () => {
         );
       } else {
         streamRetryCounts.current.delete(sessionToResume.localId);
+        logConversationDiagnostic(
+          conversationIdForSession(sessionToResume.localId),
+          "stream.failed",
+          { localId: sessionToResume.localId, name: result.error.name, message: result.error.message }
+        );
         setSessions((current) =>
           current.map((session) =>
             session.localId === sessionToResume.localId
@@ -1194,6 +1215,12 @@ export const App = () => {
       return false;
     }
     streamRetryCounts.current.set(localId, attempt);
+    logConversationDiagnostic(conversationIdForSession(localId), "stream.reconnect.scheduled", {
+      localId,
+      attempt,
+      maxAttempts: STREAM_RECONNECT_DELAYS_MS.length,
+      delayMs: STREAM_RECONNECT_DELAYS_MS[attempt - 1]
+    });
     pushStatus({
       level: "info",
       title: "Stream disconnected",
@@ -1265,6 +1292,10 @@ export const App = () => {
       pushStatus({ level: "error", title: "Cancel unavailable", detail: "This run has no active interaction id." });
       return;
     }
+    logConversationDiagnostic(conversationIdForSession(sessionToCancel.localId), "run.cancel.requested", {
+      localId: sessionToCancel.localId,
+      interactionId
+    });
 
     setSessionCanceling(sessionToCancel.localId, true);
     try {
@@ -1452,17 +1483,22 @@ export const App = () => {
     return runtimeState ?? persistedState;
   }
 
+  /**
+   * One-shot output listing: fetch, show what's there, done. The run's
+   * snapshot is final once the interaction completes, so there is no retry
+   * ladder — completion triggers a single forced fetch, and the Refresh
+   * button covers anything exotic.
+   */
   async function loadOutputFiles(
     environmentId: string,
-    force = false,
-    options: { retryUntilPaths?: string[] } = {}
+    force = false
   ): Promise<EnvironmentOutputFile[] | undefined> {
     if (!window.managedAgents?.listEnvironmentOutputFiles) {
       return undefined;
     }
-    // Refresh button, auto-refresh, and retry timers can overlap; only the
-    // newest request per environment may write state, or a slow stale
-    // response would overwrite a fresher file list.
+    // Refresh button and completion fetches can overlap; only the newest
+    // request per environment may write state, or a slow stale response
+    // would overwrite a fresher file list.
     const requestId = (outputFilesRequestSeq.current[environmentId] ?? 0) + 1;
     outputFilesRequestSeq.current[environmentId] = requestId;
     setOutputFilesByEnvironment((current) => ({
@@ -1479,47 +1515,36 @@ export const App = () => {
     if (outputFilesRequestSeq.current[environmentId] !== requestId) {
       return undefined;
     }
+    if (!result.ok) {
+      logConversationDiagnostic(activeConversationIdRef.current, "outputs.list.failed", {
+        environmentId,
+        name: result.error.name,
+        message: result.error.message
+      });
+    }
     let nextItems: EnvironmentOutputFile[] | undefined;
-    let retryScheduled = false;
-    setOutputFilesByEnvironment((current) => ({
-      ...current,
-      [environmentId]: result.ok
-        ? (() => {
-            const previousItems = current[environmentId]?.items ?? [];
-            const expectedPaths = options.retryUntilPaths ?? [];
-            nextItems = result.value.length > 0 ? result.value : previousItems;
-            const missingExpectedPaths =
-              expectedPaths.length > 0 && !outputFilesCoverPaths(nextItems, expectedPaths);
-            retryScheduled = missingExpectedPaths
-              ? scheduleOutputRetry(environmentId, expectedPaths)
-              : false;
-            if (!missingExpectedPaths) {
-              clearOutputRetry(environmentId);
-            }
-            return {
-              loading: retryScheduled,
-              items: nextItems,
-              checked: !retryScheduled,
-              error: undefined
-            };
-          })()
-        : (() => {
-            const previousItems = current[environmentId]?.items ?? [];
-            const expectedPaths = options.retryUntilPaths ?? [];
-            const retryAfterError =
-              expectedPaths.length > 0 && !outputFilesCoverPaths(previousItems, expectedPaths);
-            retryScheduled = retryAfterError
-              ? scheduleOutputRetry(environmentId, expectedPaths)
-              : false;
-            nextItems = previousItems;
-            return {
-              loading: retryScheduled,
-              items: previousItems,
-              checked: !retryScheduled,
-              error: retryScheduled || previousItems.length ? undefined : result.error.message
-            };
-          })()
-    }));
+    setOutputFilesByEnvironment((current) => {
+      const previousItems = current[environmentId]?.items ?? [];
+      if (result.ok) {
+        // A transiently empty listing must not blank a panel that already
+        // showed files.
+        nextItems = result.value.length > 0 ? result.value : previousItems;
+        return {
+          ...current,
+          [environmentId]: { loading: false, items: nextItems, checked: true, error: undefined }
+        };
+      }
+      nextItems = previousItems;
+      return {
+        ...current,
+        [environmentId]: {
+          loading: false,
+          items: previousItems,
+          checked: true,
+          error: previousItems.length ? undefined : result.error.message
+        }
+      };
+    });
     return nextItems;
   }
 
@@ -1964,6 +1989,7 @@ export const App = () => {
                   sentImageParts={sentImageParts}
                   running={selectedConversationStarting}
                   locked={!appReady || selectedConversationRunning}
+                  agentLocked={conversationAgentLocked}
                   canRun={canRun}
                   canCancel={Boolean(runningSession)}
                   cancelDisabled={!runningSession || Boolean(cancelingSessionIds[runningSession.localId])}

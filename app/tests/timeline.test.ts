@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { Interaction, InteractionStreamEvent } from "../src/sdk";
 import { buildTimeline, firstLine } from "../src/renderer/lib/timeline";
-import { mergeStreamEvents } from "../src/renderer/lib/sessionState";
+import {
+  interactionIsTerminal,
+  mergeStreamEvents,
+  sessionCanReconnect
+} from "../src/renderer/lib/sessionState";
+import type { Session } from "../src/renderer/lib/builderState";
 
 describe("buildTimeline — terminal steps[]", () => {
   it("folds a call+result pair into one command and uses output_text for the answer", () => {
@@ -412,6 +417,23 @@ describe("stream event merging", () => {
     expect(merged.map((event) => event.seq)).toEqual([4, 5, 6, 7]);
   });
 
+  it("dedups resume replays by server event_id even when seq stamps differ", () => {
+    const original: InteractionStreamEvent = {
+      event_type: "step.delta",
+      event_id: "evt-9",
+      index: 0,
+      delta: { text: "hello" },
+      seq: 10
+    };
+    // A resume with a stale last_event_id re-sends the event; the main
+    // process stamps it with a fresh seq.
+    const replayed = { ...original, seq: 500 };
+    const merged = mergeStreamEvents([original], [replayed]);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0].seq).toBe(10);
+  });
+
   it("keeps pre-seq persisted events ahead of newly stamped ones", () => {
     const legacy: InteractionStreamEvent = { event_type: "step.start", index: 0, event_id: "evt-1" };
     const merged = mergeStreamEvents([legacy], [
@@ -420,5 +442,33 @@ describe("stream event merging", () => {
 
     expect(merged[0]).toBe(legacy);
     expect(merged[1].seq).toBe(100);
+  });
+});
+
+describe("interaction recovery semantics", () => {
+  it("treats requires_action as a live, non-terminal state", () => {
+    expect(interactionIsTerminal({ id: "int-1", status: "requires_action" })).toBe(false);
+    expect(interactionIsTerminal({ id: "int-1", status: "completed" })).toBe(true);
+  });
+
+  const reconnectSession = (overrides: Partial<Session>): Session =>
+    ({
+      localId: "run-1",
+      agentId: "gemini-anything-agent",
+      request: { agent: "gemini-anything-agent", input: "hi", environment: "remote", store: true },
+      seed: { id: "int-1", status: "in_progress" },
+      startedAt: 1,
+      ...overrides
+    }) as Session;
+
+  it("only offers reconnect for stored interactions", () => {
+    expect(sessionCanReconnect(reconnectSession({}))).toBe(true);
+    expect(
+      sessionCanReconnect(
+        reconnectSession({
+          request: { agent: "gemini-anything-agent", input: "hi", environment: "remote", store: false }
+        })
+      )
+    ).toBe(false);
   });
 });

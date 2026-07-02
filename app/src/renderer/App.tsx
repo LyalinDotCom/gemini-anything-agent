@@ -31,6 +31,8 @@ import {
   withAutoContinuity
 } from "./lib/continuity";
 import type { EnvironmentOutputState, SessionMediaState } from "./lib/mediaState";
+import { createStickToBottom } from "./lib/stickToBottom";
+import { readConversationOrder, writeConversationOrder } from "./lib/conversationOrder";
 import {
   ALL_AGENT_TOOLS,
   buildChatInteraction,
@@ -46,8 +48,10 @@ import {
   type PendingComposeInput
 } from "./lib/interactionInput";
 import {
+  applyManualConversationOrder,
   buildConversations,
   NEW_CONVERSATION_ID,
+  reorderConversationIds,
   visibleConversationsWithDraft,
   type ConversationSummary
 } from "./lib/conversations";
@@ -113,6 +117,9 @@ const snapshotAgentForRun = async (
 
 const MEDIA_RETRY_DELAYS_MS = [1200, 2500, 5000, 9000];
 const OUTPUT_RETRY_DELAYS_MS = [1200, 2500, 5000, 9000];
+// Backoff for reattaching a dropped background stream before surfacing the
+// error and the manual Reconnect button.
+const STREAM_RECONNECT_DELAYS_MS = [2000, 5000, 12000];
 
 export const App = () => {
   const [runtime, setRuntime] = useState<RuntimeConfig | null>(null);
@@ -126,6 +133,7 @@ export const App = () => {
   const [activeConversationId, setActiveConversationId] = useState<string>(NEW_CONVERSATION_ID);
   const [newConversationDraftVisible, setNewConversationDraftVisible] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [conversationOrder, setConversationOrder] = useState<string[]>(readConversationOrder);
   const [outputPanelOpen, setOutputPanelOpen] = useState(true);
   const [mediaBySession, setMediaBySession] = useState<Record<string, SessionMediaState>>({});
   const [activeMedia, setActiveMedia] = useState<ResolvedEnvironmentMedia | null>(null);
@@ -136,6 +144,9 @@ export const App = () => {
   const [startingConversationIds, setStartingConversationIds] = useState<Record<string, boolean>>({});
   const [cancelingSessionIds, setCancelingSessionIds] = useState<Record<string, boolean>>({});
   const activeResumeIds = useRef<Set<string>>(new Set());
+  const streamRetryCounts = useRef<Map<string, number>>(new Map());
+  const streamRetryTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const sessionsRef = useRef<Session[]>([]);
   const pendingRunInputs = useRef<Map<string, PendingComposeInput>>(new Map());
   const requestedMediaKeys = useRef<Set<string>>(new Set());
   const completedOutputHydrationKeys = useRef<Set<string>>(new Set());
@@ -149,7 +160,7 @@ export const App = () => {
   const autoOpenedOutputEnvironments = useRef<Set<string>>(new Set());
   const ensureAgentPromise = useRef<Promise<EnsureAnythingAgentResult | undefined> | null>(null);
   const activeConversationIdRef = useRef(activeConversationId);
-  const shouldStickToBottom = useRef(true);
+  const chatStick = useRef(createStickToBottom(true)).current;
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
   const config = runtime ?? FALLBACK_RUNTIME;
@@ -167,9 +178,21 @@ export const App = () => {
     [agentId, sessions]
   );
   const conversations = useMemo(
-    () => buildConversations(agentSessions),
-    [agentSessions]
+    () => applyManualConversationOrder(buildConversations(agentSessions), conversationOrder),
+    [agentSessions, conversationOrder]
   );
+
+  function reorderConversation(dragId: string, dropSlot: number) {
+    // Snapshot the full current order so every conversation gets a manual
+    // position from the first drag onward.
+    const ids = reorderConversationIds(
+      conversations.map((conversation) => conversation.id),
+      dragId,
+      dropSlot
+    );
+    setConversationOrder(ids);
+    writeConversationOrder(ids);
+  }
   const visibleConversations = useMemo(
     () =>
       visibleConversationsWithDraft({
@@ -262,29 +285,22 @@ export const App = () => {
   );
   const canRun = appReady && !selectedConversationRunning && hasComposeInput(compose);
 
-  const isChatNearBottom = () => {
-    const node = chatScrollRef.current;
-    if (!node) {
-      return true;
-    }
-    return node.scrollHeight - node.scrollTop - node.clientHeight < 96;
+  const updateScrollStickiness = () => {
+    chatStick.onScroll(chatScrollRef.current);
   };
 
-  const updateScrollStickiness = () => {
-    shouldStickToBottom.current = isChatNearBottom();
+  const handleChatWheel = (event: React.WheelEvent) => {
+    chatStick.onWheel(event.deltaY);
   };
 
   const scrollChatToBottom = (force = false) => {
-    if (!force && !shouldStickToBottom.current) {
-      return;
+    if (force) {
+      chatStick.setStuck(true);
     }
-    const scroll = () => {
-      const node = chatScrollRef.current;
-      if (node) {
-        node.scrollTop = node.scrollHeight;
-        shouldStickToBottom.current = true;
-      }
-    };
+    // Late layout (images, media players) can grow content after this tick;
+    // follow() re-checks stuck each time, so a user scroll between frames
+    // is never overridden by these queued auto-scrolls.
+    const scroll = () => chatStick.follow(chatScrollRef.current);
     scroll();
     requestAnimationFrame(() => {
       scroll();
@@ -331,7 +347,6 @@ export const App = () => {
   }, [sessions, sessionsLoaded]);
 
   useEffect(() => {
-    shouldStickToBottom.current = true;
     setActiveHtmlPreview(null);
     setActiveTextPreview(null);
     scrollChatToBottom(true);
@@ -502,11 +517,21 @@ export const App = () => {
   }, [activeOutputFileCount, latestEnvironmentId]);
 
   useEffect(() => {
+    sessionsRef.current = sessions;
+  }, [sessions]);
+
+  useEffect(() => {
     if (!hasBridge || !runtime?.hasApiKey || !window.managedAgents?.resumeInteractionStream) {
       return;
     }
     for (const session of agentSessions) {
-      if (shouldResumeBackgroundSession(session) && !activeResumeIds.current.has(session.localId)) {
+      if (
+        shouldResumeBackgroundSession(session) &&
+        !activeResumeIds.current.has(session.localId) &&
+        // A pending backoff retry owns this session; resuming here would
+        // bypass the backoff and hammer a flaky connection.
+        !streamRetryTimers.current.has(session.localId)
+      ) {
         void resumeSessionStream(session);
       }
     }
@@ -563,10 +588,15 @@ export const App = () => {
     for (const timer of Object.values(outputRetryTimers.current)) {
       clearTimeout(timer);
     }
+    for (const timer of streamRetryTimers.current.values()) {
+      clearTimeout(timer);
+    }
     mediaRetryTimers.current = {};
     mediaRetryCounts.current = {};
     outputRetryTimers.current = {};
     outputRetryCounts.current = {};
+    streamRetryTimers.current.clear();
+    streamRetryCounts.current.clear();
   }
 
   function forgetCompletedOutputHydration(sessionId: string) {
@@ -1098,6 +1128,7 @@ export const App = () => {
       })();
 
       if (result.ok) {
+        streamRetryCounts.current.delete(sessionToResume.localId);
         setSessions((current) =>
           current.map((session) =>
             session.localId === sessionToResume.localId
@@ -1112,7 +1143,18 @@ export const App = () => {
               : session
           )
         );
+      } else if (scheduleStreamReconnect(sessionToResume)) {
+        // The interaction keeps running server-side across a dropped stream;
+        // retry the resume quietly before surfacing an error.
+        setSessions((current) =>
+          current.map((session) =>
+            session.localId === sessionToResume.localId
+              ? { ...session, streaming: false, streamId: undefined }
+              : session
+          )
+        );
       } else {
+        streamRetryCounts.current.delete(sessionToResume.localId);
         setSessions((current) =>
           current.map((session) =>
             session.localId === sessionToResume.localId
@@ -1131,6 +1173,41 @@ export const App = () => {
     } finally {
       activeResumeIds.current.delete(sessionToResume.localId);
     }
+  }
+
+  /**
+   * Schedules a bounded backoff retry of the stream resume for a background
+   * session. Returns false once attempts are exhausted (or the session isn't
+   * eligible), letting the caller surface the error and the Reconnect button.
+   */
+  function scheduleStreamReconnect(sessionToResume: Session): boolean {
+    const localId = sessionToResume.localId;
+    if (
+      sessionToResume.request.background !== true ||
+      sessionToResume.request.store !== true ||
+      streamRetryTimers.current.has(localId)
+    ) {
+      return false;
+    }
+    const attempt = (streamRetryCounts.current.get(localId) ?? 0) + 1;
+    if (attempt > STREAM_RECONNECT_DELAYS_MS.length) {
+      return false;
+    }
+    streamRetryCounts.current.set(localId, attempt);
+    pushStatus({
+      level: "info",
+      title: "Stream disconnected",
+      detail: `Reconnecting (attempt ${attempt}/${STREAM_RECONNECT_DELAYS_MS.length})…`
+    });
+    const timer = setTimeout(() => {
+      streamRetryTimers.current.delete(localId);
+      const latest = sessionsRef.current.find((session) => session.localId === localId);
+      if (latest && shouldResumeBackgroundSession(latest) && !activeResumeIds.current.has(localId)) {
+        void resumeSessionStream(latest);
+      }
+    }, STREAM_RECONNECT_DELAYS_MS[attempt - 1]);
+    streamRetryTimers.current.set(localId, timer);
+    return true;
   }
 
   async function reconnectSessionStream(sessionToReconnect: Session) {
@@ -1152,6 +1229,8 @@ export const App = () => {
       await window.managedAgents.cancelInteractionStream(staleStreamId);
     }
 
+    // A manual reconnect starts a fresh automatic-retry budget.
+    streamRetryCounts.current.delete(sessionToReconnect.localId);
     pushStatus({ level: "info", title: "Reconnecting", detail: interactionId });
     await resumeSessionStream({
       ...sessionToReconnect,
@@ -1760,6 +1839,7 @@ export const App = () => {
           onNewConversation={startNewConversation}
           onSelectConversation={selectConversation}
           onDeleteConversation={deleteConversation}
+          onReorderConversation={reorderConversation}
           onOpenSettings={() => setSettingsOpen(true)}
         />
 
@@ -1793,15 +1873,33 @@ export const App = () => {
             />
           ) : (
             <>
-              <div className="chat-scroll" ref={chatScrollRef} onScroll={updateScrollStickiness}>
+              <div
+                className="chat-scroll"
+                ref={chatScrollRef}
+                onScroll={updateScrollStickiness}
+                onWheel={handleChatWheel}
+              >
                 {chatSessions.length === 0 ? (
                   activeConversationId === NEW_CONVERSATION_ID ? (
-                    <div className="chat-empty has-samples">
-                      <SamplePromptGallery
-                        disabled={!appReady || selectedConversationRunning}
-                        onSelect={loadSamplePrompt}
-                      />
-                    </div>
+                    compose.agentMode === "anything" ? (
+                      <div className="chat-empty has-samples">
+                        <SamplePromptGallery
+                          disabled={!appReady || selectedConversationRunning}
+                          onSelect={loadSamplePrompt}
+                        />
+                      </div>
+                    ) : (
+                      <div className="chat-empty">
+                        <span className="chat-empty-mark">
+                          <Bot size={28} />
+                        </span>
+                        <strong>Deep Research</strong>
+                        <span className="chat-empty-subtitle">
+                          Ask a research question. Runs happen in the background and can take up
+                          to 60 minutes.
+                        </span>
+                      </div>
+                    )
                   ) : (
                     <div className="chat-empty">
                       <span className="chat-empty-mark">

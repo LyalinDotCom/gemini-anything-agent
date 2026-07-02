@@ -4,7 +4,6 @@ import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { EnvironmentOutputFile } from "../../shared/electron-api";
-import { normalizePreviewMarkdown } from "../lib/markdownPreview";
 
 // Past this size, markdown parsing would block the renderer for seconds; the
 // file is shown as plain text instead.
@@ -214,11 +213,13 @@ export const TextPreview = ({
               key={file.path}
               fallback={<pre className="text-preview-document"><code>{body}</code></pre>}
             >
+              {/* Files render verbatim: indentation and tabs are semantic in
+                  markdown, so no transcript-style normalization here. */}
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 components={markdownComponents(previewUrl, onOpenExternal, onOpenLinkedFile)}
               >
-                {normalizePreviewMarkdown(body)}
+                {body}
               </ReactMarkdown>
             </MarkdownErrorBoundary>
           </div>

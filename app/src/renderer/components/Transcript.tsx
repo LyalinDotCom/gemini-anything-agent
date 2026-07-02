@@ -21,6 +21,7 @@ import {
   XCircle
 } from "lucide-react";
 import type { ActivityKind, TimelineItem } from "../lib/timeline";
+import { createStickToBottom } from "../lib/stickToBottom";
 import { BufferedAudio } from "./BufferedAudio";
 
 type IconType = typeof Brain;
@@ -351,20 +352,26 @@ export const Transcript = ({
   const scrollRef = useRef<HTMLDivElement>(null);
   // Follow the tail only while the run is still streaming; a finished run opens
   // at the top so it reads prompt → activity → answer in order.
-  const stickRef = useRef(streaming);
+  const stick = useRef(createStickToBottom(streaming)).current;
   const [showJump, setShowJump] = useState(false);
 
   const onScroll = () => {
     if (embedded) {
       return;
     }
-    const node = scrollRef.current;
-    if (!node) {
-      return;
+    // Programmatic follow() scrolls return undefined and must not count as
+    // user intent; a real user scroll away from the bottom stops following
+    // until they scroll back down.
+    const distance = stick.onScroll(scrollRef.current);
+    if (distance !== undefined) {
+      setShowJump(distance > 160);
     }
-    const distance = node.scrollHeight - node.scrollTop - node.clientHeight;
-    stickRef.current = distance < 80;
-    setShowJump(distance > 160);
+  };
+
+  const onWheel = (event: React.WheelEvent) => {
+    if (!embedded) {
+      stick.onWheel(event.deltaY);
+    }
   };
 
   // Follow the tail as content streams in, but only while pinned to the bottom.
@@ -372,19 +379,13 @@ export const Transcript = ({
     if (embedded) {
       return;
     }
-    const node = scrollRef.current;
-    if (node && stickRef.current) {
-      node.scrollTop = node.scrollHeight;
-    }
-  }, [embedded, items, streaming]);
+    stick.follow(scrollRef.current);
+  }, [embedded, items, streaming, stick]);
 
   const jump = () => {
-    const node = scrollRef.current;
-    if (node) {
-      node.scrollTop = node.scrollHeight;
-      stickRef.current = true;
-      setShowJump(false);
-    }
+    stick.setStuck(true);
+    stick.follow(scrollRef.current);
+    setShowJump(false);
   };
 
   // Direction B groups tool/thinking steps inside a single Sequoia inset card,
@@ -394,7 +395,12 @@ export const Transcript = ({
 
   return (
     <div className={`transcript-wrap ${embedded ? "embedded" : ""}`}>
-      <div className={`transcript ${embedded ? "embedded" : ""}`} ref={scrollRef} onScroll={onScroll}>
+      <div
+        className={`transcript ${embedded ? "embedded" : ""}`}
+        ref={scrollRef}
+        onScroll={onScroll}
+        onWheel={onWheel}
+      >
         <div className="turn turn-user">
           <span className="turn-avatar user" title={formatClock(startedAt)}>
             <User size={13} />

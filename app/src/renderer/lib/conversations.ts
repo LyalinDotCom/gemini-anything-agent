@@ -84,6 +84,47 @@ const conversationRootId = (
   return current.localId;
 };
 
+/**
+ * Applies the user's manual drag order on top of the recency-sorted list.
+ * Conversations without a manual position (new chats, or before the user has
+ * ever dragged) stay on top in recency order; manually placed ones keep their
+ * slot regardless of activity.
+ */
+export const applyManualConversationOrder = (
+  conversations: ConversationSummary[],
+  orderedIds: string[]
+): ConversationSummary[] => {
+  if (orderedIds.length === 0) {
+    return conversations;
+  }
+  const byId = new Map(conversations.map((conversation) => [conversation.id, conversation]));
+  const ordered = orderedIds
+    .map((id) => byId.get(id))
+    .filter((conversation): conversation is ConversationSummary => Boolean(conversation));
+  const orderedSet = new Set(orderedIds);
+  const unordered = conversations.filter((conversation) => !orderedSet.has(conversation.id));
+  return [...unordered, ...ordered];
+};
+
+/**
+ * Moves dragId into the given drop slot (a gap index 0..ids.length computed
+ * while the dragged item is still in place) and returns the new id order.
+ */
+export const reorderConversationIds = (
+  ids: string[],
+  dragId: string,
+  dropSlot: number
+): string[] => {
+  const from = ids.indexOf(dragId);
+  if (from < 0) {
+    return ids;
+  }
+  const without = ids.filter((id) => id !== dragId);
+  const insertAt = Math.max(0, Math.min(dropSlot > from ? dropSlot - 1 : dropSlot, without.length));
+  without.splice(insertAt, 0, dragId);
+  return without;
+};
+
 export const buildConversations = (agentSessions: Session[]): ConversationSummary[] => {
   const byId = new Map(agentSessions.map((session) => [session.localId, session]));
   const grouped = new Map<string, Session[]>();

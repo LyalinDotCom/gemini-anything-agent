@@ -95,7 +95,12 @@ const NON_TERMINAL_INTERACTION_STATUS = new Set([
   "in-progress",
   "pending",
   "processing",
-  "started"
+  "started",
+  // Documented state between in_progress and completed: the interaction is
+  // waiting for client input (e.g. Deep Research collaborative planning) and
+  // must keep being followed, not shown as succeeded.
+  "requires_action",
+  "requires-action"
 ]);
 
 const FAILED_INTERACTION_STATUS = new Set(["failed", "error", "cancelled", "canceled", "expired"]);
@@ -128,16 +133,19 @@ export const completedAtForInteraction = (
     ? terminalCompletedAt(session, completedAt)
     : session.completedAt;
 
-// The main process stamps a monotonic seq on every buffered event, giving an
-// exact identity: two legitimately identical deltas (same payload, same step)
-// get distinct seq values and both survive, while the same event arriving via
-// both the push channel and a snapshot poll dedups. The payload-hash fallback
-// only applies to events persisted before seq existed.
+// Identity priority: the server's event_id first (a resume replay re-sends
+// events with fresh local seq stamps, so seq must not shadow it), then the
+// main-process seq (lets two legitimately identical id-less deltas both
+// survive while push/snapshot double-delivery dedups), then a payload hash
+// for events persisted before seq existed.
 const streamEventKey = (event: InteractionStreamEvent): string => {
+  if (typeof event.event_id === "string" && event.event_id) {
+    return `id:${event.event_id}`;
+  }
   if (typeof event.seq === "number") {
     return `seq:${event.seq}`;
   }
-  return event.event_id ?? `${event.event_type}:${event.index ?? ""}:${JSON.stringify(event).slice(0, 500)}`;
+  return `${event.event_type}:${event.index ?? ""}:${JSON.stringify(event).slice(0, 500)}`;
 };
 
 export const mergeStreamEvents = (
@@ -174,6 +182,9 @@ export const shouldResumeBackgroundSession = (session: Session): boolean =>
 
 export const sessionCanReconnect = (session: Session): boolean =>
   Boolean(session.seed?.id) &&
+  // Stream resume needs a stored interaction record; unstored runs have
+  // nothing server-side to reconnect to.
+  session.request.store === true &&
   !session.streaming &&
   (Boolean(session.error) || !interactionIsTerminal(session.seed!));
 

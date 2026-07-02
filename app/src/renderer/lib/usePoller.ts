@@ -11,7 +11,10 @@ const NON_TERMINAL = new Set([
   "in-progress",
   "pending",
   "processing",
-  "started"
+  "started",
+  // Waiting for client input — still a live interaction, keep polling.
+  "requires_action",
+  "requires-action"
 ]);
 
 const FAILED = new Set(["failed", "error", "cancelled", "canceled", "expired"]);

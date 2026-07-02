@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 
 import {
   AlertTriangle,
   ChevronRight,
+  ChevronsUpDown,
   ImagePlus,
   Loader2,
   Play,
@@ -53,6 +54,12 @@ const imagePreviewSrc = (part: ImagePartDraft): string => `data:${part.mimeType}
 const imageTooltip = (part: ImagePartDraft): string =>
   [part.name, part.path, formatBytes(part.bytes)].filter(Boolean).join("\n");
 
+const AGENT_MODE_LABELS: Record<AgentMode, string> = {
+  anything: "Antigravity",
+  "deep-research": "Deep Research",
+  "deep-research-max": "Deep Research Max"
+};
+
 export const Composer = ({
   compose,
   setCompose,
@@ -85,6 +92,21 @@ export const Composer = ({
   onAttachmentError?: (message: string) => void;
 }) => {
   const [showOptions, setShowOptions] = useState(false);
+  const [agentMenuOpen, setAgentMenuOpen] = useState(false);
+  const agentMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!agentMenuOpen) {
+      return;
+    }
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!agentMenuRef.current?.contains(event.target as Node)) {
+        setAgentMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    return () => document.removeEventListener("mousedown", closeOnOutsideClick);
+  }, [agentMenuOpen]);
   const disabledPreviousInteractionId = useRef<string | undefined>(undefined);
   const disabledEnvironmentId = useRef<string | undefined>(undefined);
   const disabledEnvironmentWasSpecific = useRef(false);
@@ -362,30 +384,48 @@ export const Composer = ({
             }}
           />
         </label>
-        <label
-          className={`composer-agent ${deepResearch ? "active" : ""}`}
-          title={
-            deepResearch
-              ? "Deep Research runs in the background and can take up to 60 minutes."
-              : "Choose which managed agent handles this prompt"
-          }
-        >
-          <span className="field-label">Agent</span>
-          <select
-            value={compose.agentMode}
-            disabled={locked}
-            onChange={(event) =>
-              setCompose((current) => ({
-                ...current,
-                agentMode: event.target.value as AgentMode
-              }))
+        <div className={`composer-agent ${deepResearch ? "active" : ""}`} ref={agentMenuRef}>
+          <span
+            className="composer-agent-label"
+            title={
+              deepResearch
+                ? "Deep Research runs in the background and can take up to 60 minutes."
+                : "The managed agent handling this prompt"
             }
           >
-            <option value="anything">Anything</option>
-            <option value="deep-research">Deep Research</option>
-            <option value="deep-research-max">Deep Research Max</option>
-          </select>
-        </label>
+            {AGENT_MODE_LABELS[compose.agentMode]}
+          </span>
+          <button
+            type="button"
+            className="composer-agent-switch"
+            title="Change agent"
+            aria-label="Change agent"
+            aria-expanded={agentMenuOpen}
+            disabled={locked}
+            onClick={() => setAgentMenuOpen((value) => !value)}
+          >
+            <ChevronsUpDown size={12} />
+          </button>
+          {agentMenuOpen && (
+            <div className="composer-agent-menu" role="menu">
+              {(Object.keys(AGENT_MODE_LABELS) as AgentMode[]).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={compose.agentMode === mode}
+                  className={compose.agentMode === mode ? "selected" : ""}
+                  onClick={() => {
+                    setCompose((current) => ({ ...current, agentMode: mode }));
+                    setAgentMenuOpen(false);
+                  }}
+                >
+                  {AGENT_MODE_LABELS[mode]}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <button
           type="button"
           className={`run-options ${optionCount ? "active" : ""}`}

@@ -24,7 +24,9 @@ import {
   sanitizeSessionHistory
 } from "../src/renderer/lib/sessionStore";
 import {
+  applyManualConversationOrder,
   NEW_CONVERSATION_ID,
+  reorderConversationIds,
   visibleConversationsWithDraft,
   type ConversationSummary
 } from "../src/renderer/lib/conversations";
@@ -383,6 +385,40 @@ describe("renderer payload compiler", () => {
     ).toBe("my-first-agent-v3");
     expect(nextAgentVersionId("my-first-agent-v2", [{ id: "my-first-agent" }])).toBe("my-first-agent-v2");
     expect(nextAgentVersionId("  ", [])).toBe("my-first-agent");
+  });
+});
+
+describe("manual conversation ordering", () => {
+  const conversation = (id: string): ConversationSummary => ({
+    id,
+    title: id,
+    sessions: [],
+    latestAt: 0
+  });
+
+  it("keeps recency order until the user has dragged something", () => {
+    const list = [conversation("a"), conversation("b")];
+    expect(applyManualConversationOrder(list, [])).toEqual(list);
+  });
+
+  it("applies the manual order and floats unknown (new) conversations to the top", () => {
+    const list = [conversation("new"), conversation("a"), conversation("b")];
+    const ordered = applyManualConversationOrder(list, ["b", "a"]);
+    expect(ordered.map((item) => item.id)).toEqual(["new", "b", "a"]);
+  });
+
+  it("ignores manually ordered ids that no longer exist", () => {
+    const list = [conversation("a")];
+    const ordered = applyManualConversationOrder(list, ["deleted", "a"]);
+    expect(ordered.map((item) => item.id)).toEqual(["a"]);
+  });
+
+  it("moves a dragged conversation into the drop slot", () => {
+    expect(reorderConversationIds(["a", "b", "c"], "a", 3)).toEqual(["b", "c", "a"]);
+    expect(reorderConversationIds(["a", "b", "c"], "c", 0)).toEqual(["c", "a", "b"]);
+    expect(reorderConversationIds(["a", "b", "c"], "b", 1)).toEqual(["a", "b", "c"]);
+    expect(reorderConversationIds(["a", "b", "c"], "a", 2)).toEqual(["b", "a", "c"]);
+    expect(reorderConversationIds(["a", "b", "c"], "missing", 0)).toEqual(["a", "b", "c"]);
   });
 });
 

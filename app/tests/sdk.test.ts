@@ -310,11 +310,10 @@ describe("managed agents SDK", () => {
       await vi.advanceTimersByTimeAsync(10);
       expect(fetchSignal?.aborted).toBe(false);
       outer.abort(new Error("stream cancelled"));
+      // Deliberate cancellation surfaces as the abort reason itself, not as a
+      // connection failure.
       await expect(stream).rejects.toMatchObject({
-        name: "GeminiApiConnectionError",
-        details: expect.objectContaining({
-          causeMessage: "stream cancelled"
-        })
+        message: "stream cancelled"
       });
     } finally {
       vi.useRealTimers();
@@ -399,12 +398,10 @@ describe("managed agents SDK", () => {
       timeoutMs: 1_000
     });
 
+    // Deliberate cancellation surfaces as the abort reason itself, not as a
+    // connection failure.
     await expect(client.downloadEnvironmentSnapshot("env-test", { signal: controller.signal })).rejects.toMatchObject({
-      name: "GeminiApiConnectionError",
-      details: expect.objectContaining({
-        method: "GET",
-        causeMessage: "snapshot cancelled"
-      })
+      message: "snapshot cancelled"
     });
     const [, init] = fetchMock.mock.calls[0] as Parameters<typeof fetch>;
     expect((init?.signal as AbortSignal).aborted).toBe(true);

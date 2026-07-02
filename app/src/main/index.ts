@@ -3,8 +3,8 @@ import { config as loadEnv } from "dotenv";
 import { createHash, randomUUID } from "node:crypto";
 import {
   existsSync,
-  copyFileSync,
   createReadStream,
+  createWriteStream,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -13,8 +13,11 @@ import {
   statSync,
   writeFileSync
 } from "node:fs";
+import { copyFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import type { ReadableStream as NodeWebReadableStream } from "node:stream/web";
 import { promisify } from "node:util";
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -63,7 +66,10 @@ protocol.registerSchemesAsPrivileged([
       standard: true,
       secure: true,
       supportFetchAPI: true,
-      stream: true
+      stream: true,
+      // The sandboxed HTML preview iframe has an opaque origin, so its
+      // fetch() calls for the file's own data assets are cross-origin.
+      corsEnabled: true
     }
   }
 ]);
@@ -551,14 +557,18 @@ const mediaFileResponse = (path: string, request: Request): Response => {
       headers: {
         "Accept-Ranges": "bytes",
         "Content-Range": `bytes */${size}`,
-        "Content-Type": mimeType
+        "Content-Type": mimeType,
+        "Access-Control-Allow-Origin": "*"
       }
     });
   }
 
   const headers = new Headers({
     "Accept-Ranges": "bytes",
-    "Content-Type": mimeType
+    "Content-Type": mimeType,
+    // Preview iframes are sandboxed without allow-same-origin, so their
+    // requests arrive with an opaque origin.
+    "Access-Control-Allow-Origin": "*"
   });
 
   if (!range) {
@@ -694,21 +704,31 @@ const requestedPathMatchesTarEntry = (requestedPath: string, tarEntry: string): 
 
 const unique = <T,>(values: T[]): T[] => [...new Set(values)];
 
-const filesHaveSameContent = (left: string, right: string): boolean => {
+// Hashes incrementally so comparing two multi-GB videos never loads either
+// into memory or blocks the main thread in one long readFileSync.
+const fileDigest = async (path: string): Promise<string> => {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(path)) {
+    hash.update(chunk as Buffer);
+  }
+  return hash.digest("hex");
+};
+
+const filesHaveSameContent = async (left: string, right: string): Promise<boolean> => {
   try {
     const leftStats = statSync(left);
     const rightStats = statSync(right);
     if (leftStats.size !== rightStats.size) {
       return false;
     }
-    const digest = (path: string): string => createHash("sha256").update(readFileSync(path)).digest("hex");
-    return digest(left) === digest(right);
+    const [leftDigest, rightDigest] = await Promise.all([fileDigest(left), fileDigest(right)]);
+    return leftDigest === rightDigest;
   } catch {
     return false;
   }
 };
 
-const autoSaveTarget = (directory: string, sourcePath: string): string => {
+const autoSaveTarget = async (directory: string, sourcePath: string): Promise<string> => {
   const originalName = basename(sourcePath);
   const extension = extname(originalName);
   const stem = extension ? originalName.slice(0, -extension.length) : originalName;
@@ -716,18 +736,18 @@ const autoSaveTarget = (directory: string, sourcePath: string): string => {
   for (let index = 0; ; index += 1) {
     const name = index === 0 ? originalName : `${stem}-${index + 1}${extension}`;
     const candidate = join(directory, name);
-    if (!existsSync(candidate) || filesHaveSameContent(sourcePath, candidate)) {
+    if (!existsSync(candidate) || (await filesHaveSameContent(sourcePath, candidate))) {
       return candidate;
     }
   }
 };
 
-const autoSaveMedia = (environmentId: string, sourcePath: string): string => {
+const autoSaveMedia = async (environmentId: string, sourcePath: string): Promise<string> => {
   const directory = join(LOCAL_OUTPUT_ROOT, safeCacheSegment(environmentId));
   mkdirSync(directory, { recursive: true });
-  const target = autoSaveTarget(directory, sourcePath);
+  const target = await autoSaveTarget(directory, sourcePath);
   if (!existsSync(target)) {
-    copyFileSync(sourcePath, target);
+    await copyFile(sourcePath, target);
   }
   return target;
 };
@@ -751,11 +771,11 @@ const localOutputMediaEntries = (root: string, current = root): string[] => {
   });
 };
 
-const copyAutoSavedMediaToCache = (
+const copyAutoSavedMediaToCache = async (
   environmentId: string,
   extractRoot: string,
   requestedPaths?: string[]
-): void => {
+): Promise<void> => {
   const sourceRoot = localOutputRoot(environmentId);
   if (!existsSync(sourceRoot)) {
     return;
@@ -787,7 +807,7 @@ const copyAutoSavedMediaToCache = (
       continue;
     }
     mkdirSync(dirname(targetPath), { recursive: true });
-    copyFileSync(sourcePath, targetPath);
+    await copyFile(sourcePath, targetPath);
   }
 };
 
@@ -866,40 +886,40 @@ const cachedEnvironmentOutputFiles = (
     .sort((left, right) => right.modifiedAt - left.modifiedAt || left.relativePath.localeCompare(right.relativePath));
 };
 
-const resolveCachedEnvironmentMedia = (
+const resolveCachedEnvironmentMedia = async (
   environmentId: string,
   extractRoot: string,
   requestedPaths: string[]
-): ResolvedEnvironmentMedia[] | undefined => {
+): Promise<ResolvedEnvironmentMedia[] | undefined> => {
   const entries = cachedMediaEntries(resolve(extractRoot));
   if (!entries.length) {
     return undefined;
   }
 
-  const resolvedItems = requestedPaths.flatMap((requestedPath) => {
+  const resolvedItems: ResolvedEnvironmentMedia[] = [];
+  for (const requestedPath of requestedPaths) {
     const relativeEntry = entries.find((candidate) => requestedPathMatchesTarEntry(requestedPath, candidate));
     if (!relativeEntry) {
-      return [];
+      continue;
     }
     const path = resolve(extractRoot, relativeEntry);
     if (!pathIsInside(path, resolve(extractRoot)) || !existsSync(path) || !statSync(path).isFile()) {
-      return [];
+      continue;
     }
     const mediaType = mediaTypeForPath(path);
+    if (!mediaType) {
+      continue;
+    }
     const stats = statSync(path);
     const version = `${Math.round(stats.mtimeMs)}-${stats.size}`;
-    return mediaType
-      ? [
-          {
-            requestedPath,
-            path,
-            savedPath: autoSaveMedia(environmentId, path),
-            url: mediaUrl(environmentId, relativeEntry, version),
-            mediaType
-          }
-        ]
-      : [];
-  });
+    resolvedItems.push({
+      requestedPath,
+      path,
+      savedPath: await autoSaveMedia(environmentId, path),
+      url: mediaUrl(environmentId, relativeEntry, version),
+      mediaType
+    });
+  }
 
   return resolvedItems.length === requestedPaths.length ? resolvedItems : undefined;
 };
@@ -946,6 +966,29 @@ const withEnvironmentSnapshotLock = async <T,>(
   }
 };
 
+/**
+ * Streams an environment snapshot tar straight to disk. The old path buffered
+ * the entire tar as an ArrayBuffer plus a Buffer copy (2x peak memory) and
+ * wrote it with a blocking writeFileSync — a multi-GB snapshot froze the app.
+ * Writes to a temp file and renames so readers never see a truncated tar.
+ */
+const downloadSnapshotTarTo = async (environmentId: string, filePath: string): Promise<void> => {
+  const partialPath = `${filePath}.partial`;
+  const download = await createClient().downloadEnvironmentSnapshotStream(environmentId);
+  try {
+    await pipeline(
+      Readable.fromWeb(download.stream as unknown as NodeWebReadableStream<Uint8Array>),
+      createWriteStream(partialPath)
+    );
+    renameSync(partialPath, filePath);
+  } catch (error) {
+    rmSync(partialPath, { force: true });
+    throw error;
+  } finally {
+    download.cleanup();
+  }
+};
+
 const listEnvironmentOutputFilesFromSnapshot = async (
   environmentId: string,
   force = false
@@ -958,7 +1001,7 @@ const listEnvironmentOutputFilesFromSnapshot = async (
   const tarPath = snapshotTarPath(cacheRoot);
 
   if (!force) {
-    copyAutoSavedMediaToCache(environmentId, extractRoot);
+    await copyAutoSavedMediaToCache(environmentId, extractRoot);
   }
   const cached = cachedEnvironmentOutputFiles(environmentId, extractRoot);
   if (!force && cached.length > 0) {
@@ -967,7 +1010,7 @@ const listEnvironmentOutputFilesFromSnapshot = async (
 
   return withEnvironmentSnapshotLock(environmentId, async () => {
     if (!force) {
-      copyAutoSavedMediaToCache(environmentId, extractRoot);
+      await copyAutoSavedMediaToCache(environmentId, extractRoot);
       const cachedAfterLock = cachedEnvironmentOutputFiles(environmentId, extractRoot);
       if (cachedAfterLock.length > 0) {
         return cachedAfterLock;
@@ -998,10 +1041,9 @@ const listEnvironmentOutputFilesFromSnapshot = async (
     rmSync(tarPath, { force: true });
 
     try {
-      const buffer = await createClient().downloadEnvironmentSnapshot(environmentId);
-      writeFileSync(tarPath, Buffer.from(buffer));
+      await downloadSnapshotTarTo(environmentId, tarPath);
 
-      const listed = await execFileAsync("tar", ["-tf", tarPath], { maxBuffer: 5 * 1024 * 1024 });
+      const listed = await execFileAsync("tar", ["-tf", tarPath], { maxBuffer: 64 * 1024 * 1024 });
       const selectedEntries = unique(
         listed.stdout
           .split("\n")
@@ -1023,7 +1065,7 @@ const listEnvironmentOutputFilesFromSnapshot = async (
 
       return cachedEnvironmentOutputFiles(environmentId, extractRoot);
     } catch (error) {
-      copyAutoSavedMediaToCache(environmentId, extractRoot);
+      await copyAutoSavedMediaToCache(environmentId, extractRoot);
       const fallback = cachedEnvironmentOutputFiles(environmentId, extractRoot);
       if (fallback.length > 0) {
         return fallback;
@@ -1041,20 +1083,27 @@ const listEnvironmentOutputFilesFromSnapshot = async (
 
 const registerMediaProtocol = (): void => {
   protocol.handle(MEDIA_PROTOCOL, (request) => {
-    const url = new URL(request.url);
-    const environmentSegment = safeCacheSegment(url.hostname);
-    const relativeEntry = normalizedRelativeTarPath(decodeURIComponent(url.pathname.slice(1)));
-    if (!relativeEntry || !canServeOutputPath(relativeEntry)) {
+    // Agent-generated HTML can reference subresources with malformed
+    // percent-escapes or paths; any parse/stat failure is a plain 404, not an
+    // uncaught handler error.
+    try {
+      const url = new URL(request.url);
+      const environmentSegment = safeCacheSegment(url.hostname);
+      const relativeEntry = normalizedRelativeTarPath(decodeURIComponent(url.pathname.slice(1)));
+      if (!relativeEntry || !canServeOutputPath(relativeEntry)) {
+        return new Response("Not found", { status: 404 });
+      }
+
+      const root = resolve(mediaCacheRoot(), environmentSegment, "files");
+      const path = resolve(root, relativeEntry);
+      if (!pathIsInside(path, root) || !existsSync(path) || !statSync(path).isFile()) {
+        return new Response("Not found", { status: 404 });
+      }
+
+      return mediaFileResponse(path, request);
+    } catch {
       return new Response("Not found", { status: 404 });
     }
-
-    const root = resolve(mediaCacheRoot(), environmentSegment, "files");
-    const path = resolve(root, relativeEntry);
-    if (!pathIsInside(path, root) || !existsSync(path) || !statSync(path).isFile()) {
-      return new Response("Not found", { status: 404 });
-    }
-
-    return mediaFileResponse(path, request);
   });
 };
 
@@ -1174,6 +1223,10 @@ const scheduleStreamBufferCleanup = (streamId: string, buffer: StreamBuffer): vo
   }, STREAM_BUFFER_TTL_MS);
 };
 
+// Seeded from wall-clock so sequence values stay above anything persisted by a
+// previous app run; the renderer dedups events by seq across push + snapshot.
+let nextStreamEventSeq = Date.now() * 1000;
+
 const rememberStreamEvent = (
   buffer: {
     events: InteractionStreamEvent[];
@@ -1181,27 +1234,29 @@ const rememberStreamEvent = (
     lastEventId?: string;
   },
   streamEvent: InteractionStreamEvent
-): Interaction | undefined => {
-  buffer.events = [...buffer.events, streamEvent].slice(-300);
-  if (streamEvent.event_id) {
-    buffer.lastEventId = streamEvent.event_id;
+): { event: InteractionStreamEvent; latestInteraction: Interaction | undefined } => {
+  const event: InteractionStreamEvent = { ...streamEvent, seq: nextStreamEventSeq };
+  nextStreamEventSeq += 1;
+  buffer.events = [...buffer.events, event].slice(-300);
+  if (event.event_id) {
+    buffer.lastEventId = event.event_id;
   }
-  if (streamEvent.interaction) {
-    buffer.latestInteraction = streamEvent.interaction;
-    return streamEvent.interaction;
+  if (event.interaction) {
+    buffer.latestInteraction = event.interaction;
+    return { event, latestInteraction: event.interaction };
   }
-  if (streamEvent.interaction_id || streamEvent.status) {
-    const id = streamEvent.interaction_id ?? buffer.latestInteraction?.id;
+  if (event.interaction_id || event.status) {
+    const id = event.interaction_id ?? buffer.latestInteraction?.id;
     if (id) {
       buffer.latestInteraction = {
         ...(buffer.latestInteraction ?? { id }),
         id,
-        status: streamEvent.status ?? buffer.latestInteraction?.status
+        status: event.status ?? buffer.latestInteraction?.status
       };
-      return buffer.latestInteraction;
+      return { event, latestInteraction: buffer.latestInteraction };
     }
   }
-  return buffer.latestInteraction;
+  return { event, latestInteraction: buffer.latestInteraction };
 };
 
 const hydrateStreamInteraction = async (
@@ -1252,14 +1307,6 @@ const openWebUrlExternally = (url: string): void => {
   }
 };
 
-const sameOrigin = (a: string, b: string): boolean => {
-  try {
-    return new URL(a).origin === new URL(b).origin;
-  } catch {
-    return false;
-  }
-};
-
 /**
  * Links must never replace the app shell. A plain <a> click (e.g. a markdown
  * link in agent output) would otherwise navigate the BrowserWindow away from the
@@ -1273,11 +1320,30 @@ const guardWindowNavigation = (mainWindow: BrowserWindow): void => {
   });
 
   mainWindow.webContents.on("will-navigate", (event, url) => {
-    if (sameOrigin(url, mainWindow.webContents.getURL())) {
+    // Only an in-place reload of the app shell may proceed. A same-origin
+    // check is not enough: the packaged app shell is a file:// URL whose
+    // origin is "null", so ANY file:// navigation (e.g. a file dragged onto
+    // the window) would compare equal and replace the app.
+    if (url === mainWindow.webContents.getURL()) {
       return;
     }
     event.preventDefault();
     openWebUrlExternally(url);
+  });
+
+  // will-navigate only covers the main frame. The only subframes in this app
+  // are sandboxed output previews (about:srcdoc); generated scripts, forms,
+  // and meta refreshes must not replace the decorated preview document with
+  // live web content inside the app. Deliberate link clicks reach the OS
+  // browser via the preview's postMessage bridge instead.
+  mainWindow.webContents.on("will-frame-navigate", (details) => {
+    if (details.isMainFrame) {
+      return;
+    }
+    if (details.url === "about:blank" || details.url.startsWith("about:srcdoc")) {
+      return;
+    }
+    details.preventDefault();
   });
 };
 
@@ -1298,7 +1364,6 @@ const createWindow = (): void => {
       preload: join(__dirname, "../preload/index.mjs"),
       contextIsolation: true,
       nodeIntegration: false,
-      webviewTag: true,
       // The preload is built as ESM (.mjs); Electron only loads ESM preloads
       // when the renderer is unsandboxed. contextIsolation stays on for safety.
       sandbox: false
@@ -1307,11 +1372,14 @@ const createWindow = (): void => {
 
   guardWindowNavigation(mainWindow);
 
-  if (process.env.ELECTRON_RENDERER_URL) {
-    mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
-  } else {
-    mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
-  }
+  // A rejected load (dev server not up yet, missing packaged renderer) would
+  // otherwise be an unhandled rejection and a silent blank window.
+  const loaded = process.env.ELECTRON_RENDERER_URL
+    ? mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
+    : mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
+  loaded.catch((error: unknown) => {
+    console.error("Failed to load renderer:", error);
+  });
 };
 
 handle(ipcChannels.runtimeConfig, () => ({
@@ -1449,14 +1517,15 @@ ipcMain.handle(
 
     try {
       for await (const streamEvent of client.createInteractionStream(augmentInteractionRequest(request), { signal: controller.signal })) {
-        latestInteraction = rememberStreamEvent(buffer, streamEvent);
+        const remembered = rememberStreamEvent(buffer, streamEvent);
+        latestInteraction = remembered.latestInteraction;
         if (event.sender.isDestroyed()) {
           controller.abort(new Error("Renderer was destroyed."));
           break;
         }
         event.sender.send(ipcChannels.interactionStreamEvent, {
           streamId,
-          event: streamEvent
+          event: remembered.event
         });
       }
 
@@ -1483,7 +1552,11 @@ ipcMain.handle(
       event.sender.off("destroyed", abortForDestroyedSender);
       buffer.done = true;
       scheduleStreamBufferCleanup(streamId, buffer);
-      streamControllers.delete(streamId);
+      // Identity-guarded like the buffer cleanup: if a newer stream reused
+      // this streamId, its controller must stay registered and cancellable.
+      if (streamControllers.get(streamId) === controller) {
+        streamControllers.delete(streamId);
+      }
     }
   }
 );
@@ -1510,14 +1583,15 @@ ipcMain.handle(
         lastEventId,
         signal: controller.signal
       })) {
-        latestInteraction = rememberStreamEvent(buffer, streamEvent);
+        const remembered = rememberStreamEvent(buffer, streamEvent);
+        latestInteraction = remembered.latestInteraction;
         if (event.sender.isDestroyed()) {
           controller.abort(new Error("Renderer was destroyed."));
           break;
         }
         event.sender.send(ipcChannels.interactionStreamEvent, {
           streamId,
-          event: streamEvent
+          event: remembered.event
         });
       }
 
@@ -1543,7 +1617,11 @@ ipcMain.handle(
       event.sender.off("destroyed", abortForDestroyedSender);
       buffer.done = true;
       scheduleStreamBufferCleanup(streamId, buffer);
-      streamControllers.delete(streamId);
+      // Identity-guarded like the buffer cleanup: if a newer stream reused
+      // this streamId, its controller must stay registered and cancellable.
+      if (streamControllers.get(streamId) === controller) {
+        streamControllers.delete(streamId);
+      }
     }
   }
 );
@@ -1589,9 +1667,8 @@ handle<[string], SnapshotDownloadResult>(ipcChannels.downloadSnapshot, async (en
   if (result.canceled || !result.filePath) {
     return { saved: false, canceled: true };
   }
-  const buffer = await createClient().downloadEnvironmentSnapshot(environmentId);
-  writeFileSync(result.filePath, Buffer.from(buffer));
-  return { saved: true, path: result.filePath, bytes: buffer.byteLength };
+  await downloadSnapshotTarTo(environmentId, result.filePath);
+  return { saved: true, path: result.filePath, bytes: statSync(result.filePath).size };
 });
 
 handle<[string, string[]], ResolvedEnvironmentMedia[]>(
@@ -1609,20 +1686,20 @@ handle<[string, string[]], ResolvedEnvironmentMedia[]>(
     const cacheRoot = join(mediaCacheRoot(), safeCacheSegment(environmentId));
     const extractRoot = join(cacheRoot, "files");
     const tarPath = snapshotTarPath(cacheRoot);
-    let cached = resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
+    let cached = await resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
     if (!cached) {
-      copyAutoSavedMediaToCache(environmentId, extractRoot, requestedPaths);
-      cached = resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
+      await copyAutoSavedMediaToCache(environmentId, extractRoot, requestedPaths);
+      cached = await resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
     }
     if (cached) {
       return cached;
     }
 
     return withEnvironmentSnapshotLock(environmentId, async () => {
-      let lockedCached = resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
+      let lockedCached = await resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
       if (!lockedCached) {
-        copyAutoSavedMediaToCache(environmentId, extractRoot, requestedPaths);
-        lockedCached = resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
+        await copyAutoSavedMediaToCache(environmentId, extractRoot, requestedPaths);
+        lockedCached = await resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
       }
       if (lockedCached) {
         return lockedCached;
@@ -1632,10 +1709,9 @@ handle<[string, string[]], ResolvedEnvironmentMedia[]>(
       mkdirSync(extractRoot, { recursive: true });
 
       try {
-        const buffer = await createClient().downloadEnvironmentSnapshot(environmentId);
-        writeFileSync(tarPath, Buffer.from(buffer));
+        await downloadSnapshotTarTo(environmentId, tarPath);
 
-        const listed = await execFileAsync("tar", ["-tf", tarPath], { maxBuffer: 5 * 1024 * 1024 });
+        const listed = await execFileAsync("tar", ["-tf", tarPath], { maxBuffer: 64 * 1024 * 1024 });
         const tarEntries = listed.stdout
           .split("\n")
           .map((entry) => entry.trim())
@@ -1658,38 +1734,38 @@ handle<[string, string[]], ResolvedEnvironmentMedia[]>(
 
         await extractTarEntries(cacheRoot, tarPath, extractRoot, selectedEntries);
 
-        return requestedPaths.flatMap((requestedPath) => {
+        const resolved: ResolvedEnvironmentMedia[] = [];
+        for (const requestedPath of requestedPaths) {
           const entry = selectedEntries.find((candidate) => requestedPathMatchesTarEntry(requestedPath, candidate));
           const relativeEntry = entry ? normalizedRelativeTarPath(entry) : undefined;
           if (!relativeEntry) {
-            return [];
+            continue;
           }
           const path = resolve(extractRoot, relativeEntry);
           if (!pathIsInside(path, resolve(extractRoot))) {
-            return [];
+            continue;
           }
           if (!existsSync(path) || !statSync(path).isFile()) {
-            return [];
+            continue;
           }
           const mediaType = mediaTypeForPath(path);
+          if (!mediaType) {
+            continue;
+          }
           const stats = statSync(path);
           const version = `${Math.round(stats.mtimeMs)}-${stats.size}`;
-          const savedPath = mediaType ? autoSaveMedia(environmentId, path) : undefined;
-          return mediaType
-            ? [
-                {
-                  requestedPath,
-                  path,
-                  savedPath,
-                  url: mediaUrl(environmentId, relativeEntry, version),
-                  mediaType
-                }
-              ]
-            : [];
-        });
+          resolved.push({
+            requestedPath,
+            path,
+            savedPath: await autoSaveMedia(environmentId, path),
+            url: mediaUrl(environmentId, relativeEntry, version),
+            mediaType
+          });
+        }
+        return resolved;
       } catch (error) {
-        copyAutoSavedMediaToCache(environmentId, extractRoot, requestedPaths);
-        const fallback = resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
+        await copyAutoSavedMediaToCache(environmentId, extractRoot, requestedPaths);
+        const fallback = await resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
         if (fallback) {
           return fallback;
         }
@@ -1721,7 +1797,7 @@ handle<[string], SaveResolvedMediaResult>(ipcChannels.saveResolvedMedia, async (
     return { saved: false, canceled: true };
   }
 
-  copyFileSync(source, result.filePath);
+  await copyFile(source, result.filePath);
   return { saved: true, path: result.filePath, bytes: statSync(result.filePath).size };
 });
 
@@ -1740,7 +1816,7 @@ handle<[string], SaveResolvedMediaResult>(ipcChannels.saveEnvironmentOutputFile,
     return { saved: false, canceled: true };
   }
 
-  copyFileSync(source, result.filePath);
+  await copyFile(source, result.filePath);
   return { saved: true, path: result.filePath, bytes: statSync(result.filePath).size };
 });
 
@@ -1768,14 +1844,22 @@ handle<[string], ReadEnvironmentOutputTextResult>(ipcChannels.readEnvironmentOut
   }
 
   const fileType = outputFileTypeForPath(source);
-  if (fileType !== "markdown" && fileType !== "text") {
+  if (fileType !== "html" && fileType !== "markdown" && fileType !== "text") {
     throw new Error("Output file is not readable text.");
+  }
+
+  const bytes = statSync(source).size;
+  const maxPreviewBytes = 10 * 1024 * 1024;
+  if (bytes > maxPreviewBytes) {
+    throw new Error(
+      `This file is too large to preview in the app (${Math.round(bytes / (1024 * 1024))} MB). Use "Save" to export it instead.`
+    );
   }
 
   return {
     path: source,
     content: readFileSync(source, "utf8"),
-    bytes: statSync(source).size,
+    bytes,
     fileType
   };
 });
@@ -1802,10 +1886,24 @@ handle(ipcChannels.loadStoredSessions, (): ChatSessionStoreSnapshot => ({
 
 handle<[PersistedSession[]], ChatSessionStoreSnapshot>(ipcChannels.saveStoredSessions, (sessions) => {
   saveChatSessionsToDisk(LOCAL_CHAT_ROOT, sessions);
+  // Re-reading every conversation file here doubled the save cost, and the
+  // renderer keeps its own copy of the sessions it just saved.
   return {
     rootPath: LOCAL_CHAT_ROOT,
-    sessions: loadChatSessionsFromDisk(LOCAL_CHAT_ROOT)
+    sessions
   };
+});
+
+// Blocking variant for window unload: renderer saves are coalesced, so the
+// final pending snapshot must land on disk before the process goes away.
+ipcMain.on(ipcChannels.saveStoredSessionsSync, (event, sessions: PersistedSession[]) => {
+  try {
+    saveChatSessionsToDisk(LOCAL_CHAT_ROOT, sessions);
+    event.returnValue = true;
+  } catch (error) {
+    console.error("Failed to persist chat sessions during unload:", error);
+    event.returnValue = false;
+  }
 });
 
 handle<[string], AgentProjectSnapshot>(ipcChannels.loadAgentProject, async (agentId) =>

@@ -9,7 +9,7 @@ import {
   X,
   XCircle
 } from "lucide-react";
-import { uid, type ComposeState, type ImagePartDraft } from "../lib/builderState";
+import { uid, type AgentMode, type ComposeState, type ImagePartDraft } from "../lib/builderState";
 import { IconButton, TextArea, TextField, Toggle } from "./primitives";
 
 type Setter = Dispatch<SetStateAction<ComposeState>>;
@@ -98,6 +98,7 @@ export const Composer = ({
   const reusingLatestEnvironment = compose.reuseEnvironment && !manualEnvironment && autoEnvironmentId;
   const contextOverrideCount = explicitPreviousInteractionId ? 1 : compose.store && !compose.autoContinue ? 1 : 0;
   const environmentOverrideCount = compose.overrideEnvironment ? 1 : !compose.reuseEnvironment ? 1 : 0;
+  const deepResearch = compose.agentMode !== "anything";
   const imageParts = compose.parts.filter((part): part is ImagePartDraft => part.kind === "image");
   const attachedImageCount = sentImageParts.length + imageParts.length;
   const optionCount =
@@ -361,6 +362,30 @@ export const Composer = ({
             }}
           />
         </label>
+        <label
+          className={`composer-agent ${deepResearch ? "active" : ""}`}
+          title={
+            deepResearch
+              ? "Deep Research runs in the background and can take up to 60 minutes."
+              : "Choose which managed agent handles this prompt"
+          }
+        >
+          <span className="field-label">Agent</span>
+          <select
+            value={compose.agentMode}
+            disabled={locked}
+            onChange={(event) =>
+              setCompose((current) => ({
+                ...current,
+                agentMode: event.target.value as AgentMode
+              }))
+            }
+          >
+            <option value="anything">Anything</option>
+            <option value="deep-research">Deep Research</option>
+            <option value="deep-research-max">Deep Research Max</option>
+          </select>
+        </label>
         <button
           type="button"
           className={`run-options ${optionCount ? "active" : ""}`}
@@ -387,6 +412,12 @@ export const Composer = ({
       {showOptions && (
         <div className="run-options-panel">
           <p className="inline-note">Run controls. Defaults keep chat context and sandbox continuity on.</p>
+          {deepResearch && (
+            <p className="inline-note">
+              Deep Research always runs in the background with stored history; system-instruction, tool, and
+              environment overrides below do not apply to it.
+            </p>
+          )}
           <Toggle
             checked={compose.store}
             label="Store interaction history"

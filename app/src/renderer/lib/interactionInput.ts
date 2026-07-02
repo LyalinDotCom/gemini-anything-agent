@@ -1,11 +1,14 @@
-import type {
-  InteractionCreateRequest,
-  InteractionInput,
-  ToolType
+import {
+  DEEP_RESEARCH_AGENT,
+  DEEP_RESEARCH_MAX_AGENT,
+  type InteractionCreateRequest,
+  type InteractionInput,
+  type ToolType
 } from "@sdk";
 import {
   initialCompose,
   uid,
+  type AgentMode,
   type ComposeState,
   type ImageAttachmentMeta,
   type ImagePartDraft
@@ -107,10 +110,52 @@ export const mergeImageParts = (parts: ImagePartDraft[]): ImagePartDraft[] => {
 export const hasComposeInput = (compose: ComposeState): boolean =>
   compose.input.trim().length > 0 || compose.parts.some((part) => part.kind === "image");
 
+export const deepResearchAgentIdForMode = (mode: AgentMode): string | undefined =>
+  mode === "deep-research"
+    ? DEEP_RESEARCH_AGENT
+    : mode === "deep-research-max"
+      ? DEEP_RESEARCH_MAX_AGENT
+      : undefined;
+
+export const agentModeForAgentId = (agentId: string): AgentMode => {
+  const id = agentId.trim();
+  if (id === DEEP_RESEARCH_AGENT) {
+    return "deep-research";
+  }
+  if (id === DEEP_RESEARCH_MAX_AGENT) {
+    return "deep-research-max";
+  }
+  return "anything";
+};
+
 export const buildChatInteraction = (
   agentId: string,
   compose: ComposeState
 ): InteractionCreateRequest => {
+  const deepResearchAgent = deepResearchAgentIdForMode(compose.agentMode);
+  if (deepResearchAgent) {
+    // Deep Research is invoked directly by base-agent id and requires
+    // background execution with stored history; per-run system-instruction,
+    // tool, and environment overrides do not apply to it.
+    const request: InteractionCreateRequest = {
+      agent: deepResearchAgent,
+      input: composeToInput(compose),
+      environment: "remote",
+      store: true,
+      background: true,
+      agent_config: {
+        type: "deep-research",
+        ...(compose.thinkingSummaries !== "none"
+          ? { thinking_summaries: compose.thinkingSummaries }
+          : {})
+      }
+    };
+    if (compose.previousInteractionId.trim()) {
+      request.previous_interaction_id = compose.previousInteractionId.trim();
+    }
+    return request;
+  }
+
   const request: InteractionCreateRequest = {
     agent: agentId,
     input: composeToInput(compose),
@@ -187,6 +232,7 @@ export const composeFromRequest = (request: InteractionCreateRequest): ComposeSt
     inputMode: parts.length ? "parts" : "string",
     input,
     parts,
+    agentMode: agentModeForAgentId(request.agent),
     store: request.store ?? initialCompose.store,
     autoContinue: !request.previous_interaction_id,
     reuseEnvironment: request.environment === "remote",

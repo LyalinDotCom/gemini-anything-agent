@@ -1,145 +1,111 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, X } from "lucide-react";
+import { AlertCircle, Loader2, X } from "lucide-react";
 import type { EnvironmentOutputFile } from "../../shared/electron-api";
-
-type WebviewElement = HTMLElement & {
-  executeJavaScript?: (code: string, userGesture?: boolean) => Promise<unknown>;
-};
-
-const stripHash = (value: string): string => {
-  try {
-    const url = new URL(value);
-    url.hash = "";
-    return url.toString();
-  } catch {
-    return value.replace(/#.*/, "");
-  }
-};
-
-const linkCaptureScript = `
-(() => {
-  if (window.__geminiAnythingHtmlPreviewLinkGuard) {
-    return;
-  }
-  window.__geminiAnythingHtmlPreviewLinkGuard = true;
-  document.addEventListener("click", (event) => {
-    const target = event.target;
-    const anchor = target && target.closest ? target.closest("a[href]") : null;
-    if (!anchor) {
-      return;
-    }
-    const href = anchor.href;
-    if (!href || href.startsWith("javascript:")) {
-      return;
-    }
-    event.preventDefault();
-    window.location.href = href;
-  }, true);
-})();
-`;
+import {
+  decorateHtmlPreviewDocument,
+  htmlPreviewMessageType,
+  htmlPreviewOpenFileMessageType
+} from "../lib/htmlPreview";
 
 export const HtmlPreview = ({
   file,
   onClose,
-  onOpenExternal
+  onOpenExternal,
+  onOpenLinkedFile
 }: {
   file: EnvironmentOutputFile;
   onClose: () => void;
   onOpenExternal: (url: string) => void;
+  /** Invoked when the previewed page links to a sibling output file. */
+  onOpenLinkedFile?: (url: string) => void;
 }) => {
-  const webviewRef = useRef<HTMLElement | null>(null);
-  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const [source, setSource] = useState("");
+  const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const lastOpenAtRef = useRef(0);
   const previewUrl = file.url ?? "";
-  const previewDocumentUrl = useMemo(() => stripHash(previewUrl), [previewUrl]);
-
-  const resizeGuest = () => {
-    const webview = webviewRef.current as WebviewElement | null;
-    const body = bodyRef.current;
-    if (!webview || !body) {
-      return;
-    }
-    const rect = body.getBoundingClientRect();
-    const width = Math.max(1, Math.floor(rect.width));
-    const height = Math.max(1, Math.floor(rect.height));
-    webview.style.width = `${width}px`;
-    webview.style.height = `${height}px`;
-    void webview.executeJavaScript?.(
-      "window.dispatchEvent(new Event('resize'));",
-      false
-    ).catch(() => undefined);
-  };
+  const previewDocument = useMemo(
+    () => (source && previewUrl ? decorateHtmlPreviewDocument(source, previewUrl) : ""),
+    [previewUrl, source]
+  );
 
   useEffect(() => {
-    const body = bodyRef.current;
-    if (!body) {
-      return;
-    }
+    const controller = new AbortController();
+    setSource("");
+    setLoadError(null);
+    setLoading(true);
 
-    const resize = () => resizeGuest();
-    const observer = new ResizeObserver(resize);
-    observer.observe(body);
-    requestAnimationFrame(resize);
-    const timers = [window.setTimeout(resize, 60), window.setTimeout(resize, 250), window.setTimeout(resize, 700)];
+    const loadFile = async () => {
+      if (window.managedAgents?.readEnvironmentOutputText) {
+        const result = await window.managedAgents.readEnvironmentOutputText(file.path);
+        if (controller.signal.aborted) {
+          // The user switched files while this read was in flight; applying it
+          // would render the old file against the new file's base URL.
+          return;
+        }
+        if (!result.ok) {
+          throw new Error(result.error.message);
+        }
+        setSource(result.value.content);
+        return;
+      }
 
-    return () => {
-      observer.disconnect();
-      timers.forEach((timer) => window.clearTimeout(timer));
+      if (!previewUrl) {
+        throw new Error("This HTML file is not available for preview.");
+      }
+      const response = await fetch(previewUrl, { signal: controller.signal });
+      if (!response.ok) {
+        throw new Error(`Could not load this HTML file (${response.status}).`);
+      }
+      setSource(await response.text());
     };
-  }, [previewUrl]);
+
+    void loadFile()
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        setLoadError(error instanceof Error ? error.message : "Could not load this HTML preview.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      });
+
+    return () => controller.abort();
+  }, [file.path, previewUrl]);
 
   useEffect(() => {
-    const webview = webviewRef.current as WebviewElement | null;
-    if (!webview || !previewUrl) {
-      return;
-    }
-
-    const maybeOpenExternally = (event: Event) => {
-      const url = (event as Event & { url?: string }).url;
-      if (!url || stripHash(url) === previewDocumentUrl || url === "about:blank") {
+    const handleMessage = (event: MessageEvent) => {
+      // Only the preview iframe may post link requests.
+      if (!iframeRef.current || event.source !== iframeRef.current.contentWindow) {
         return;
       }
-      event.preventDefault();
-      onOpenExternal(url);
-    };
-
-    const injectLinkGuard = () => {
-      void webview.executeJavaScript?.(linkCaptureScript, false).catch(() => undefined);
-    };
-
-    const handleLoaded = () => {
-      setLoadError(null);
-      resizeGuest();
-      window.setTimeout(resizeGuest, 80);
-    };
-
-    const handleLoadFailure = (event: Event) => {
-      const details = event as Event & {
-        errorCode?: number;
-        errorDescription?: string;
-        isMainFrame?: boolean;
-        validatedURL?: string;
-      };
-      if (details.errorCode === -3 || details.isMainFrame === false) {
+      const data = event.data as { type?: unknown; url?: unknown } | null;
+      if (!data || typeof data.url !== "string") {
         return;
       }
-      setLoadError(details.errorDescription || "Could not load this HTML preview.");
+      if (data.type === htmlPreviewMessageType) {
+        // External opens are rate limited — untrusted generated HTML could
+        // otherwise spam the OS browser from a timer.
+        const now = Date.now();
+        if (now - lastOpenAtRef.current < 1000) {
+          return;
+        }
+        lastOpenAtRef.current = now;
+        onOpenExternal(data.url);
+        return;
+      }
+      if (data.type === htmlPreviewOpenFileMessageType) {
+        onOpenLinkedFile?.(data.url);
+      }
     };
 
-    webview.addEventListener("will-navigate", maybeOpenExternally);
-    webview.addEventListener("new-window", maybeOpenExternally);
-    webview.addEventListener("dom-ready", injectLinkGuard);
-    webview.addEventListener("did-finish-load", handleLoaded);
-    webview.addEventListener("did-fail-load", handleLoadFailure);
-
-    return () => {
-      webview.removeEventListener("will-navigate", maybeOpenExternally);
-      webview.removeEventListener("new-window", maybeOpenExternally);
-      webview.removeEventListener("dom-ready", injectLinkGuard);
-      webview.removeEventListener("did-finish-load", handleLoaded);
-      webview.removeEventListener("did-fail-load", handleLoadFailure);
-    };
-  }, [onOpenExternal, previewDocumentUrl, previewUrl]);
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, [onOpenExternal, onOpenLinkedFile]);
 
   return (
     <div className="html-preview" aria-label={`Preview ${file.name}`}>
@@ -158,19 +124,28 @@ export const HtmlPreview = ({
           <X size={15} />
         </button>
       </header>
-      <div className="html-preview-body" ref={bodyRef}>
-        <webview
-          ref={webviewRef}
-          className="html-preview-webview"
-          src={previewUrl}
-        />
+      <div className="html-preview-body">
+        {loading ? (
+          <div className="html-preview-state">
+            <Loader2 size={16} className="spin" />
+            <span>Loading preview...</span>
+          </div>
+        ) : loadError ? (
+          <div className="html-preview-state error">
+            <AlertCircle size={16} />
+            <span>{loadError}</span>
+          </div>
+        ) : (
+          <iframe
+            ref={iframeRef}
+            className="html-preview-frame"
+            title={`Preview ${file.name}`}
+            sandbox="allow-forms allow-scripts"
+            allow="autoplay; fullscreen"
+            srcDoc={previewDocument}
+          />
+        )}
       </div>
-      {loadError && (
-        <div className="html-preview-error">
-          <AlertCircle size={18} />
-          <span>{loadError}</span>
-        </div>
-      )}
     </div>
   );
 };

@@ -2,7 +2,21 @@ export const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1
 export const GEMINI_API_REVISION = "2026-05-20";
 export const ANTIGRAVITY_BASE_AGENT = "antigravity-preview-05-2026";
 
-export type BaseAgentId = typeof ANTIGRAVITY_BASE_AGENT;
+// Deep Research managed agents are invoked directly by base-agent id in the
+// `agent` field of POST /interactions; they are not created as custom agents.
+// See https://ai.google.dev/gemini-api/docs/deep-research
+export const DEEP_RESEARCH_AGENT = "deep-research-preview-04-2026";
+export const DEEP_RESEARCH_MAX_AGENT = "deep-research-max-preview-04-2026";
+
+export const isDeepResearchAgentId = (agentId: string): boolean => {
+  const id = agentId.trim();
+  return id === DEEP_RESEARCH_AGENT || id === DEEP_RESEARCH_MAX_AGENT;
+};
+
+export type BaseAgentId =
+  | typeof ANTIGRAVITY_BASE_AGENT
+  | typeof DEEP_RESEARCH_AGENT
+  | typeof DEEP_RESEARCH_MAX_AGENT;
 
 export type ToolType = "code_execution" | "google_search" | "url_context";
 
@@ -156,6 +170,12 @@ export type Interaction = {
 export type InteractionStreamEvent = {
   event_type: string;
   event_id?: string;
+  /**
+   * Local monotonic sequence stamped by the app's main process when the event
+   * is buffered — NOT part of the wire protocol. Used for exact dedup when the
+   * same event arrives via both the push channel and snapshot polls.
+   */
+  seq?: number;
   interaction?: Interaction;
   interaction_id?: string;
   status?: string;

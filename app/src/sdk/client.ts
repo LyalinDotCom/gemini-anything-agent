@@ -71,6 +71,28 @@ type SendOptions = {
   timeoutMs?: number;
 };
 
+type RequestLifetime = {
+  signal: AbortSignal;
+  cleanup: () => void;
+};
+
+// Streams disable the overall timeout (interactions can run for many minutes),
+// so a stalled connection needs its own guard: if no bytes arrive for this
+// long, the read is abandoned instead of hanging the consumer forever.
+export const STREAM_INACTIVITY_TIMEOUT_MS = 180_000;
+
+const RETRY_BACKOFF_MS = [500, 1500];
+const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
+
+const isTransientError = (error: unknown): boolean => {
+  if (error instanceof GeminiApiConnectionError) {
+    return true;
+  }
+  return error instanceof GeminiApiError && RETRYABLE_STATUSES.has(error.status);
+};
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
 export class GeminiManagedAgentsClient {
   private readonly apiKey?: string;
   private readonly baseUrl: string;
@@ -126,17 +148,20 @@ export class GeminiManagedAgentsClient {
     if (!validation.ok) {
       throw new GeminiApiValidationError(validation.errors);
     }
-    const response = await this.send(
-      "POST",
-      "/interactions",
-      { ...validation.value, stream: true },
-      {
-        ...options,
-        timeoutMs: 0
-      }
-    );
-
-    yield* this.readStreamResponse(response);
+    // The lifetime spans the whole stream, not just the headers: the caller's
+    // abort signal must be able to cancel mid-body, or "Stop" is a no-op.
+    const lifetime = this.createLifetime({ ...options, timeoutMs: 0 });
+    try {
+      const response = await this.send(
+        "POST",
+        "/interactions",
+        { ...validation.value, stream: true },
+        lifetime.signal
+      );
+      yield* this.readStreamResponse(response);
+    } finally {
+      lifetime.cleanup();
+    }
   }
 
   async *resumeInteractionStream(
@@ -147,14 +172,18 @@ export class GeminiManagedAgentsClient {
     if (options.lastEventId) {
       params.set("last_event_id", options.lastEventId);
     }
-    const response = await this.send(
-      "GET",
-      `/interactions/${encodeURIComponent(id)}?${params.toString()}`,
-      undefined,
-      { ...options, timeoutMs: 0 }
-    );
-
-    yield* this.readStreamResponse(response);
+    const lifetime = this.createLifetime({ ...options, timeoutMs: 0 });
+    try {
+      const response = await this.send(
+        "GET",
+        `/interactions/${encodeURIComponent(id)}?${params.toString()}`,
+        undefined,
+        lifetime.signal
+      );
+      yield* this.readStreamResponse(response);
+    } finally {
+      lifetime.cleanup();
+    }
   }
 
   async getInteraction(id: string): Promise<Interaction> {
@@ -178,6 +207,37 @@ export class GeminiManagedAgentsClient {
     );
   }
 
+  /**
+   * Streaming variant of downloadEnvironmentSnapshot for large snapshots:
+   * the caller consumes the body incrementally instead of buffering the whole
+   * tar in memory, and must call `cleanup` when done (success or failure).
+   */
+  async downloadEnvironmentSnapshotStream(
+    environmentId: string,
+    options: SendOptions = {}
+  ): Promise<{ stream: ReadableStream<Uint8Array>; cleanup: () => void }> {
+    const lifetime = this.createLifetime(options);
+    try {
+      const response = await this.send(
+        "GET",
+        `/files/environment-${encodeURIComponent(environmentId)}:download?alt=media`,
+        undefined,
+        lifetime.signal
+      );
+      if (!response.ok) {
+        const text = await response.text();
+        throw new GeminiApiError(response.status, this.errorMessage(response.status, text), parseBody(text));
+      }
+      if (!response.body) {
+        throw new Error("Gemini snapshot download did not include a body.");
+      }
+      return { stream: response.body, cleanup: lifetime.cleanup };
+    } catch (error) {
+      lifetime.cleanup();
+      throw error;
+    }
+  }
+
   private requireApiKey(): string {
     if (!this.apiKey) {
       throw new GeminiApiKeyMissingError();
@@ -191,17 +251,48 @@ export class GeminiManagedAgentsClient {
   }
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const response = await this.send(method, path, body);
-    const text = await response.text();
-
-    if (!response.ok) {
-      throw new GeminiApiError(response.status, this.errorMessage(response.status, text), parseBody(text));
+    // Only idempotent GETs retry; replaying a failed POST /interactions would
+    // create duplicate interactions.
+    const maxAttempts = method === "GET" ? RETRY_BACKOFF_MS.length + 1 : 1;
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await this.requestOnce<T>(method, path, body);
+      } catch (error) {
+        if (attempt >= maxAttempts || !isTransientError(error)) {
+          throw error;
+        }
+        await sleep(RETRY_BACKOFF_MS[attempt - 1]!);
+      }
     }
+  }
 
-    if (!text) {
-      return undefined as T;
+  private async requestOnce<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const lifetime = this.createLifetime();
+    try {
+      const response = await this.send(method, path, body, lifetime.signal);
+      const text = await response.text();
+
+      if (!response.ok) {
+        throw new GeminiApiError(response.status, this.errorMessage(response.status, text), parseBody(text));
+      }
+
+      if (!text) {
+        return undefined as T;
+      }
+      const parsed = parseBody(text);
+      if (typeof parsed === "string") {
+        // A 200 with a non-JSON body (proxy page, captive portal) must not be
+        // handed to callers typed as an Interaction/Agent.
+        throw new GeminiApiError(
+          response.status,
+          "Gemini API returned an unexpected non-JSON response.",
+          parsed.slice(0, 500)
+        );
+      }
+      return parsed as T;
+    } finally {
+      lifetime.cleanup();
     }
-    return parseBody(text) as T;
   }
 
   private async requestBinary(
@@ -210,21 +301,26 @@ export class GeminiManagedAgentsClient {
     body?: unknown,
     options: SendOptions = {}
   ): Promise<ArrayBuffer> {
-    const response = await this.send(method, path, body, options);
-    if (!response.ok) {
-      const text = await response.text();
-      throw new GeminiApiError(response.status, this.errorMessage(response.status, text), parseBody(text));
+    const lifetime = this.createLifetime(options);
+    try {
+      const response = await this.send(method, path, body, lifetime.signal);
+      if (!response.ok) {
+        const text = await response.text();
+        throw new GeminiApiError(response.status, this.errorMessage(response.status, text), parseBody(text));
+      }
+      return await response.arrayBuffer();
+    } finally {
+      lifetime.cleanup();
     }
-    return response.arrayBuffer();
   }
 
-  private async send(
-    method: string,
-    path: string,
-    body?: unknown,
-    options: SendOptions = {}
-  ): Promise<Response> {
-    const apiKey = this.requireApiKey();
+  /**
+   * Builds an AbortSignal that combines the caller's signal with the request
+   * timeout. Callers must keep it alive until the response BODY is consumed —
+   * detaching after headers made cancellation and timeouts silently stop
+   * covering body reads.
+   */
+  private createLifetime(options: SendOptions = {}): RequestLifetime {
     const controller = new AbortController();
     const abortFromOuterSignal = (): void => {
       controller.abort(options.signal?.reason ?? new Error("Gemini API request was cancelled."));
@@ -239,35 +335,45 @@ export class GeminiManagedAgentsClient {
       timeoutMs > 0
         ? setTimeout(() => controller.abort(new Error(`Gemini API request timed out after ${timeoutMs}ms`)), timeoutMs)
         : undefined;
+    return {
+      signal: controller.signal,
+      cleanup: () => {
+        options.signal?.removeEventListener("abort", abortFromOuterSignal);
+        if (timeout) {
+          clearTimeout(timeout);
+        }
+      }
+    };
+  }
 
+  private async send(method: string, path: string, body: unknown, signal: AbortSignal): Promise<Response> {
+    const apiKey = this.requireApiKey();
+    const headers: Record<string, string> = {
+      "x-goog-api-key": apiKey,
+      "Api-Revision": this.apiRevision
+    };
+
+    const init: RequestInit = {
+      method,
+      headers,
+      signal
+    };
+
+    if (body !== undefined) {
+      headers["Content-Type"] = "application/json";
+      init.body = JSON.stringify(body);
+    }
+
+    const url = this.endpoint(path);
     try {
-      const headers: Record<string, string> = {
-        "x-goog-api-key": apiKey,
-        "Api-Revision": this.apiRevision
-      };
-
-      const init: RequestInit = {
-        method,
-        headers,
-        signal: controller.signal
-      };
-
-      if (body !== undefined) {
-        headers["Content-Type"] = "application/json";
-        init.body = JSON.stringify(body);
+      return await this.fetchImpl(url, init);
+    } catch (error) {
+      if (signal.aborted) {
+        // Deliberate cancellations and timeouts must surface as themselves,
+        // not as "could not reach Gemini API".
+        throw signal.reason instanceof Error ? signal.reason : error;
       }
-
-      const url = this.endpoint(path);
-      try {
-        return await this.fetchImpl(url, init);
-      } catch (error) {
-        throw new GeminiApiConnectionError(method, url, error);
-      }
-    } finally {
-      options.signal?.removeEventListener("abort", abortFromOuterSignal);
-      if (timeout) {
-        clearTimeout(timeout);
-      }
+      throw new GeminiApiConnectionError(method, url, error);
     }
   }
 
@@ -291,11 +397,18 @@ export class GeminiManagedAgentsClient {
       throw new Error("Gemini streaming response did not include a body.");
     }
 
-    for await (const event of readInteractionStream(response.body)) {
+    for await (const event of readInteractionStream(response.body, {
+      inactivityTimeoutMs: STREAM_INACTIVITY_TIMEOUT_MS
+    })) {
       if (event.event_type === "error" || event.error) {
         throw new Error(event.error?.message ?? "Gemini interaction stream failed.");
       }
       yield event;
+      if (event.event_type === "done") {
+        // Some servers hold the connection open after the final event; don't
+        // wait for the socket to close once the stream says it is finished.
+        return;
+      }
     }
   }
 }
@@ -359,15 +472,42 @@ const parseSseMessage = (raw: string): InteractionStreamEvent | undefined => {
 };
 
 export async function* readInteractionStream(
-  body: ReadableStream<Uint8Array>
+  body: ReadableStream<Uint8Array>,
+  options: { inactivityTimeoutMs?: number } = {}
 ): AsyncGenerator<InteractionStreamEvent> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
 
+  const inactivityTimeoutMs = options.inactivityTimeoutMs ?? 0;
+  const read = async (): Promise<ReadableStreamReadResult<Uint8Array>> => {
+    if (inactivityTimeoutMs <= 0) {
+      return reader.read();
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        reader.read(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () =>
+              reject(
+                new Error(`Gemini interaction stream stalled: no data for ${inactivityTimeoutMs}ms.`)
+              ),
+            inactivityTimeoutMs
+          );
+        })
+      ]);
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    }
+  };
+
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      const { done, value } = await read();
       if (done) {
         break;
       }

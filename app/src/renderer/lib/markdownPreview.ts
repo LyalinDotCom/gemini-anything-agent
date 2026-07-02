@@ -1,5 +1,8 @@
-const fencePattern = /^\s*(```|~~~)/;
+// Per CommonMark, a fence may be indented at most 3 spaces; deeper
+// indentation is code-block content and must not toggle fence tracking.
+const fencePattern = /^ {0,3}(```|~~~)/;
 const indentedBlockPattern = /^(?: {4,}|\t)/;
+const listMarkerPattern = /^\s*(?:[-*+]|\d{1,3}[.)])\s/;
 
 const commandPattern =
   /^\s*(?:bash|cat|cd|chmod|cp|curl|echo|export|find|git|mkdir|mv|node|npm|npx|pnpm|python|python3|rm|sh|touch|yarn)\b/m;
@@ -43,7 +46,13 @@ export const normalizePreviewMarkdown = (source: string): string => {
       .replace(/\s+/g, " ")
       .trim();
 
-    if (isProbablyProse(text)) {
+    // Indented list items are real markdown structure (nested lists, list
+    // continuations); joining them into one paragraph destroys the list.
+    const containsListItems = proseCandidate.some((line) =>
+      listMarkerPattern.test(stripIndentedPrefix(line))
+    );
+
+    if (!containsListItems && isProbablyProse(text)) {
       normalized.push(text);
     } else {
       normalized.push(...proseCandidate);

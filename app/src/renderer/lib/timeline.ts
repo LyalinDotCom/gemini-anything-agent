@@ -249,7 +249,14 @@ const stepText = (step: unknown, type: string): { body: string; synthetic: boole
   return { body: JSON.stringify(step, null, 2).slice(0, 4000), synthetic: true };
 };
 
-type Mut = { type: string; text: string; status: TimelineStatus; synthetic?: boolean };
+type Mut = {
+  type: string;
+  text: string;
+  status: TimelineStatus;
+  synthetic?: boolean;
+  /** The step's position in the interaction's steps[] when explicitly known. */
+  index?: number;
+};
 
 const normalizedText = (value: string): string => value.trim().replace(/\s+/g, " ");
 
@@ -408,7 +415,8 @@ const fromEvents = (events: InteractionStreamEvent[]): Mut[] => {
 
   for (const event of events) {
     if (event.event_type === "step.start") {
-      const index = typeof event.index === "number" ? event.index : order.length;
+      const explicitIndex = typeof event.index === "number" ? event.index : undefined;
+      const index = explicitIndex ?? order.length;
       const type = str(rec(event.step)?.type) ?? "step";
       if (HIDDEN_STEP_TYPES.has(type)) {
         continue;
@@ -417,13 +425,25 @@ const fromEvents = (events: InteractionStreamEvent[]): Mut[] => {
       if (existing) {
         existing.type = type;
       } else {
-        byIndex.set(index, { type, text: "", status: "running" });
+        byIndex.set(index, { type, text: "", status: "running", index: explicitIndex });
         order.push(index);
       }
     } else if (event.event_type === "step.delta") {
-      const mut = byIndex.get(indexOf(event));
+      const index = indexOf(event);
+      const mut = byIndex.get(index);
       if (mut) {
         mut.text += deltaText(event.delta);
+      } else if (typeof event.index === "number") {
+        // The step.start for this index was evicted by the event cap; a
+        // placeholder keeps the delta's text on its own step instead of
+        // dropping it, and terminal hydration fills the real type by index.
+        byIndex.set(index, {
+          type: "step",
+          text: deltaText(event.delta),
+          status: "running",
+          index
+        });
+        order.push(index);
       }
     } else if (event.event_type === "step.stop") {
       const mut = byIndex.get(indexOf(event));
@@ -437,13 +457,13 @@ const fromEvents = (events: InteractionStreamEvent[]): Mut[] => {
 
 const fromSteps = (steps: unknown[]): Mut[] =>
   steps
-    .map((step): Mut | undefined => {
+    .map((step, position): Mut | undefined => {
       const type = str(rec(step)?.type) ?? "step";
       if (HIDDEN_STEP_TYPES.has(type)) {
         return undefined;
       }
       const { body, synthetic } = stepText(step, type);
-      return { type, text: body, status: "done" as const, synthetic };
+      return { type, text: body, status: "done" as const, synthetic, index: position };
     })
     .filter((mut): mut is Mut => Boolean(mut));
 
@@ -454,12 +474,23 @@ const hydrateEventMuts = (
   eventMuts: Mut[],
   stepMuts: Mut[],
   interaction: Interaction | undefined
-): Mut[] =>
-  eventMuts.map((mut, index) => {
-    const step = stepMuts[index];
+): Mut[] => {
+  // Match each streamed step to its terminal steps[] entry by the step's real
+  // index. Positional alignment breaks as soon as the event cap evicts early
+  // events: event-derived muts then start at some step N while steps[] starts
+  // at 0, and text hydrates into the wrong rows.
+  const stepsByIndex = new Map(
+    stepMuts
+      .filter((mut) => typeof mut.index === "number")
+      .map((mut) => [mut.index as number, mut])
+  );
+  return eventMuts.map((mut, position) => {
+    const step = typeof mut.index === "number" ? stepsByIndex.get(mut.index) : stepMuts[position];
     const hydratedText = mut.text.trim().length || step?.synthetic ? mut.text : step?.text ?? mut.text;
     return {
       ...mut,
+      // Placeholder muts (evicted step.start) learn their real type here.
+      type: mut.type === "step" && step ? step.type : mut.type,
       text: hydratedText,
       synthetic: mut.synthetic && step && !step.synthetic ? false : mut.synthetic,
       status: mut.status === "running" && (step?.status === "done" || isTerminalInteraction(interaction))
@@ -467,6 +498,7 @@ const hydrateEventMuts = (
         : mut.status
     };
   });
+};
 
 /**
  * Build the folded activity timeline for the agent's turn. Once we have a live

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Interaction, InteractionStreamEvent } from "../src/sdk";
 import { buildTimeline, firstLine } from "../src/renderer/lib/timeline";
+import { mergeStreamEvents } from "../src/renderer/lib/sessionState";
 
 describe("buildTimeline — terminal steps[]", () => {
   it("folds a call+result pair into one command and uses output_text for the answer", () => {
@@ -309,10 +310,115 @@ describe("buildTimeline — live event stream", () => {
 });
 
 describe("firstLine", () => {
+  it("keeps delta text on its own step when the step.start was evicted by the event cap", () => {
+    // Simulates a long run where early events (including index 2's step.start)
+    // fell off the front of the 300-event window.
+    const events: InteractionStreamEvent[] = [
+      { event_type: "step.delta", index: 2, delta: { command: "npm run build" } },
+      { event_type: "step.stop", index: 2 },
+      { event_type: "step.start", index: 3, step: { type: "model_output" } },
+      { event_type: "step.delta", index: 3, delta: { text: "All done" } },
+      { event_type: "step.stop", index: 3 }
+    ];
+    const interaction: Interaction = {
+      id: "int_evicted",
+      status: "completed",
+      steps: [
+        { type: "thought", summary: "planning" },
+        { type: "thought", summary: "more planning" },
+        { type: "code_execution_call", command: "npm run build" },
+        { type: "model_output", content: [{ text: "All done" }] }
+      ]
+    };
+
+    const items = buildTimeline(interaction, events);
+
+    // The orphaned delta must render as a command step (type hydrated from
+    // steps[2] by index), not vanish or glue onto another row.
+    const command = items.find((item) => item.kind === "command");
+    expect(command?.body).toBe("npm run build");
+    expect(command?.status).toBe("done");
+  });
+
+  it("hydrates streamed steps from terminal steps by index, not by array position", () => {
+    // Early events evicted: the stream only saw steps 2 and 3. Positional
+    // alignment would hydrate them from steps[0] and steps[1].
+    const events: InteractionStreamEvent[] = [
+      { event_type: "step.start", index: 2, step: { type: "code_execution_call" } },
+      { event_type: "step.stop", index: 2 },
+      { event_type: "step.start", index: 3, step: { type: "function_call" } },
+      { event_type: "step.stop", index: 3 }
+    ];
+    const interaction: Interaction = {
+      id: "int_offset",
+      status: "completed",
+      steps: [
+        { type: "thought", summary: "wrong text for step 0" },
+        { type: "thought", summary: "wrong text for step 1" },
+        { type: "code_execution_call", command: "cargo test" },
+        { type: "function_call", name: "write_file", args: { path: "out.md" } }
+      ]
+    };
+
+    const items = buildTimeline(interaction, events);
+
+    const command = items.find((item) => item.kind === "command");
+    expect(command?.body).toBe("cargo test");
+    const write = items.find((item) => item.kind === "write_file" || item.kind === "function");
+    expect(write?.body).toContain("out.md");
+    expect(items.some((item) => item.body?.includes("wrong text"))).toBe(false);
+  });
+
   it("returns the first non-empty line, truncated", () => {
     expect(firstLine("\n\nhello\nworld")).toBe("hello");
     expect(firstLine("x".repeat(200), 10)).toBe("xxxxxxxxx…");
     expect(firstLine("")).toBeUndefined();
     expect(firstLine(undefined)).toBeUndefined();
+  });
+});
+
+describe("stream event merging", () => {
+  it("keeps legitimately identical deltas that carry distinct seq values", () => {
+    const delta = { event_type: "step.delta", index: 1, delta: { text: "\n\n" } };
+    const merged = mergeStreamEvents(
+      [{ ...delta, seq: 10 }],
+      [{ ...delta, seq: 11 }]
+    );
+
+    expect(merged).toHaveLength(2);
+  });
+
+  it("dedups the same event arriving via push and snapshot channels", () => {
+    const event: InteractionStreamEvent = {
+      event_type: "step.delta",
+      index: 1,
+      delta: { text: "hello" },
+      seq: 42
+    };
+    const merged = mergeStreamEvents([event], [{ ...event }]);
+
+    expect(merged).toHaveLength(1);
+  });
+
+  it("orders seq-stamped events canonically even when arrivals interleave", () => {
+    const eventAt = (seq: number): InteractionStreamEvent => ({
+      event_type: "step.delta",
+      index: 0,
+      delta: { text: `t${seq}` },
+      seq
+    });
+    const merged = mergeStreamEvents([eventAt(5), eventAt(7)], [eventAt(6), eventAt(4)]);
+
+    expect(merged.map((event) => event.seq)).toEqual([4, 5, 6, 7]);
+  });
+
+  it("keeps pre-seq persisted events ahead of newly stamped ones", () => {
+    const legacy: InteractionStreamEvent = { event_type: "step.start", index: 0, event_id: "evt-1" };
+    const merged = mergeStreamEvents([legacy], [
+      { event_type: "step.delta", index: 0, delta: { text: "new" }, seq: 100 }
+    ]);
+
+    expect(merged[0]).toBe(legacy);
+    expect(merged[1].seq).toBe(100);
   });
 });

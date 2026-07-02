@@ -37,4 +37,32 @@ describe("markdown preview normalization", () => {
 
     expect(normalizePreviewMarkdown(source)).toBe(source);
   });
+
+  it("preserves indented nested list items instead of joining them into prose", () => {
+    const source = [
+      "- Top level item.",
+      "    - Nested item one about something.",
+      "    - Nested item two about something else."
+    ].join("\n");
+
+    expect(normalizePreviewMarkdown(source)).toBe(source);
+  });
+
+  it("does not let fence markers inside indented code invert fence tracking", () => {
+    const source = [
+      "Example of writing a fence:",
+      "",
+      "      ```",
+      "",
+      "Now this prose paragraph continues after the example, with punctuation.",
+      "",
+      "    This indented paragraph reads like prose and should still be joined."
+    ].join("\n");
+
+    const normalized = normalizePreviewMarkdown(source);
+    expect(normalized).toContain(
+      "This indented paragraph reads like prose and should still be joined."
+    );
+    expect(normalized).not.toContain("    This indented paragraph");
+  });
 });

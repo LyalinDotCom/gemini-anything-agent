@@ -1,6 +1,8 @@
 import {
   ANTIGRAVITY_BASE_AGENT,
   extractInteractionOutputText,
+  isDeepResearchAgentId,
+  type BaseAgentId,
   type Interaction,
   type InteractionStreamEvent,
   type ManagedAgent
@@ -126,8 +128,17 @@ export const completedAtForInteraction = (
     ? terminalCompletedAt(session, completedAt)
     : session.completedAt;
 
-const streamEventKey = (event: InteractionStreamEvent): string =>
-  event.event_id ?? `${event.event_type}:${event.index ?? ""}:${JSON.stringify(event).slice(0, 500)}`;
+// The main process stamps a monotonic seq on every buffered event, giving an
+// exact identity: two legitimately identical deltas (same payload, same step)
+// get distinct seq values and both survive, while the same event arriving via
+// both the push channel and a snapshot poll dedups. The payload-hash fallback
+// only applies to events persisted before seq existed.
+const streamEventKey = (event: InteractionStreamEvent): string => {
+  if (typeof event.seq === "number") {
+    return `seq:${event.seq}`;
+  }
+  return event.event_id ?? `${event.event_type}:${event.index ?? ""}:${JSON.stringify(event).slice(0, 500)}`;
+};
 
 export const mergeStreamEvents = (
   current: InteractionStreamEvent[] | undefined,
@@ -142,7 +153,13 @@ export const mergeStreamEvents = (
       seen.add(key);
     }
   }
-  return merged.slice(-300);
+  // Canonical order: pre-seq persisted events keep arrival order up front,
+  // seq-stamped events sort by seq (push and snapshot arrivals interleave).
+  const withoutSeq = merged.filter((event) => typeof event.seq !== "number");
+  const withSeq = merged
+    .filter((event) => typeof event.seq === "number")
+    .sort((left, right) => (left.seq as number) - (right.seq as number));
+  return [...withoutSeq, ...withSeq].slice(-300);
 };
 
 export const latestStreamEventId = (events: InteractionStreamEvent[] | undefined): string | undefined =>
@@ -160,8 +177,15 @@ export const sessionCanReconnect = (session: Session): boolean =>
   !session.streaming &&
   (Boolean(session.error) || !interactionIsTerminal(session.seed!));
 
-export const fallbackAgent = (agentId: string): ManagedAgent => ({
-  id: agentId,
-  base_agent: ANTIGRAVITY_BASE_AGENT,
-  description: "Preconfigured Gemini Anything managed agent."
-});
+export const fallbackAgent = (agentId: string): ManagedAgent =>
+  isDeepResearchAgentId(agentId)
+    ? {
+        id: agentId,
+        base_agent: agentId.trim() as BaseAgentId,
+        description: "Google Deep Research managed agent."
+      }
+    : {
+        id: agentId,
+        base_agent: ANTIGRAVITY_BASE_AGENT,
+        description: "Preconfigured Gemini Anything managed agent."
+      };

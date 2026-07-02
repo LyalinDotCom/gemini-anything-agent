@@ -46,13 +46,14 @@ export const isTerminal = (interaction: Interaction | undefined): boolean => {
 };
 
 const DELAYS = [1000, 1500, 2000, 3000, 5000];
-const MAX_ATTEMPTS = 80;
-const MAX_ELAPSED_MS = 5 * 60_000;
+const MAX_CONSECUTIVE_FAILURES = 5;
 
 /**
  * Polls getInteraction on a capped backoff until the interaction reaches a
  * terminal status. Each RunView owns one poller; it cleans up on unmount,
  * supports a manual stop, and no-ops gracefully without the Electron bridge.
+ * Transient poll failures are retried; polling only stops on a terminal
+ * status, a manual stop, or several consecutive failures.
  */
 export const useInteractionPoller = (
   id: string | undefined,
@@ -73,9 +74,20 @@ export const useInteractionPoller = (
   useEffect(() => {
     seedRef.current = seed;
     if (seed) {
-      setInteraction(seed);
+      // A parent re-render can hand back a stale non-terminal seed after the
+      // poller already fetched the terminal interaction; never regress.
+      setInteraction((previous) =>
+        previous && previous.id === seed.id && isTerminal(previous) && !isTerminal(seed)
+          ? previous
+          : seed
+      );
     }
   }, [seed]);
+
+  useEffect(() => {
+    setInteraction(seedRef.current);
+    setError(undefined);
+  }, [id]);
 
   useEffect(() => {
     if (!enabled || !id || isTerminal(seedRef.current) || !window.managedAgents) {
@@ -85,15 +97,15 @@ export const useInteractionPoller = (
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let attempt = 0;
-    const startedAt = Date.now();
+    let consecutiveFailures = 0;
     stoppedRef.current = false;
     setPolling(true);
 
-    const stillRunning = (): boolean =>
-      !cancelled &&
-      !stoppedRef.current &&
-      attempt < MAX_ATTEMPTS &&
-      Date.now() - startedAt < MAX_ELAPSED_MS;
+    const stillRunning = (): boolean => !cancelled && !stoppedRef.current;
+
+    const scheduleNext = () => {
+      timer = setTimeout(() => void tick(), DELAYS[Math.min(attempt, DELAYS.length - 1)]);
+    };
 
     const tick = async (): Promise<void> => {
       if (!stillRunning()) {
@@ -101,22 +113,42 @@ export const useInteractionPoller = (
         return;
       }
       attempt += 1;
-      const result = await window.managedAgents!.getInteraction(id);
-      if (cancelled || stoppedRef.current) {
+      let failure: IpcError | undefined;
+      try {
+        const result = await window.managedAgents!.getInteraction(id);
+        if (!stillRunning()) {
+          setPolling(false);
+          return;
+        }
+        if (result.ok) {
+          consecutiveFailures = 0;
+          setError(undefined);
+          setInteraction(result.value);
+          if (isTerminal(result.value)) {
+            setPolling(false);
+            return;
+          }
+          scheduleNext();
+          return;
+        }
+        failure = result.error;
+      } catch (thrown) {
+        if (!stillRunning()) {
+          setPolling(false);
+          return;
+        }
+        failure = {
+          name: "PollError",
+          message: thrown instanceof Error ? thrown.message : "Polling failed unexpectedly."
+        };
+      }
+      consecutiveFailures += 1;
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        setError(failure);
         setPolling(false);
         return;
       }
-      if (!result.ok) {
-        setError(result.error);
-        setPolling(false);
-        return;
-      }
-      setInteraction(result.value);
-      if (isTerminal(result.value)) {
-        setPolling(false);
-        return;
-      }
-      timer = setTimeout(() => void tick(), DELAYS[Math.min(attempt, DELAYS.length - 1)]);
+      scheduleNext();
     };
 
     timer = setTimeout(() => void tick(), DELAYS[0]);

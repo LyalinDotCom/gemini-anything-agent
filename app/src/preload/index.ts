@@ -87,6 +87,13 @@ const bridge: ManagedAgentsBridge = {
     invoke<ChatSessionStoreSnapshot>(ipcChannels.loadStoredSessions),
   saveStoredSessions: (sessions: PersistedSession[]) =>
     invoke<ChatSessionStoreSnapshot>(ipcChannels.saveStoredSessions, sessions),
+  saveStoredSessionsSync: (sessions: PersistedSession[]): boolean => {
+    try {
+      return ipcRenderer.sendSync(ipcChannels.saveStoredSessionsSync, sessions) === true;
+    } catch {
+      return false;
+    }
+  },
   loadAgentProject: (agentId: string) =>
     invoke<AgentProjectSnapshot>(ipcChannels.loadAgentProject, agentId),
   saveAgentProject: (agentId: string, files: AgentProjectFileSnapshot[]) =>

@@ -110,6 +110,35 @@ const readConversationFile = (path: string): ConversationFile | undefined => {
   }
 };
 
+// Saves run on every renderer state change, so unchanged conversations and runs
+// must be skipped instead of rewritten. Keyed by absolute folder path.
+const folderConversationIds = new Map<string, string>();
+const writtenConversations = new Map<string, string>();
+const writtenRuns = new Map<string, string>();
+
+const forgetFolderCaches = (folderPath: string): void => {
+  folderConversationIds.delete(folderPath);
+  writtenConversations.delete(folderPath);
+  for (const key of writtenRuns.keys()) {
+    if (key.startsWith(`${folderPath}/`)) {
+      writtenRuns.delete(key);
+    }
+  }
+};
+
+const conversationIdForFolder = (folderPath: string): string | undefined => {
+  const cached = folderConversationIds.get(folderPath);
+  if (cached) {
+    return cached;
+  }
+  const conversation = readConversationFile(join(folderPath, CONVERSATION_FILE));
+  if (conversation?.conversationId) {
+    folderConversationIds.set(folderPath, conversation.conversationId);
+    return conversation.conversationId;
+  }
+  return undefined;
+};
+
 const writeTextFile = (path: string, content: string): void => {
   const tempPath = `${path}.tmp`;
   writeFileSync(tempPath, content, "utf8");
@@ -169,19 +198,36 @@ const conversationMarkdown = (conversation: ConversationFile): string => {
 const conversationFolderName = (root: PersistedSession): string =>
   `${compactDate(root.startedAt)}-${safeSegment(firstPromptLine(root.request.input))}-${safeSegment(root.localId)}`;
 
+// A single dangling symlink or unreadable entry must not abort a scan of the
+// whole store: a failed load feeds the renderer an empty session list, and the
+// next autosave would then delete every conversation on disk.
+const conversationFolderPaths = (rootPath: string): string[] => {
+  const paths: string[] = [];
+  let entries: string[];
+  try {
+    entries = readdirSync(rootPath);
+  } catch {
+    return paths;
+  }
+  for (const entry of entries) {
+    const folderPath = join(rootPath, entry);
+    try {
+      if (statSync(folderPath).isDirectory()) {
+        paths.push(folderPath);
+      }
+    } catch {
+      // Skip entries that cannot be stat'ed (dangling symlinks, permissions).
+    }
+  }
+  return paths;
+};
+
 const existingConversationFolders = (rootPath: string): Map<string, string> => {
   const folders = new Map<string, string>();
-  if (!existsSync(rootPath)) {
-    return folders;
-  }
-  for (const entry of readdirSync(rootPath)) {
-    const folderPath = join(rootPath, entry);
-    if (!statSync(folderPath).isDirectory()) {
-      continue;
-    }
-    const conversation = readConversationFile(join(folderPath, CONVERSATION_FILE));
-    if (conversation?.conversationId) {
-      folders.set(conversation.conversationId, folderPath);
+  for (const folderPath of conversationFolderPaths(rootPath)) {
+    const conversationId = conversationIdForFolder(folderPath);
+    if (conversationId) {
+      folders.set(conversationId, folderPath);
     }
   }
   return folders;
@@ -191,39 +237,46 @@ const runFolderName = (session: PersistedSession): string =>
   `${compactDate(session.startedAt)}-${safeSegment(session.localId, "run")}`;
 
 const writeRunFiles = (runPath: string, session: PersistedSession): void => {
+  const serialized = JSON.stringify(session);
+  if (writtenRuns.get(runPath) === serialized) {
+    return;
+  }
   mkdirSync(runPath, { recursive: true });
+  // Sidecar files must be removed when their source data is gone — a run that
+  // errored and later succeeded on reconnect must not keep a stale error.json.
+  const writeOrRemove = (name: string, content: string | undefined): void => {
+    if (content === undefined) {
+      rmSync(join(runPath, name), { force: true });
+    } else {
+      writeTextFile(join(runPath, name), content);
+    }
+  };
+  const asJson = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
+
   writeJsonFile(join(runPath, "session.json"), session);
   writeJsonFile(join(runPath, "request.json"), session.request);
-  if (session.seed) {
-    writeJsonFile(join(runPath, "latest-interaction.json"), session.seed);
-  }
-  if (session.events?.length) {
-    writeTextFile(
-      join(runPath, "events.jsonl"),
-      `${session.events.map((event) => JSON.stringify(event)).join("\n")}\n`
-    );
-  }
-  if (session.error) {
-    writeJsonFile(join(runPath, "error.json"), session.error);
-  }
-  if (session.imageAttachments?.length) {
-    writeJsonFile(join(runPath, "attachments.json"), session.imageAttachments);
-  }
-  if (session.resolvedMedia?.length) {
-    writeJsonFile(join(runPath, "resolved-media.json"), session.resolvedMedia);
-  }
+  writeOrRemove("latest-interaction.json", session.seed ? asJson(session.seed) : undefined);
+  writeOrRemove(
+    "events.jsonl",
+    session.events?.length
+      ? `${session.events.map((event) => JSON.stringify(event)).join("\n")}\n`
+      : undefined
+  );
+  writeOrRemove("error.json", session.error ? asJson(session.error) : undefined);
+  writeOrRemove(
+    "attachments.json",
+    session.imageAttachments?.length ? asJson(session.imageAttachments) : undefined
+  );
+  writeOrRemove(
+    "resolved-media.json",
+    session.resolvedMedia?.length ? asJson(session.resolvedMedia) : undefined
+  );
+  writtenRuns.set(runPath, serialized);
 };
 
 export const loadChatSessionsFromDisk = (rootPath: string): PersistedSession[] => {
-  if (!existsSync(rootPath)) {
-    return [];
-  }
   const sessions: PersistedSession[] = [];
-  for (const entry of readdirSync(rootPath)) {
-    const folderPath = join(rootPath, entry);
-    if (!statSync(folderPath).isDirectory()) {
-      continue;
-    }
+  for (const folderPath of conversationFolderPaths(rootPath)) {
     const conversation = readConversationFile(join(folderPath, CONVERSATION_FILE));
     if (conversation?.sessions) {
       sessions.push(...conversation.sessions);
@@ -241,6 +294,7 @@ export const saveChatSessionsToDisk = (rootPath: string, sessions: PersistedSess
   for (const [conversationId, folderPath] of existing) {
     if (!activeConversationIds.has(conversationId)) {
       rmSync(folderPath, { recursive: true, force: true });
+      forgetFolderCaches(folderPath);
     }
   }
 
@@ -262,10 +316,20 @@ export const saveChatSessionsToDisk = (rootPath: string, sessions: PersistedSess
       sessions: sorted
     };
 
-    mkdirSync(folderPath, { recursive: true });
-    rmSync(runsPath, { recursive: true, force: true });
+    const serialized = `${JSON.stringify(conversation, null, 2)}\n`;
+    const previouslyWritten =
+      writtenConversations.get(folderPath) ??
+      (existsSync(join(folderPath, CONVERSATION_FILE))
+        ? readFileSync(join(folderPath, CONVERSATION_FILE), "utf8")
+        : undefined);
+    if (previouslyWritten === serialized) {
+      writtenConversations.set(folderPath, serialized);
+      folderConversationIds.set(folderPath, conversationId);
+      continue;
+    }
+
     mkdirSync(runsPath, { recursive: true });
-    writeJsonFile(join(folderPath, CONVERSATION_FILE), conversation);
+    writeTextFile(join(folderPath, CONVERSATION_FILE), serialized);
     writeTextFile(join(folderPath, "conversation.md"), conversationMarkdown(conversation));
     writeTextFile(
       join(folderPath, "README.md"),
@@ -283,8 +347,17 @@ export const saveChatSessionsToDisk = (rootPath: string, sessions: PersistedSess
       ].join("\n")
     );
 
+    const expectedRunFolders = new Set(sorted.map(runFolderName));
+    for (const entry of readdirSync(runsPath)) {
+      if (!expectedRunFolders.has(entry)) {
+        rmSync(join(runsPath, entry), { recursive: true, force: true });
+        writtenRuns.delete(join(runsPath, entry));
+      }
+    }
     for (const session of sorted) {
       writeRunFiles(join(runsPath, runFolderName(session)), session);
     }
+    writtenConversations.set(folderPath, serialized);
+    folderConversationIds.set(folderPath, conversationId);
   }
 };

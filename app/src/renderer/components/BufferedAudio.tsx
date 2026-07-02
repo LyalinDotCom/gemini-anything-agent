@@ -12,7 +12,10 @@ type WindowWithWebkitAudio = Window &
     webkitAudioContext?: typeof AudioContext;
   };
 
-const MAX_DECODE_DURATION_BYTES = 120 * 1024 * 1024;
+// decodeAudioData expands compressed audio to raw PCM (~10x for MP3), so this
+// cap bounds the memory spike; larger files fall back to the <audio> element's
+// own metadata for duration.
+const MAX_DECODE_DURATION_BYTES = 32 * 1024 * 1024;
 
 const formatAudioTime = (seconds: number | undefined): string => {
   if (seconds === undefined || !Number.isFinite(seconds) || seconds < 0) {
@@ -109,7 +112,6 @@ export const BufferedAudio = ({ src, autoPlay = false, className }: BufferedAudi
   const audioRef = useRef<HTMLAudioElement>(null);
   const autoPlayHandledRef = useRef(false);
   const [audioUrl, setAudioUrl] = useState<string>();
-  const [directSource, setDirectSource] = useState(false);
   const [loading, setLoading] = useState(true);
   const [durationHint, setDurationHint] = useState<number>();
   const [duration, setDuration] = useState<number>();
@@ -123,7 +125,6 @@ export const BufferedAudio = ({ src, autoPlay = false, className }: BufferedAudi
     let nextObjectUrl: string | undefined;
     const controller = new AbortController();
     setAudioUrl(undefined);
-    setDirectSource(false);
     setLoading(true);
     setDurationHint(undefined);
     setDuration(undefined);
@@ -151,7 +152,6 @@ export const BufferedAudio = ({ src, autoPlay = false, className }: BufferedAudi
           setDuration(nextDurationHint);
         }
         setAudioUrl(nextObjectUrl);
-        setDirectSource(false);
         setLoading(false);
       })
       .catch((error) => {
@@ -160,7 +160,6 @@ export const BufferedAudio = ({ src, autoPlay = false, className }: BufferedAudi
         }
         if (!canceled) {
           setAudioUrl(src);
-          setDirectSource(true);
           setLoading(false);
         }
       });
@@ -181,7 +180,10 @@ export const BufferedAudio = ({ src, autoPlay = false, className }: BufferedAudi
   }, [duration, durationHint]);
 
   const effectiveDuration = durationHint ?? duration;
-  const nativeFallback = Boolean(audioUrl && directSource && metadataLoaded && !effectiveDuration && !loadFailed);
+  // Whenever no duration could be determined (not only on direct-source
+  // fetch failures), fall back to native controls instead of showing
+  // "Preparing audio..." forever.
+  const nativeFallback = Boolean(audioUrl && metadataLoaded && !effectiveDuration && !loadFailed);
   const ready = Boolean(audioUrl && !loading && effectiveDuration && effectiveDuration > 0 && !loadFailed);
 
   useEffect(() => {

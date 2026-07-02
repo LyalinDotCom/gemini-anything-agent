@@ -52,6 +52,11 @@ const sanitizeInteraction = (value: unknown): Interaction | undefined => {
   if (!isRecord(value) || typeof value.id !== "string") {
     return undefined;
   }
+  // Non-string status in a hand-edited or corrupted store would crash
+  // status.toLowerCase() during render, taking every chat down with it.
+  if (value.status !== undefined && typeof value.status !== "string") {
+    return { ...value, status: undefined } as Interaction;
+  }
   return value as Interaction;
 };
 
@@ -209,9 +214,42 @@ export const sanitizeSessionHistory = (value: unknown): Session[] => {
     });
   }
 
-  return sessions
-    .sort((left, right) => right.startedAt - left.startedAt)
-    .slice(0, MAX_STORED_SESSIONS);
+  return pruneToWholeConversations(
+    sessions.sort((left, right) => right.startedAt - left.startedAt)
+  );
+};
+
+const conversationRootId = (session: Session, byId: Map<string, Session>): string => {
+  let current = session;
+  const seen = new Set<string>();
+  while (current.parentLocalId && byId.has(current.parentLocalId) && !seen.has(current.localId)) {
+    seen.add(current.localId);
+    current = byId.get(current.parentLocalId)!;
+  }
+  return current.localId;
+};
+
+// Capping must drop whole conversations, newest-first: slicing raw sessions
+// orphans children of pruned roots (splitting one chat into several after a
+// restart) and deletes still-referenced conversation folders from disk.
+const pruneToWholeConversations = (sessionsNewestFirst: Session[]): Session[] => {
+  if (sessionsNewestFirst.length <= MAX_STORED_SESSIONS) {
+    return sessionsNewestFirst;
+  }
+  const byId = new Map(sessionsNewestFirst.map((session) => [session.localId, session]));
+  const keptRoots = new Set<string>();
+  const kept: Session[] = [];
+  for (const session of sessionsNewestFirst) {
+    const rootId = conversationRootId(session, byId);
+    if (!keptRoots.has(rootId)) {
+      if (kept.length >= MAX_STORED_SESSIONS) {
+        continue;
+      }
+      keptRoots.add(rootId);
+    }
+    kept.push(session);
+  }
+  return kept;
 };
 
 export const clearLegacyBrowserSessionHistory = (): void => {
@@ -227,16 +265,55 @@ export const clearLegacyBrowserSessionHistory = (): void => {
   }
 };
 
-export const readStoredSessions = async (): Promise<Session[]> => {
+export type StoredSessionsReadResult = {
+  ok: boolean;
+  sessions: Session[];
+};
+
+export const readStoredSessions = async (): Promise<StoredSessionsReadResult> => {
   if (typeof window === "undefined" || !window.managedAgents?.loadStoredSessions) {
-    return [];
+    return { ok: true, sessions: [] };
   }
   try {
     const result = await window.managedAgents.loadStoredSessions();
-    return result.ok ? sanitizeSessionHistory(result.value.sessions) : [];
+    return result.ok
+      ? { ok: true, sessions: sanitizeSessionHistory(result.value.sessions) }
+      : { ok: false, sessions: [] };
   } catch {
-    return [];
+    return { ok: false, sessions: [] };
   }
+};
+
+// Session state changes on every stream event, so saves are coalesced: at most
+// one disk write per interval, with the latest snapshot flushed on unload.
+const SAVE_COALESCE_MS = 1000;
+let pendingSessions: Session[] | null = null;
+let saveTimer: number | null = null;
+let flushOnUnloadRegistered = false;
+
+const flushPendingSessions = (options: { sync?: boolean } = {}): void => {
+  if (saveTimer !== null) {
+    window.clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  if (!pendingSessions) {
+    return;
+  }
+  const sessions = pendingSessions;
+  pendingSessions = null;
+  const payload = sanitizeSessionHistory(sessions) as PersistedSession[];
+  // On unload an async IPC round-trip may not complete before the renderer
+  // dies; the blocking channel guarantees the last snapshot reaches disk.
+  if (options.sync && window.managedAgents?.saveStoredSessionsSync) {
+    window.managedAgents.saveStoredSessionsSync(payload);
+    return;
+  }
+  if (!window.managedAgents?.saveStoredSessions) {
+    return;
+  }
+  window.managedAgents.saveStoredSessions(payload).catch((error: unknown) => {
+    console.error("Failed to persist chat sessions", error);
+  });
 };
 
 export const writeStoredSessions = (
@@ -245,7 +322,14 @@ export const writeStoredSessions = (
   if (typeof window === "undefined" || !window.managedAgents?.saveStoredSessions) {
     return;
   }
-  void window.managedAgents.saveStoredSessions(sanitizeSessionHistory(sessions) as PersistedSession[]);
+  pendingSessions = sessions;
+  if (!flushOnUnloadRegistered) {
+    flushOnUnloadRegistered = true;
+    window.addEventListener("beforeunload", () => flushPendingSessions({ sync: true }));
+  }
+  if (saveTimer === null) {
+    saveTimer = window.setTimeout(() => flushPendingSessions(), SAVE_COALESCE_MS);
+  }
 };
 
 export const removeSessionsForAgent = (sessions: Session[], agentId: string): Session[] =>

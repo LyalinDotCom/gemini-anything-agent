@@ -78,7 +78,7 @@ export type ReadEnvironmentOutputTextResult = {
   path: string;
   content: string;
   bytes: number;
-  fileType: "markdown" | "text";
+  fileType: "html" | "markdown" | "text";
 };
 
 export type InteractionStreamSnapshot = {
@@ -193,6 +193,8 @@ export type ManagedAgentsBridge = {
   saveText: (content: string, defaultFileName?: string) => Promise<IpcResult<SaveTextResult>>;
   loadStoredSessions: () => Promise<IpcResult<ChatSessionStoreSnapshot>>;
   saveStoredSessions: (sessions: PersistedSession[]) => Promise<IpcResult<ChatSessionStoreSnapshot>>;
+  /** Blocking save used on window unload, when an async IPC round-trip may not complete. */
+  saveStoredSessionsSync?: (sessions: PersistedSession[]) => boolean;
   loadAgentProject: (agentId: string) => Promise<IpcResult<AgentProjectSnapshot>>;
   saveAgentProject: (
     agentId: string,
@@ -231,6 +233,7 @@ export const ipcChannels = {
   saveText: "managed-agents:save-text",
   loadStoredSessions: "managed-agents:load-stored-sessions",
   saveStoredSessions: "managed-agents:save-stored-sessions",
+  saveStoredSessionsSync: "managed-agents:save-stored-sessions-sync",
   loadAgentProject: "managed-agents:load-agent-project",
   saveAgentProject: "managed-agents:save-agent-project",
   openAgentProject: "managed-agents:open-agent-project",

@@ -39,7 +39,7 @@ When the user asks, "make me an image of a cat," this is what happens:
 8. `gai` calls the Gemini image model through the GenAI SDK.
 9. The image is written to `/workspace/output`.
 10. The app downloads and caches the output locally.
-11. The chat shows an inline preview, and the output panel exposes the saved file. HTML opens in an in-app browser; Markdown and text files open in a read-only in-app viewer.
+11. The chat shows an inline preview, and the output panel exposes the saved file. HTML opens in a sandboxed in-app preview; Markdown and text files open in a read-only in-app viewer.
 
 The important design choice is that generated artifacts live in `/workspace/output`. The app can treat that folder as the handoff surface between the remote agent and the local UI.
 

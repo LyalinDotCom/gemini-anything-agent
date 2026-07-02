@@ -58,7 +58,8 @@ const client = new GeminiManagedAgentsClient({
   apiRevision: process.env.GEMINI_API_REVISION
 });
 
-const HARNESS_TIMEOUT_MS = Number(process.env.GEMINI_HARNESS_TIMEOUT_MS ?? 300_000);
+const parsedTimeout = Number(process.env.GEMINI_HARNESS_TIMEOUT_MS ?? 300_000);
+const HARNESS_TIMEOUT_MS = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 300_000;
 
 const usage = () => {
   console.log(`Gemini managed-agent harness
@@ -145,13 +146,23 @@ const createAndWaitInteraction = async (
   let interaction = await client.createInteraction(request);
   let delayMs = 2_000;
 
+  let pollFailures = 0;
   while (
     interaction.id &&
     !isTerminalInteraction(interaction) &&
     Date.now() - startedAt < HARNESS_TIMEOUT_MS
   ) {
     await sleep(delayMs);
-    interaction = await client.getInteraction(interaction.id);
+    try {
+      interaction = await client.getInteraction(interaction.id);
+      pollFailures = 0;
+    } catch (error) {
+      // A transient poll failure must not abandon a possibly-succeeding run.
+      pollFailures += 1;
+      if (pollFailures >= 3) {
+        throw error;
+      }
+    }
     delayMs = Math.min(Math.round(delayMs * 1.5), 10_000);
   }
 

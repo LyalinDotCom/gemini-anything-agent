@@ -96,10 +96,14 @@ export type ImageAttachmentMeta = {
  * State for the Run Console's Compose bar. The agent id is always taken from the
  * Build Sheet (the agent you are building), so it is not duplicated here.
  */
+/** Which managed agent handles the next run. */
+export type AgentMode = "anything" | "deep-research" | "deep-research-max";
+
 export type ComposeState = {
   inputMode: "string" | "parts";
   input: string;
   parts: InputPartDraft[];
+  agentMode: AgentMode;
   store: boolean;
   autoContinue: boolean;
   reuseEnvironment: boolean;
@@ -273,6 +277,7 @@ export const initialCompose: ComposeState = {
   inputMode: "string",
   input: "",
   parts: [],
+  agentMode: "anything",
   store: true,
   autoContinue: true,
   reuseEnvironment: true,

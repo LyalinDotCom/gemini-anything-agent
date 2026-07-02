@@ -113,6 +113,16 @@ Native managed-agent tools handle text, code, tasks, analysis, research, browsin
 
 When the user refers to an existing artifact, the agent should inspect `/workspace/output` first.
 
+## Agent Switch: Deep Research
+
+The composer has an Agent selector next to Options:
+
+- **Anything** (default) — the custom managed agent built on `antigravity-preview-05-2026`.
+- **Deep Research** — Google's `deep-research-preview-04-2026` managed agent.
+- **Deep Research Max** — `deep-research-max-preview-04-2026`.
+
+Deep Research agents are invoked directly by base-agent id (no custom agent is deployed for them). They always run in the background with stored history — research can take up to 60 minutes, and the app keeps polling until the interaction finishes. Follow-up prompts in the same conversation chain through `previous_interaction_id`, so you can ask for revisions to a finished report. Per-run system-instruction, tool, and environment overrides apply only to the Anything agent.
+
 ## Development
 
 App:

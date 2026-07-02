@@ -43,6 +43,8 @@ import {
   shouldAutoResolveMedia
 } from "../src/renderer/lib/mediaResolver";
 import { outputFileLabel, outputFileMatchesPath, outputFilesCoverPaths } from "../src/renderer/lib/outputFiles";
+import { buildChatInteraction, composeFromRequest } from "../src/renderer/lib/interactionInput";
+import { DEEP_RESEARCH_AGENT, DEEP_RESEARCH_MAX_AGENT } from "../src/sdk";
 
 const KEY_FOR: Partial<Record<CapabilityKey, string>> = {
   brain: "system_instruction",
@@ -311,6 +313,65 @@ describe("renderer payload compiler", () => {
       { type: "text", text: "Describe this" },
       { type: "image", data: "AAAA", mime_type: "image/png" }
     ]);
+  });
+
+  it("builds a Deep Research request invoked by base-agent id", () => {
+    const request = buildChatInteraction("gemini-anything-agent", {
+      ...initialCompose,
+      agentMode: "deep-research",
+      input: "Research the history of Google TPUs.",
+      // These overrides do not apply to Deep Research and must be ignored.
+      store: false,
+      background: false,
+      overrideSystemInstruction: true,
+      systemInstruction: "ignored",
+      overrideTools: true,
+      overrideEnvironment: true,
+      environmentId: "env-ignored"
+    });
+
+    expect(request.agent).toBe(DEEP_RESEARCH_AGENT);
+    expect(request.store).toBe(true);
+    expect(request.background).toBe(true);
+    expect(request.environment).toBe("remote");
+    expect(request.agent_config).toEqual({ type: "deep-research" });
+    expect(request.system_instruction).toBeUndefined();
+    expect(request.tools).toBeUndefined();
+  });
+
+  it("keeps Deep Research follow-ups chained to the previous interaction", () => {
+    const request = buildChatInteraction("gemini-anything-agent", {
+      ...initialCompose,
+      agentMode: "deep-research-max",
+      input: "Expand the report with a competitor table.",
+      previousInteractionId: "int-research-1",
+      thinkingSummaries: "auto"
+    });
+
+    expect(request.agent).toBe(DEEP_RESEARCH_MAX_AGENT);
+    expect(request.previous_interaction_id).toBe("int-research-1");
+    expect(request.agent_config).toEqual({
+      type: "deep-research",
+      thinking_summaries: "auto"
+    });
+  });
+
+  it("restores the agent mode when rebuilding compose state from a request", () => {
+    const research = composeFromRequest({
+      agent: DEEP_RESEARCH_AGENT,
+      input: "Research something.",
+      environment: "remote",
+      store: true,
+      background: true
+    });
+    const anything = composeFromRequest({
+      agent: "gemini-anything-agent",
+      input: "Do something.",
+      environment: "remote"
+    });
+
+    expect(research.agentMode).toBe("deep-research");
+    expect(anything.agentMode).toBe("anything");
   });
 
   it("chooses the next available agent version id", () => {

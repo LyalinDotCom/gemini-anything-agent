@@ -1817,6 +1817,35 @@ svg {
   opacity: 0.55;
 }
 
+.composer-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.composer-agent .field-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.composer-agent select {
+  height: 34px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.composer-agent.active select {
+  color: var(--teal-dark);
+  border-color: rgba(14, 124, 117, 0.35);
+  background: rgba(14, 124, 117, 0.09);
+}
+
 .run-options {
   display: inline-flex;
   align-items: center;
@@ -4483,10 +4512,9 @@ button:disabled {
   background: #fff;
 }
 
-.chat-app .html-preview-webview {
+.chat-app .html-preview-frame {
   position: absolute;
   inset: 0;
-  display: inline-flex;
   width: 100%;
   height: 100%;
   min-height: 0;
@@ -4494,18 +4522,28 @@ button:disabled {
   background: #fff;
 }
 
-.chat-app .html-preview-error {
+.chat-app .html-preview-state {
   position: absolute;
-  inset: 58px 24px auto;
-  z-index: 2;
+  inset: 0;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
   padding: 10px 12px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.92);
+  color: var(--b-muted);
+  font-size: 12px;
+}
+
+.chat-app .html-preview-state.error {
   color: #ff3b30;
-  box-shadow: 0 0 0 0.5px rgba(255, 59, 48, 0.2), 0 8px 24px rgba(0, 0, 0, 0.14);
+}
+
+.chat-app .markdown-preview-missing-image {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  color: var(--b-muted);
   font-size: 12px;
 }
 

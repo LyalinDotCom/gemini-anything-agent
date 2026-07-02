@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Bot } from "lucide-react";
 import {
+  isDeepResearchAgentId,
   validateInteractionCreate,
   type Interaction,
   type ManagedAgent
@@ -144,6 +145,7 @@ export const App = () => {
   const outputRetryCounts = useRef<Record<string, number>>({});
   const outputRetryTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const outputRefreshSignatures = useRef<Record<string, string>>({});
+  const outputFilesRequestSeq = useRef<Record<string, number>>({});
   const autoOpenedOutputEnvironments = useRef<Set<string>>(new Set());
   const ensureAgentPromise = useRef<Promise<EnsureAnythingAgentResult | undefined> | null>(null);
   const activeConversationIdRef = useRef(activeConversationId);
@@ -158,7 +160,10 @@ export const App = () => {
   const keyMissing = hasBridge && runtimeLoaded && !hasKey;
   const appReady = hasBridge && hasKey && sessionsLoaded;
   const agentSessions = useMemo(
-    () => sessions.filter((session) => session.agentId === agentId),
+    () =>
+      sessions.filter(
+        (session) => session.agentId === agentId || isDeepResearchAgentId(session.agentId)
+      ),
     [agentId, sessions]
   );
   const conversations = useMemo(
@@ -291,15 +296,23 @@ export const App = () => {
     void loadRuntime();
   }, []);
 
+  useEffect(() => clearAllRetryTimers, []);
+
   useEffect(() => {
     let canceled = false;
     clearLegacyBrowserSessionHistory();
-    void readStoredSessions().then((storedSessions) => {
+    void readStoredSessions().then((stored) => {
       if (canceled) {
         return;
       }
-      setSessions(storedSessions);
-      setSessionsLoaded(true);
+      setSessions(stored.sessions);
+      if (stored.ok) {
+        setSessionsLoaded(true);
+      } else {
+        // Saving would persist the empty list and delete every chat on disk,
+        // so autosave stays off for this app run when the load failed.
+        console.error("Chat history failed to load; autosave is disabled to protect stored chats.");
+      }
     });
     return () => {
       canceled = true;
@@ -328,6 +341,38 @@ export const App = () => {
     scrollChatToBottom();
   }, [chatSessions, mediaBySession, latestRunId]);
 
+  // A new sandbox environment means the output panel now lists different
+  // files; an open preview would keep showing a file from the old one.
+  const previousEnvironmentIdRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const previous = previousEnvironmentIdRef.current;
+    previousEnvironmentIdRef.current = latestEnvironmentId;
+    if (previous && latestEnvironmentId && previous !== latestEnvironmentId) {
+      setActiveHtmlPreview(null);
+      setActiveTextPreview(null);
+    }
+  }, [latestEnvironmentId]);
+
+  // When a refresh produces a new version of the previewed file (new ?v= in
+  // its url), swap the open preview to it so stale content doesn't persist.
+  useEffect(() => {
+    const items = latestEnvironmentId
+      ? outputFilesByEnvironment[latestEnvironmentId]?.items
+      : undefined;
+    if (!items?.length) {
+      return;
+    }
+    const refresh = (current: EnvironmentOutputFile | null): EnvironmentOutputFile | null => {
+      if (!current) {
+        return current;
+      }
+      const updated = items.find((item) => item.path === current.path);
+      return updated && updated.url !== current.url ? updated : current;
+    };
+    setActiveHtmlPreview(refresh);
+    setActiveTextPreview(refresh);
+  }, [latestEnvironmentId, outputFilesByEnvironment]);
+
   useEffect(() => {
     if (!keyMissing) {
       return;
@@ -342,6 +387,8 @@ export const App = () => {
     setOutputPanelOpen(true);
     setMediaBySession({});
     setOutputFilesByEnvironment({});
+    setActiveHtmlPreview(null);
+    setActiveTextPreview(null);
     pendingRunInputs.current.clear();
     activeResumeIds.current.clear();
     requestedMediaKeys.current.clear();
@@ -767,20 +814,27 @@ export const App = () => {
     setCompose((current) => clearComposeInput(current));
     setLatestRunId(localId);
 
-    const ensuredAgent = await ensureAgentBeforeRun(bridge, agentId);
-    if (!ensuredAgent) {
-      restorePendingRunInput(localId, sourceConversationId);
-      runtimeOutputHydrationSessionIds.current.delete(localId);
-      setConversationStarting(sourceConversationId, false);
-      return;
+    // Deep Research agents are invoked directly by base-agent id; there is no
+    // custom managed agent to deploy or snapshot for them.
+    const isDeepResearchRun = isDeepResearchAgentId(request.agent);
+    if (!isDeepResearchRun) {
+      const ensuredAgent = await ensureAgentBeforeRun(bridge, agentId);
+      if (!ensuredAgent) {
+        restorePendingRunInput(localId, sourceConversationId);
+        runtimeOutputHydrationSessionIds.current.delete(localId);
+        setConversationStarting(sourceConversationId, false);
+        return;
+      }
+
+      if (ensuredAgent.created || ensuredAgent.recreated) {
+        request.environment = "remote";
+        delete request.previous_interaction_id;
+      }
     }
 
-    if (ensuredAgent.created || ensuredAgent.recreated) {
-      request.environment = "remote";
-      delete request.previous_interaction_id;
-    }
-
-    const agentSnapshot = await snapshotAgentForRun(request.agent, fallbackAgent(request.agent));
+    const agentSnapshot = isDeepResearchRun
+      ? fallbackAgent(request.agent)
+      : await snapshotAgentForRun(request.agent, fallbackAgent(request.agent));
     const base: Session = {
       localId,
       agentId: request.agent,
@@ -823,12 +877,16 @@ export const App = () => {
           setActiveConversationId((current) => (current === sourceConversationId ? localId : current));
         }
         let snapshotTimer: ReturnType<typeof setInterval> | undefined;
+        // A snapshot poll in flight when the stream finishes must not apply
+        // after the final update: it would flip the session back to
+        // streaming:true forever and lock the conversation.
+        let streamFinalized = false;
         const syncStreamSnapshot = async () => {
-          if (!getInteractionStreamSnapshot) {
+          if (!getInteractionStreamSnapshot || streamFinalized) {
             return;
           }
           const snapshot = await getInteractionStreamSnapshot(streamId);
-          if (!snapshot.ok) {
+          if (!snapshot.ok || streamFinalized) {
             return;
           }
           if (snapshot.value.done && snapshot.value.events.length === 0 && !snapshot.value.latestInteraction) {
@@ -869,6 +927,7 @@ export const App = () => {
               clearInterval(snapshotTimer);
               await syncStreamSnapshot();
             }
+            streamFinalized = true;
             unsubscribe();
           }
         })();
@@ -983,12 +1042,15 @@ export const App = () => {
 
     const getInteractionStreamSnapshot = window.managedAgents.getInteractionStreamSnapshot;
     let snapshotTimer: ReturnType<typeof setInterval> | undefined;
+    // Same guard as runInteraction: a late snapshot must not resurrect a
+    // finished stream as streaming:true.
+    let streamFinalized = false;
     const syncStreamSnapshot = async () => {
-      if (!getInteractionStreamSnapshot) {
+      if (!getInteractionStreamSnapshot || streamFinalized) {
         return;
       }
       const snapshot = await getInteractionStreamSnapshot(streamId);
-      if (!snapshot.ok) {
+      if (!snapshot.ok || streamFinalized) {
         return;
       }
       if (snapshot.value.done && snapshot.value.events.length === 0 && !snapshot.value.latestInteraction) {
@@ -1030,6 +1092,7 @@ export const App = () => {
             clearInterval(snapshotTimer);
             await syncStreamSnapshot();
           }
+          streamFinalized = true;
           unsubscribe();
         }
       })();
@@ -1318,6 +1381,11 @@ export const App = () => {
     if (!window.managedAgents?.listEnvironmentOutputFiles) {
       return undefined;
     }
+    // Refresh button, auto-refresh, and retry timers can overlap; only the
+    // newest request per environment may write state, or a slow stale
+    // response would overwrite a fresher file list.
+    const requestId = (outputFilesRequestSeq.current[environmentId] ?? 0) + 1;
+    outputFilesRequestSeq.current[environmentId] = requestId;
     setOutputFilesByEnvironment((current) => ({
       ...current,
       [environmentId]: {
@@ -1329,6 +1397,9 @@ export const App = () => {
     }));
 
     const result = await window.managedAgents.listEnvironmentOutputFiles(environmentId, force);
+    if (outputFilesRequestSeq.current[environmentId] !== requestId) {
+      return undefined;
+    }
     let nextItems: EnvironmentOutputFile[] | undefined;
     let retryScheduled = false;
     setOutputFilesByEnvironment((current) => ({
@@ -1385,6 +1456,36 @@ export const App = () => {
     }
     if (result.value.saved) {
       pushStatus({ level: "success", title: "File saved", detail: result.value.path });
+    }
+  }
+
+  function openLinkedOutputFile(url: string) {
+    const items = latestEnvironmentId
+      ? outputFilesByEnvironment[latestEnvironmentId]?.items
+      : undefined;
+    if (!items?.length) {
+      return;
+    }
+    // Resolve a gemini-media:// URL (as clicked inside a preview) back to the
+    // output file it serves; ?v= cache-busting on listed urls is ignored.
+    const normalize = (value: string): string | undefined => {
+      try {
+        const parsed = new URL(value);
+        if (parsed.protocol !== "gemini-media:") {
+          return undefined;
+        }
+        return `${parsed.hostname}${decodeURIComponent(parsed.pathname)}`;
+      } catch {
+        return undefined;
+      }
+    };
+    const target = normalize(url);
+    if (!target) {
+      return;
+    }
+    const file = items.find((item) => item.url && normalize(item.url) === target);
+    if (file) {
+      previewOutputFile(file);
     }
   }
 
@@ -1681,12 +1782,14 @@ export const App = () => {
               file={activeHtmlPreview}
               onClose={() => setActiveHtmlPreview(null)}
               onOpenExternal={(url) => void openPreviewLinkExternally(url)}
+              onOpenLinkedFile={openLinkedOutputFile}
             />
           ) : activeTextPreview?.url ? (
             <TextPreview
               file={activeTextPreview}
               onClose={() => setActiveTextPreview(null)}
               onOpenExternal={(url) => void openPreviewLinkExternally(url)}
+              onOpenLinkedFile={openLinkedOutputFile}
             />
           ) : (
             <>

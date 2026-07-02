@@ -121,7 +121,9 @@ export const agentToDraft = (agent: ManagedAgent): BuilderDraft => {
       draft.networkMode = "disabled";
     } else if (env.network && typeof env.network === "object") {
       draft.networkMode = "allowlist" as NetworkMode;
-      draft.networkRules = env.network.allowlist.map(ruleToDraft);
+      draft.networkRules = Array.isArray(env.network.allowlist)
+        ? env.network.allowlist.map(ruleToDraft)
+        : [];
     }
   }
 

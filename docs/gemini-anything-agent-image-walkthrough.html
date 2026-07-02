@@ -925,7 +925,7 @@ const response = await fetch(`${API_BASE}/interactions`, {
 });</code></pre>
             </div>
 
-            <p>The result is not just a text answer. The agent can leave files in <code>/workspace/output</code>, and the local app turns that folder into a browsable output panel with previews and downloads. HTML opens inside the app in a webview, while Markdown and text outputs open in a read-only viewer.</p>
+            <p>The result is not just a text answer. The agent can leave files in <code>/workspace/output</code>, and the local app turns that folder into a browsable output panel with previews and downloads. HTML opens inside the app in a sandboxed preview, while Markdown and text outputs open in a read-only viewer.</p>
           </section>
 
           <section id="boundaries">

@@ -88,17 +88,6 @@ export type InteractionStreamSnapshot = {
   lastEventId?: string;
 };
 
-export type AgentProjectFileSnapshot = {
-  path: string;
-  content: string;
-};
-
-export type AgentProjectSnapshot = {
-  agentId: string;
-  rootPath: string;
-  files: AgentProjectFileSnapshot[];
-};
-
 export type IpcError = {
   name: string;
   message: string;
@@ -127,7 +116,6 @@ export type PersistedSession = {
   startedAt: number;
   completedAt?: number;
   error?: IpcError;
-  resolvedMedia?: ResolvedEnvironmentMedia[];
   imageAttachments?: PersistedImageAttachment[];
   parentLocalId?: string;
 };
@@ -178,11 +166,6 @@ export type ManagedAgentsBridge = {
   cancelInteraction: (id: string) => Promise<IpcResult<Interaction>>;
   deleteInteraction: (id: string) => Promise<IpcResult<boolean>>;
   downloadEnvironmentSnapshot: (environmentId: string) => Promise<IpcResult<SnapshotDownloadResult>>;
-  resolveEnvironmentMedia: (
-    environmentId: string,
-    paths: string[]
-  ) => Promise<IpcResult<ResolvedEnvironmentMedia[]>>;
-  saveResolvedMedia: (path: string) => Promise<IpcResult<SaveResolvedMediaResult>>;
   listEnvironmentOutputFiles?: (
     environmentId: string,
     force?: boolean
@@ -200,12 +183,6 @@ export type ManagedAgentsBridge = {
     conversationId: string,
     entry: { at: string; event: string; detail?: string }
   ) => void;
-  loadAgentProject: (agentId: string) => Promise<IpcResult<AgentProjectSnapshot>>;
-  saveAgentProject: (
-    agentId: string,
-    files: AgentProjectFileSnapshot[]
-  ) => Promise<IpcResult<AgentProjectSnapshot>>;
-  openAgentProject: (agentId: string) => Promise<IpcResult<boolean>>;
   getPathForFile?: (file: File) => string;
   openExternal: (url: string) => Promise<IpcResult<boolean>>;
 };
@@ -229,8 +206,6 @@ export const ipcChannels = {
   cancelInteraction: "managed-agents:cancel-interaction",
   deleteInteraction: "managed-agents:delete-interaction",
   downloadSnapshot: "managed-agents:download-snapshot",
-  resolveEnvironmentMedia: "managed-agents:resolve-environment-media",
-  saveResolvedMedia: "managed-agents:save-resolved-media",
   listEnvironmentOutputFiles: "managed-agents:list-environment-output-files",
   saveEnvironmentOutputFile: "managed-agents:save-environment-output-file",
   openEnvironmentOutputFile: "managed-agents:open-environment-output-file",
@@ -240,8 +215,5 @@ export const ipcChannels = {
   saveStoredSessions: "managed-agents:save-stored-sessions",
   saveStoredSessionsSync: "managed-agents:save-stored-sessions-sync",
   appendConversationDiagnostics: "managed-agents:append-conversation-diagnostics",
-  loadAgentProject: "managed-agents:load-agent-project",
-  saveAgentProject: "managed-agents:save-agent-project",
-  openAgentProject: "managed-agents:open-agent-project",
   openExternal: "managed-agents:open-external"
 } as const;

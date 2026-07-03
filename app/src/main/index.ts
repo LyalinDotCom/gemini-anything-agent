@@ -37,8 +37,6 @@ import {
 } from "../sdk";
 import {
   ipcChannels,
-  type AgentProjectFileSnapshot,
-  type AgentProjectSnapshot,
   type ChatSessionStoreSnapshot,
   type EnvironmentOutputFile,
   type EnsureAnythingAgentResult,
@@ -103,7 +101,6 @@ const ROOT_ENV_PATH = join(REPO_ROOT, ".env");
 const ROOT_ENV_LOCAL_PATH = join(REPO_ROOT, ".env.local");
 const ENV_PATH = join(APP_ROOT, ".env");
 const ENV_LOCAL_PATH = join(APP_ROOT, ".env.local");
-const PROJECTS_ROOT = join(APP_ROOT, "agent-projects");
 const AGENT_ASSETS_ROOT = join(REPO_ROOT, "agents");
 const APP_ICON_PNG_PATH = join(APP_ROOT, "assets", "app-icon.png");
 const APP_ICON_PATH = process.platform === "darwin"
@@ -684,29 +681,6 @@ const outputRelativePathForEntry = (value: string): string | undefined => {
   return relativeOutputPath;
 };
 
-const canonicalMediaRequestPath = (value: string): string | undefined => {
-  const cleaned = value.trim().replace(/[?#].*$/, "").replace(/\\/g, "/");
-  const savedOutputMatch = cleaned.match(/(?:^|\/)outputs\/managed-agent\/[^/]+\/(.+)$/i);
-  if (savedOutputMatch?.[1]) {
-    const outputPath = normalizedRelativeTarPath(savedOutputMatch[1]);
-    return outputPath && mediaTypeForPath(outputPath) ? `/workspace/output/${outputPath}` : undefined;
-  }
-  return cleaned && mediaTypeForPath(cleaned) ? cleaned : undefined;
-};
-
-const requestedPathMatchesTarEntry = (requestedPath: string, tarEntry: string): boolean => {
-  const requested = requestedPath.replace(/^[/\\]+/, "").replace(/\\/g, "/");
-  const requestedWithoutWorkspace = requested.replace(/^workspace\//, "");
-  const entry = tarEntry.replace(/^\.?\//, "").replace(/\\/g, "/");
-  const entryWithoutWorkspace = entry.replace(/^workspace\//, "");
-  return (
-    entry === requested ||
-    entryWithoutWorkspace === requestedWithoutWorkspace ||
-    entry.endsWith(`/${requested}`) ||
-    entry.endsWith(`/${requestedWithoutWorkspace}`)
-  );
-};
-
 const unique = <T,>(values: T[]): T[] => [...new Set(values)];
 
 // Hashes incrementally so comparing two multi-GB videos never loads either
@@ -842,22 +816,6 @@ const mediaUrl = (environmentId: string, relativeEntry: string, version?: string
   return `${MEDIA_PROTOCOL}://${safeCacheSegment(environmentId)}/${encodedPath}${cacheBust}`;
 };
 
-const cachedMediaEntries = (root: string, current = root): string[] => {
-  if (!existsSync(current)) {
-    return [];
-  }
-  return readdirSync(current, { withFileTypes: true }).flatMap((entry) => {
-    const fullPath = join(current, entry.name);
-    if (entry.isDirectory()) {
-      return cachedMediaEntries(root, fullPath);
-    }
-    if (!entry.isFile() || !mediaTypeForPath(fullPath)) {
-      return [];
-    }
-    return [normalize(fullPath.slice(root.length)).replace(/^[/\\]+/, "").replace(/\\/g, "/")];
-  });
-};
-
 const cachedEnvironmentOutputFiles = (
   environmentId: string,
   root: string,
@@ -906,44 +864,6 @@ const cachedEnvironmentOutputFiles = (
       return [file];
     })
     .sort((left, right) => right.modifiedAt - left.modifiedAt || left.relativePath.localeCompare(right.relativePath));
-};
-
-const resolveCachedEnvironmentMedia = async (
-  environmentId: string,
-  extractRoot: string,
-  requestedPaths: string[]
-): Promise<ResolvedEnvironmentMedia[] | undefined> => {
-  const entries = cachedMediaEntries(resolve(extractRoot));
-  if (!entries.length) {
-    return undefined;
-  }
-
-  const resolvedItems: ResolvedEnvironmentMedia[] = [];
-  for (const requestedPath of requestedPaths) {
-    const relativeEntry = entries.find((candidate) => requestedPathMatchesTarEntry(requestedPath, candidate));
-    if (!relativeEntry) {
-      continue;
-    }
-    const path = resolve(extractRoot, relativeEntry);
-    if (!pathIsInside(path, resolve(extractRoot)) || !existsSync(path) || !statSync(path).isFile()) {
-      continue;
-    }
-    const mediaType = mediaTypeForPath(path);
-    if (!mediaType) {
-      continue;
-    }
-    const stats = statSync(path);
-    const version = `${Math.round(stats.mtimeMs)}-${stats.size}`;
-    resolvedItems.push({
-      requestedPath,
-      path,
-      savedPath: await autoSaveMedia(environmentId, path),
-      url: mediaUrl(environmentId, relativeEntry, version),
-      mediaType
-    });
-  }
-
-  return resolvedItems.length === requestedPaths.length ? resolvedItems : undefined;
 };
 
 const extractTarEntries = async (
@@ -1088,6 +1008,21 @@ const listEnvironmentOutputFilesFromSnapshot = async (
         replaceExtractRootFromNext();
       }
 
+      // Local convenience copies (outputs/managed-agent/) so generated media
+      // survives environment expiry. This is the only auto-save hook now that
+      // media resolution is cache-only.
+      for (const entry of selectedEntries) {
+        const mediaPath = resolve(extractRoot, entry);
+        if (
+          mediaTypeForPath(mediaPath) &&
+          pathIsInside(mediaPath, resolve(extractRoot)) &&
+          existsSync(mediaPath) &&
+          statSync(mediaPath).isFile()
+        ) {
+          await autoSaveMedia(environmentId, mediaPath);
+        }
+      }
+
       return cachedEnvironmentOutputFiles(environmentId, extractRoot);
     } catch (error) {
       await copyAutoSavedMediaToCache(environmentId, extractRoot);
@@ -1134,51 +1069,6 @@ const registerMediaProtocol = (): void => {
 
 /** Strip surrounding whitespace and any control chars so a pasted key can't inject extra .env lines. */
 const sanitizeKey = (key: string): string => key.trim().replace(/[\x00-\x1f]/g, "");
-
-const safeProjectSegment = (value: string): string => {
-  const safe = value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return safe || "untitled-agent";
-};
-
-const projectDir = (agentId: string): string => join(PROJECTS_ROOT, safeProjectSegment(agentId));
-
-const safeProjectPath = (root: string, relativePath: string): string => {
-  const normalized = normalize(relativePath);
-  if (!normalized || isAbsolute(normalized) || normalized.startsWith("..")) {
-    throw new Error(`Invalid project file path: ${relativePath}`);
-  }
-  return join(root, normalized);
-};
-
-const readProjectFiles = (root: string, base = ""): AgentProjectFileSnapshot[] => {
-  if (!existsSync(root)) {
-    return [];
-  }
-  return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
-    const relativePath = base ? `${base}/${entry.name}` : entry.name;
-    const fullPath = join(root, entry.name);
-    if (entry.isDirectory()) {
-      return readProjectFiles(fullPath, relativePath);
-    }
-    if (!entry.isFile() || statSync(fullPath).size > 1024 * 1024) {
-      return [];
-    }
-    return [{ path: relativePath, content: readFileSync(fullPath, "utf8") }];
-  });
-};
-
-const loadAgentProjectSnapshot = (agentId: string): AgentProjectSnapshot => {
-  const rootPath = projectDir(agentId);
-  return {
-    agentId,
-    rootPath,
-    files: readProjectFiles(rootPath)
-  };
-};
 
 /** Upsert `NAME=value` in a .env file, preserving other lines and creating the file if needed. */
 const upsertEnvKey = (envPath: string, name: string, value: string): void => {
@@ -1722,129 +1612,10 @@ handle<[string], SnapshotDownloadResult>(ipcChannels.downloadSnapshot, async (en
   return { saved: true, path: result.filePath, bytes: statSync(result.filePath).size };
 });
 
-handle<[string, string[]], ResolvedEnvironmentMedia[]>(
-  ipcChannels.resolveEnvironmentMedia,
-  async (environmentId, paths) => {
-    const requestedPaths = unique(
-      paths
-        .map(canonicalMediaRequestPath)
-        .filter((path): path is string => Boolean(path))
-    );
-    if (requestedPaths.length === 0) {
-      return [];
-    }
-
-    const cacheRoot = join(mediaCacheRoot(), safeCacheSegment(environmentId));
-    const extractRoot = join(cacheRoot, "files");
-    const tarPath = snapshotTarPath(cacheRoot);
-    // Server-wins policy: resolve from the server-derived cache, then the
-    // server itself; locally auto-saved copies only backfill on failure.
-    const cached = await resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
-    if (cached) {
-      return cached;
-    }
-
-    return withEnvironmentSnapshotLock(environmentId, async () => {
-      const lockedCached = await resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
-      if (lockedCached) {
-        return lockedCached;
-      }
-
-      rmSync(tarPath, { force: true });
-      mkdirSync(extractRoot, { recursive: true });
-
-      try {
-        await downloadSnapshotTarTo(environmentId, tarPath);
-
-        const listed = await execFileAsync("tar", ["-tf", tarPath], { maxBuffer: 64 * 1024 * 1024 });
-        const tarEntries = listed.stdout
-          .split("\n")
-          .map((entry) => entry.trim())
-          .map(normalizedRelativeTarPath)
-          .filter((entry): entry is string => {
-            if (!entry) {
-              return false;
-            }
-            return Boolean(mediaTypeForPath(entry));
-          });
-        const selectedEntries = unique(
-          tarEntries.filter((entry) =>
-            requestedPaths.some((requestedPath) => requestedPathMatchesTarEntry(requestedPath, entry))
-          )
-        );
-
-        if (selectedEntries.length === 0) {
-          return [];
-        }
-
-        await extractTarEntries(cacheRoot, tarPath, extractRoot, selectedEntries);
-
-        const resolved: ResolvedEnvironmentMedia[] = [];
-        for (const requestedPath of requestedPaths) {
-          const entry = selectedEntries.find((candidate) => requestedPathMatchesTarEntry(requestedPath, candidate));
-          const relativeEntry = entry ? normalizedRelativeTarPath(entry) : undefined;
-          if (!relativeEntry) {
-            continue;
-          }
-          const path = resolve(extractRoot, relativeEntry);
-          if (!pathIsInside(path, resolve(extractRoot))) {
-            continue;
-          }
-          if (!existsSync(path) || !statSync(path).isFile()) {
-            continue;
-          }
-          const mediaType = mediaTypeForPath(path);
-          if (!mediaType) {
-            continue;
-          }
-          const stats = statSync(path);
-          const version = `${Math.round(stats.mtimeMs)}-${stats.size}`;
-          resolved.push({
-            requestedPath,
-            path,
-            savedPath: await autoSaveMedia(environmentId, path),
-            url: mediaUrl(environmentId, relativeEntry, version),
-            mediaType
-          });
-        }
-        return resolved;
-      } catch (error) {
-        await copyAutoSavedMediaToCache(environmentId, extractRoot, requestedPaths);
-        const fallback = await resolveCachedEnvironmentMedia(environmentId, extractRoot, requestedPaths);
-        if (fallback) {
-          return fallback;
-        }
-        throw error;
-      } finally {
-        rmSync(tarPath, { force: true });
-      }
-    });
-  }
-);
-
 handle<[string, boolean | undefined], EnvironmentOutputFile[]>(
   ipcChannels.listEnvironmentOutputFiles,
   async (environmentId, force) => listEnvironmentOutputFilesFromSnapshot(environmentId, Boolean(force))
 );
-
-handle<[string], SaveResolvedMediaResult>(ipcChannels.saveResolvedMedia, async (sourcePath) => {
-  const source = resolve(sourcePath);
-  const root = resolve(mediaCacheRoot());
-  if (!pathIsInside(source, root) || !existsSync(source) || !statSync(source).isFile() || !mediaTypeForPath(source)) {
-    throw new Error("Media file is not available in the app cache.");
-  }
-
-  const result = await dialog.showSaveDialog({
-    title: "Save generated media",
-    defaultPath: basename(source)
-  });
-  if (result.canceled || !result.filePath) {
-    return { saved: false, canceled: true };
-  }
-
-  await copyFile(source, result.filePath);
-  return { saved: true, path: result.filePath, bytes: statSync(result.filePath).size };
-});
 
 handle<[string], SaveResolvedMediaResult>(ipcChannels.saveEnvironmentOutputFile, async (sourcePath) => {
   const source = resolve(sourcePath);
@@ -1974,32 +1745,6 @@ ipcMain.on(ipcChannels.saveStoredSessionsSync, (event, sessions: PersistedSessio
   }
 });
 
-handle<[string], AgentProjectSnapshot>(ipcChannels.loadAgentProject, async (agentId) =>
-  loadAgentProjectSnapshot(agentId)
-);
-handle<[string, AgentProjectFileSnapshot[]], AgentProjectSnapshot>(
-  ipcChannels.saveAgentProject,
-  async (agentId, files) => {
-    const rootPath = projectDir(agentId);
-    rmSync(rootPath, { recursive: true, force: true });
-    mkdirSync(rootPath, { recursive: true });
-    for (const file of files) {
-      if (typeof file.path !== "string" || typeof file.content !== "string") {
-        continue;
-      }
-      const filePath = safeProjectPath(rootPath, file.path);
-      mkdirSync(dirname(filePath), { recursive: true });
-      writeFileSync(filePath, file.content, "utf8");
-    }
-    return loadAgentProjectSnapshot(agentId);
-  }
-);
-handle<[string], boolean>(ipcChannels.openAgentProject, async (agentId) => {
-  const rootPath = projectDir(agentId);
-  mkdirSync(rootPath, { recursive: true });
-  await shell.openPath(rootPath);
-  return true;
-});
 handle<[string], boolean>(ipcChannels.openExternal, async (url) => {
   const parsed = new URL(url);
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {

@@ -305,10 +305,6 @@ const writeRunFiles = (runPath: string, session: PersistedSession): void => {
     "attachments.json",
     session.imageAttachments?.length ? asJson(session.imageAttachments) : undefined
   );
-  writeOrRemove(
-    "resolved-media.json",
-    session.resolvedMedia?.length ? asJson(session.resolvedMedia) : undefined
-  );
   writtenRuns.set(runPath, serialized);
 };
 

@@ -2,15 +2,12 @@ import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
   IpcResult,
   EnvironmentOutputFile,
-  AgentProjectSnapshot,
-  AgentProjectFileSnapshot,
   ChatSessionStoreSnapshot,
   EnsureAnythingAgentResult,
   InteractionStreamSnapshot,
   ManagedAgentsBridge,
   PersistedSession,
   ReadEnvironmentOutputTextResult,
-  ResolvedEnvironmentMedia,
   RuntimeConfig,
   SaveResolvedMediaResult,
   SaveTextResult,
@@ -69,10 +66,6 @@ const bridge: ManagedAgentsBridge = {
   deleteInteraction: (id: string) => invoke<boolean>(ipcChannels.deleteInteraction, id),
   downloadEnvironmentSnapshot: (environmentId: string) =>
     invoke<SnapshotDownloadResult>(ipcChannels.downloadSnapshot, environmentId),
-  resolveEnvironmentMedia: (environmentId: string, paths: string[]) =>
-    invoke<ResolvedEnvironmentMedia[]>(ipcChannels.resolveEnvironmentMedia, environmentId, paths),
-  saveResolvedMedia: (path: string) =>
-    invoke<SaveResolvedMediaResult>(ipcChannels.saveResolvedMedia, path),
   listEnvironmentOutputFiles: (environmentId: string, force?: boolean) =>
     invoke<EnvironmentOutputFile[]>(ipcChannels.listEnvironmentOutputFiles, environmentId, force),
   saveEnvironmentOutputFile: (path: string) =>
@@ -100,11 +93,6 @@ const bridge: ManagedAgentsBridge = {
   ): void => {
     ipcRenderer.send(ipcChannels.appendConversationDiagnostics, conversationId, entry);
   },
-  loadAgentProject: (agentId: string) =>
-    invoke<AgentProjectSnapshot>(ipcChannels.loadAgentProject, agentId),
-  saveAgentProject: (agentId: string, files: AgentProjectFileSnapshot[]) =>
-    invoke<AgentProjectSnapshot>(ipcChannels.saveAgentProject, agentId, files),
-  openAgentProject: (agentId: string) => invoke<boolean>(ipcChannels.openAgentProject, agentId),
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
   openExternal: (url: string) => invoke<boolean>(ipcChannels.openExternal, url)
 };

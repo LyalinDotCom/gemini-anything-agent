@@ -1,12 +1,4 @@
-import type { EnvironmentOutputFile, ResolvedEnvironmentMedia } from "../../shared/electron-api";
-
-export type SessionMediaState = {
-  loading: boolean;
-  items: ResolvedEnvironmentMedia[];
-  error?: string;
-  progress?: number;
-  stage?: string;
-};
+import type { EnvironmentOutputFile } from "../../shared/electron-api";
 
 export type EnvironmentOutputState = {
   loading: boolean;

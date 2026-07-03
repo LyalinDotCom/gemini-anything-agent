@@ -9,6 +9,7 @@ import {
 import type {
   EnvironmentOutputFile,
   EnsureAnythingAgentResult,
+  IpcResult,
   ResolvedEnvironmentMedia,
   RuntimeConfig
 } from "../shared/electron-api";
@@ -29,7 +30,7 @@ import {
   sessionEnvironmentId,
   withAutoContinuity
 } from "./lib/continuity";
-import type { EnvironmentOutputState, SessionMediaState } from "./lib/mediaState";
+import type { EnvironmentOutputState } from "./lib/mediaState";
 import { createStickToBottom } from "./lib/stickToBottom";
 import { readConversationOrder, writeConversationOrder } from "./lib/conversationOrder";
 import { logConversationDiagnostic } from "./lib/diagnostics";
@@ -57,22 +58,10 @@ import {
   type ConversationSummary
 } from "./lib/conversations";
 import {
-  cachedMediaStateForSession,
-  extractMediaPaths,
-  extractWorkspaceOutputPaths,
-  mediaItemsCoverPaths,
-  mergeResolvedMedia,
-  mentionsWorkspaceOutput,
-  outputMediaItemsForPaths,
-  shouldAutoResolveMedia,
-  textFileNameForLabel
-} from "./lib/mediaResolver";
-import {
   completedAtForInteraction,
   fallbackAgent,
   interactionIsTerminal,
   latestStreamEventId,
-  mediaSearchTextForSession,
   mergeStreamEvents,
   patchSeedFromStreamEvent,
   patchSeedFromStreamSnapshot,
@@ -82,11 +71,11 @@ import {
   timelineItemsForSession
 } from "./lib/sessionState";
 import { bridgeUnavailable, FALLBACK_RUNTIME } from "./lib/runtimeConfig";
-import { outputMediaItem } from "./lib/outputFiles";
+import { outputMediaItem, textFileNameForLabel } from "./lib/outputFiles";
 import { Composer } from "./components/Composer";
 import { Transcript } from "./components/Transcript";
 import { SettingsModal } from "./components/Overlays";
-import { MediaLightbox, SessionMedia } from "./components/GeneratedMedia";
+import { MediaLightbox } from "./components/GeneratedMedia";
 import { OutputFilesPanel } from "./components/OutputFilesPanel";
 import { HtmlPreview } from "./components/HtmlPreview";
 import { TextPreview } from "./components/TextPreview";
@@ -116,10 +105,6 @@ const snapshotAgentForRun = async (
   }
 };
 
-// One short retry only: after a completed run the snapshot is final, so a
-// path that still doesn't resolve is a phantom mention, and every extra
-// attempt costs a full snapshot download.
-const MEDIA_RETRY_DELAYS_MS = [2500];
 // Backoff for reattaching a dropped background stream before surfacing the
 // error and the manual Reconnect button.
 const STREAM_RECONNECT_DELAYS_MS = [2000, 5000, 12000];
@@ -138,7 +123,6 @@ export const App = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [conversationOrder, setConversationOrder] = useState<string[]>(readConversationOrder);
   const [outputPanelOpen, setOutputPanelOpen] = useState(true);
-  const [mediaBySession, setMediaBySession] = useState<Record<string, SessionMediaState>>({});
   const [activeMedia, setActiveMedia] = useState<ResolvedEnvironmentMedia | null>(null);
   const [activeHtmlPreview, setActiveHtmlPreview] = useState<EnvironmentOutputFile | null>(null);
   const [activeTextPreview, setActiveTextPreview] = useState<EnvironmentOutputFile | null>(null);
@@ -151,12 +135,10 @@ export const App = () => {
   const streamRetryTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const sessionsRef = useRef<Session[]>([]);
   const pendingRunInputs = useRef<Map<string, PendingComposeInput>>(new Map());
-  const requestedMediaKeys = useRef<Set<string>>(new Set());
   const completedOutputHydrationKeys = useRef<Set<string>>(new Set());
   const runtimeOutputHydrationSessionIds = useRef<Set<string>>(new Set());
-  const mediaRetryCounts = useRef<Record<string, number>>({});
-  const mediaRetryTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const outputFilesRequestSeq = useRef<Record<string, number>>({});
+  const outputFilesPending = useRef<Record<string, number>>({});
   const autoOpenedOutputEnvironments = useRef<Set<string>>(new Set());
   const ensureAgentPromise = useRef<Promise<EnsureAnythingAgentResult | undefined> | null>(null);
   const activeConversationIdRef = useRef(activeConversationId);
@@ -371,7 +353,7 @@ export const App = () => {
 
   useEffect(() => {
     scrollChatToBottom();
-  }, [chatSessions, mediaBySession, latestRunId]);
+  }, [chatSessions, latestRunId]);
 
   // A new sandbox environment means the output panel now lists different
   // files; an open preview would keep showing a file from the old one.
@@ -417,13 +399,11 @@ export const App = () => {
     setStartingConversationIds({});
     setCancelingSessionIds({});
     setOutputPanelOpen(true);
-    setMediaBySession({});
     setOutputFilesByEnvironment({});
     setActiveHtmlPreview(null);
     setActiveTextPreview(null);
     pendingRunInputs.current.clear();
     activeResumeIds.current.clear();
-    requestedMediaKeys.current.clear();
     completedOutputHydrationKeys.current.clear();
     runtimeOutputHydrationSessionIds.current.clear();
     clearAllRetryTimers();
@@ -443,15 +423,6 @@ export const App = () => {
   }, [activeConversationId, conversations, latestRunId]);
 
   useEffect(() => {
-    if (!window.managedAgents?.resolveEnvironmentMedia) {
-      return;
-    }
-    for (const session of chatSessions) {
-      void resolveMediaForSession(session);
-    }
-  }, [chatSessions, latestRunId, outputFilesByEnvironment]);
-
-  useEffect(() => {
     for (const session of agentSessions) {
       if (!runtimeOutputHydrationSessionIds.current.has(session.localId)) {
         continue;
@@ -464,14 +435,6 @@ export const App = () => {
         runtimeOutputHydrationSessionIds.current.delete(session.localId);
         continue;
       }
-      const outputText = mediaSearchTextForSession(session);
-      const expectedOutputPaths = extractWorkspaceOutputPaths(outputText);
-      const mediaPaths = extractMediaPaths(outputText);
-      if (expectedOutputPaths.length === 0 && mediaPaths.length === 0) {
-        runtimeOutputHydrationSessionIds.current.delete(session.localId);
-        continue;
-      }
-
       const hydrationKey = `${session.localId}:${session.completedAt}`;
       if (completedOutputHydrationKeys.current.has(hydrationKey)) {
         runtimeOutputHydrationSessionIds.current.delete(session.localId);
@@ -480,15 +443,9 @@ export const App = () => {
 
       completedOutputHydrationKeys.current.add(hydrationKey);
       runtimeOutputHydrationSessionIds.current.delete(session.localId);
-      // Run completed → fetch the final snapshot ONCE and process everything
-      // in it. Media resolution runs after the listing so it hits the freshly
-      // extracted cache instead of downloading the snapshot a second time.
-      void (async () => {
-        await loadOutputFiles(environmentId, true);
-        if (mediaPaths.length > 0 && shouldAutoResolveMedia(session)) {
-          void resolveMediaForSession(session, true);
-        }
-      })();
+      // Run completed → pull the final snapshot ONCE; everything downstream
+      // (output panel, previews, the media viewer) reads the extracted files.
+      void loadOutputFiles(environmentId, true);
     }
   }, [agentSessions]);
 
@@ -575,24 +532,10 @@ export const App = () => {
     });
   };
 
-  function clearMediaRetry(requestKey: string) {
-    const timer = mediaRetryTimers.current[requestKey];
-    if (timer) {
-      clearTimeout(timer);
-      delete mediaRetryTimers.current[requestKey];
-    }
-    delete mediaRetryCounts.current[requestKey];
-  }
-
   function clearAllRetryTimers() {
-    for (const timer of Object.values(mediaRetryTimers.current)) {
-      clearTimeout(timer);
-    }
     for (const timer of streamRetryTimers.current.values()) {
       clearTimeout(timer);
     }
-    mediaRetryTimers.current = {};
-    mediaRetryCounts.current = {};
     streamRetryTimers.current.clear();
     streamRetryCounts.current.clear();
   }
@@ -601,36 +544,6 @@ export const App = () => {
     completedOutputHydrationKeys.current = new Set(
       [...completedOutputHydrationKeys.current].filter((key) => !key.startsWith(`${sessionId}:`))
     );
-  }
-
-  function shouldRetrySessionOutputHydration(session: Session): boolean {
-    if (session.streaming || !session.completedAt) {
-      return false;
-    }
-    const outputText = mediaSearchTextForSession(session);
-    return mentionsWorkspaceOutput(outputText) || extractMediaPaths(outputText).length > 0;
-  }
-
-  function scheduleMediaRetry(session: Session, requestKey: string): boolean {
-    if (!shouldRetrySessionOutputHydration(session)) {
-      return false;
-    }
-    if (mediaRetryTimers.current[requestKey]) {
-      return true;
-    }
-    const attempt = mediaRetryCounts.current[requestKey] ?? 0;
-    const delay = MEDIA_RETRY_DELAYS_MS[attempt];
-    if (!delay) {
-      return false;
-    }
-
-    mediaRetryCounts.current[requestKey] = attempt + 1;
-    mediaRetryTimers.current[requestKey] = setTimeout(() => {
-      delete mediaRetryTimers.current[requestKey];
-      requestedMediaKeys.current.delete(requestKey);
-      void resolveMediaForSession(session, true);
-    }, delay);
-    return true;
   }
 
   const setOptimisticSentImagesForKeys = (keys: string[], images: ImagePartDraft[]) => {
@@ -668,9 +581,6 @@ export const App = () => {
         .filter((value): value is string => Boolean(value))
     );
 
-    setMediaBySession((current) =>
-      Object.fromEntries(Object.entries(current).filter(([localId]) => !deletedIds.has(localId)))
-    );
     setOutputFilesByEnvironment((current) =>
       Object.fromEntries(
         Object.entries(current).filter(
@@ -679,24 +589,9 @@ export const App = () => {
       )
     );
 
-    requestedMediaKeys.current = new Set(
-      [...requestedMediaKeys.current].filter((key) => {
-        const [localId, environmentId] = key.split(":", 3);
-        return (
-          !deletedIds.has(localId) &&
-          (!deletedEnvironmentIds.has(environmentId) || remainingEnvironmentIds.has(environmentId))
-        );
-      })
-    );
     completedOutputHydrationKeys.current = new Set(
       [...completedOutputHydrationKeys.current].filter((key) => !deletedIds.has(key.split(":", 1)[0]))
     );
-    for (const key of Object.keys(mediaRetryTimers.current)) {
-      const [localId] = key.split(":", 1);
-      if (deletedIds.has(localId)) {
-        clearMediaRetry(key);
-      }
-    }
     for (const environmentId of deletedEnvironmentIds) {
       if (!remainingEnvironmentIds.has(environmentId)) {
         autoOpenedOutputEnvironments.current.delete(environmentId);
@@ -1449,55 +1344,6 @@ export const App = () => {
     }
   }
 
-  async function saveMedia(item: ResolvedEnvironmentMedia) {
-    if (!window.managedAgents?.saveResolvedMedia) {
-      pushStatus({ level: "error", title: "Save unavailable", detail: "Run the Electron app to save media." });
-      return;
-    }
-    const result = await window.managedAgents.saveResolvedMedia(item.path);
-    if (!result.ok) {
-      pushStatus({ level: "error", title: result.error.name, detail: result.error.message });
-      return;
-    }
-    if (result.value.saved) {
-      pushStatus({ level: "success", title: "Media saved", detail: result.value.path });
-    }
-  }
-
-  function mediaStateForSession(session: Session): SessionMediaState | undefined {
-    if (!shouldAutoResolveMedia(session)) {
-      return undefined;
-    }
-    const runtimeState = mediaBySession[session.localId];
-    const persistedState = cachedMediaStateForSession(session);
-    if (session.streaming) {
-      return runtimeState ?? persistedState;
-    }
-
-    const environmentId = sessionEnvironmentId(session);
-    const outputState = environmentId ? outputFilesByEnvironment[environmentId] : undefined;
-    const paths = extractMediaPaths(mediaSearchTextForSession(session));
-    const outputItems = outputMediaItemsForPaths(outputState?.items, paths);
-    const mergedItems = mergeResolvedMedia(
-      mergeResolvedMedia(persistedState?.items, outputItems),
-      runtimeState?.items ?? []
-    );
-
-    if (mergedItems.length > 0) {
-      return {
-        loading: false,
-        items: mergedItems,
-        progress: 100
-      };
-    }
-
-    if (runtimeState?.loading && !session.streaming && session.localId !== latestRunId) {
-      return persistedState;
-    }
-
-    return runtimeState ?? persistedState;
-  }
-
   /**
    * One-shot output listing: fetch, show what's there, done. The run's
    * snapshot is final once the interaction completes, so there is no retry
@@ -1512,10 +1358,16 @@ export const App = () => {
       return undefined;
     }
     // Refresh button and completion fetches can overlap; only the newest
-    // request per environment may write state, or a slow stale response
+    // request per environment may write items, or a slow stale response
     // would overwrite a fresher file list.
     const requestId = (outputFilesRequestSeq.current[environmentId] ?? 0) + 1;
     outputFilesRequestSeq.current[environmentId] = requestId;
+    outputFilesPending.current[environmentId] = (outputFilesPending.current[environmentId] ?? 0) + 1;
+    const startedAt = Date.now();
+    logConversationDiagnostic(activeConversationIdRef.current, "outputs.list.started", {
+      environmentId,
+      force
+    });
     setOutputFilesByEnvironment((current) => ({
       ...current,
       [environmentId]: {
@@ -1526,11 +1378,38 @@ export const App = () => {
       }
     }));
 
-    const result = await window.managedAgents.listEnvironmentOutputFiles(environmentId, force);
-    if (outputFilesRequestSeq.current[environmentId] !== requestId) {
+    let result: IpcResult<EnvironmentOutputFile[]> | undefined;
+    try {
+      result = await window.managedAgents.listEnvironmentOutputFiles(environmentId, force);
+    } catch (thrown) {
+      // An IPC transport rejection must not leave the spinner dangling.
+      logConversationDiagnostic(activeConversationIdRef.current, "outputs.list.rejected", {
+        environmentId,
+        message: thrown instanceof Error ? thrown.message : String(thrown)
+      });
+    } finally {
+      outputFilesPending.current[environmentId] = Math.max(
+        0,
+        (outputFilesPending.current[environmentId] ?? 1) - 1
+      );
+    }
+    logConversationDiagnostic(activeConversationIdRef.current, "outputs.list.settled", {
+      environmentId,
+      force,
+      elapsedMs: Date.now() - startedAt,
+      ok: result?.ok === true,
+      items: result?.ok ? result.value.length : undefined
+    });
+
+    // Whoever settles LAST must close the loading state, even when their
+    // response is stale — otherwise a discarded response can leave the panel
+    // stuck on "Refreshing files..." with no request in flight.
+    const isNewest = outputFilesRequestSeq.current[environmentId] === requestId;
+    const newerStillInFlight = (outputFilesPending.current[environmentId] ?? 0) > 0;
+    if (!isNewest && newerStillInFlight) {
       return undefined;
     }
-    if (!result.ok) {
+    if (result && !result.ok) {
       logConversationDiagnostic(activeConversationIdRef.current, "outputs.list.failed", {
         environmentId,
         name: result.error.name,
@@ -1540,13 +1419,14 @@ export const App = () => {
     let nextItems: EnvironmentOutputFile[] | undefined;
     setOutputFilesByEnvironment((current) => {
       const previousItems = current[environmentId]?.items ?? [];
-      if (result.ok) {
+      if (result?.ok) {
         // A transiently empty listing must not blank a panel that already
         // showed files.
-        nextItems = result.value.length > 0 ? result.value : previousItems;
+        const resolvedItems = result.value.length > 0 ? result.value : previousItems;
+        nextItems = resolvedItems;
         return {
           ...current,
-          [environmentId]: { loading: false, items: nextItems, checked: true, error: undefined }
+          [environmentId]: { loading: false, items: resolvedItems, checked: true, error: undefined }
         };
       }
       nextItems = previousItems;
@@ -1556,7 +1436,7 @@ export const App = () => {
           loading: false,
           items: previousItems,
           checked: true,
-          error: previousItems.length ? undefined : result.error.message
+          error: result && !previousItems.length ? result.error.message : undefined
         }
       };
     });
@@ -1647,129 +1527,6 @@ export const App = () => {
     if (!result.ok) {
       pushStatus({ level: "error", title: result.error.name, detail: result.error.message });
     }
-  }
-
-  async function resolveMediaForSession(session: Session, force = false) {
-    if (!window.managedAgents?.resolveEnvironmentMedia) {
-      return;
-    }
-    if (!force && !shouldAutoResolveMedia(session)) {
-      return;
-    }
-    const environmentId = sessionEnvironmentId(session);
-    if (!environmentId || session.streaming) {
-      return;
-    }
-    const paths = extractMediaPaths(mediaSearchTextForSession(session));
-    if (paths.length === 0) {
-      return;
-    }
-    const requestKey = `${session.localId}:${environmentId}:${paths.join("|")}`;
-    const runtimeItems = mediaBySession[session.localId]?.items;
-    const persistedItems = session.resolvedMedia;
-    const cachedItems = runtimeItems ?? persistedItems;
-    const outputItems = outputMediaItemsForPaths(outputFilesByEnvironment[environmentId]?.items, paths);
-    if (!force && outputItems.length > 0) {
-      requestedMediaKeys.current.add(requestKey);
-      clearMediaRetry(requestKey);
-      const items = mergeResolvedMedia(cachedItems, outputItems);
-      setMediaBySession((current) => ({
-        ...current,
-        [session.localId]: {
-          loading: false,
-          items,
-          progress: 100
-        }
-      }));
-      if (!mediaItemsCoverPaths(session.resolvedMedia, paths)) {
-        setSessions((current) =>
-          current.map((currentSession) =>
-            currentSession.localId === session.localId
-              ? {
-                  ...currentSession,
-                  resolvedMedia: mergeResolvedMedia(currentSession.resolvedMedia, outputItems)
-                }
-              : currentSession
-          )
-        );
-      }
-      return;
-    }
-    if (!force && mediaItemsCoverPaths(runtimeItems, paths)) {
-      requestedMediaKeys.current.add(requestKey);
-      clearMediaRetry(requestKey);
-      setMediaBySession((current) => ({
-        ...current,
-        [session.localId]: {
-          loading: false,
-          items: runtimeItems ?? [],
-          progress: 100
-        }
-      }));
-      return;
-    }
-    if (force) {
-      requestedMediaKeys.current.delete(requestKey);
-    }
-    if (requestedMediaKeys.current.has(requestKey)) {
-      return;
-    }
-
-    requestedMediaKeys.current.add(requestKey);
-    const existingItems = cachedItems ?? [];
-    const showInlineLoading = existingItems.length === 0 && (force || session.streaming || session.localId === latestRunId);
-    setMediaBySession((current) => ({
-      ...current,
-      [session.localId]: {
-        loading: showInlineLoading,
-        items: force ? existingItems : (current[session.localId]?.items ?? existingItems),
-        progress: showInlineLoading ? 35 : 100,
-        stage: showInlineLoading ? "Downloading generated media from the managed workspace..." : undefined
-      }
-    }));
-
-    const result = await window.managedAgents.resolveEnvironmentMedia(environmentId, paths);
-    const retryScheduled = result.ok
-      ? result.value.length === 0 && scheduleMediaRetry(session, requestKey)
-      : scheduleMediaRetry(session, requestKey);
-    if (result.ok && result.value.length > 0) {
-      clearMediaRetry(requestKey);
-      setSessions((current) =>
-        current.map((currentSession) =>
-          currentSession.localId === session.localId
-            ? {
-                ...currentSession,
-                resolvedMedia: mergeResolvedMedia(currentSession.resolvedMedia, result.value)
-              }
-            : currentSession
-        )
-      );
-    }
-    setMediaBySession((current) => ({
-      ...current,
-      [session.localId]: result.ok
-        ? (() => {
-            const items = mergeResolvedMedia(current[session.localId]?.items ?? session.resolvedMedia, result.value);
-            return {
-              loading: retryScheduled && items.length === 0,
-              items,
-              progress: retryScheduled ? 65 : 100,
-              stage: retryScheduled ? "Waiting for generated media to appear in the workspace..." : undefined,
-              error: result.value.length || retryScheduled
-                ? undefined
-                : "No generated media file was found in the downloaded workspace."
-            };
-          })()
-        : {
-            loading: retryScheduled && !(current[session.localId]?.items ?? session.resolvedMedia ?? []).length,
-            items: current[session.localId]?.items ?? session.resolvedMedia ?? [],
-            progress: retryScheduled ? 65 : (current[session.localId]?.items ?? session.resolvedMedia ?? []).length ? 100 : 0,
-            stage: retryScheduled ? "Waiting for generated media to appear in the workspace..." : undefined,
-            error: retryScheduled || (current[session.localId]?.items ?? session.resolvedMedia ?? []).length
-              ? undefined
-              : result.error.message
-          }
-    }));
   }
 
   function resetConversation() {
@@ -1982,12 +1739,6 @@ export const App = () => {
                         onReconnect={() => void reconnectSessionStream(session)}
                         onRetry={() => restoreSessionPromptForRetry(session)}
                         onCancel={() => void cancelSession(session)}
-                      />
-                      <SessionMedia
-                        state={mediaStateForSession(session)}
-                        onSave={saveMedia}
-                        onRetry={() => void resolveMediaForSession(session, true)}
-                        onOpen={setActiveMedia}
                       />
                     </div>
                   ))

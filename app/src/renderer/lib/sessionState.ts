@@ -32,18 +32,6 @@ export const timelineItemsForSession = (session: Session): TimelineItem[] => {
   ];
 };
 
-export const mediaSearchTextForSession = (session: Session): string =>
-  [
-    extractInteractionOutputText(session.seed),
-    ...timelineItemsForSession(session).flatMap((item) => [
-      item.summary,
-      item.body,
-      ...(item.details?.flatMap((detail) => [detail.summary, detail.body]) ?? [])
-    ])
-  ]
-    .filter((value): value is string => Boolean(value))
-    .join("\n");
-
 export const patchSeedFromStreamEvent = (
   seed: Interaction | undefined,
   event: InteractionStreamEvent

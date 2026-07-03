@@ -32,7 +32,6 @@ yarn-error.log*
 pnpm-debug.log*
 
 # Managed-agent snapshots and downloaded sandboxes
-agent-projects/
 snapshot_env.tar
 snapshot*.tar
 snapshot*.tar.gz

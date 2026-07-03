@@ -66,3 +66,13 @@ export const outputMediaItem = (file: EnvironmentOutputFile): ResolvedEnvironmen
         mediaType: file.mediaType
       }
     : undefined;
+
+export const textFileNameForLabel = (label: string): string => {
+  const stem = label
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "agent-output";
+  return stem.endsWith(".md") || stem.endsWith(".txt") ? stem : `${stem}.md`;
+};

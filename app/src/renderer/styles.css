@@ -3725,16 +3725,6 @@ button:disabled {
   margin-bottom: 8px;
 }
 
-.session-media {
-  display: grid;
-  gap: 10px;
-  padding: 10px;
-  background: rgba(255, 255, 255, 0.78);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-sm);
-}
-
 .media-card {
   display: grid;
   gap: 7px;
@@ -5119,15 +5109,6 @@ button:disabled {
 }
 
 /* ---- generated media cards ---- */
-.chat-app .session-media {
-  margin-top: 12px;
-  padding: 0;
-  gap: 12px;
-  border: none;
-  background: none;
-  box-shadow: none;
-}
-
 .chat-app .media-card {
   border-radius: 12px;
   overflow: hidden;

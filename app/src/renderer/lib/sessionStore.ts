@@ -1,5 +1,5 @@
 import type { Interaction, InteractionCreateRequest, InteractionStreamEvent, ManagedAgent } from "@sdk";
-import type { IpcError, PersistedSession, ResolvedEnvironmentMedia } from "../../shared/electron-api";
+import type { IpcError, PersistedSession } from "../../shared/electron-api";
 import type { ImageAttachmentMeta, Session } from "./builderState";
 
 const MAX_STORED_SESSIONS = 200;
@@ -119,28 +119,6 @@ const sanitizeError = (value: unknown): IpcError | undefined => {
   };
 };
 
-const isMediaType = (value: unknown): value is ResolvedEnvironmentMedia["mediaType"] =>
-  value === "image" || value === "video" || value === "audio";
-
-const sanitizeResolvedMedia = (value: unknown): ResolvedEnvironmentMedia[] | undefined => {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-  const media = value.filter((item): item is ResolvedEnvironmentMedia => {
-    if (!isRecord(item)) {
-      return false;
-    }
-    return (
-      typeof item.requestedPath === "string" &&
-      typeof item.path === "string" &&
-      typeof item.url === "string" &&
-      (typeof item.savedPath === "undefined" || typeof item.savedPath === "string") &&
-      isMediaType(item.mediaType)
-    );
-  });
-  return media.length ? media : undefined;
-};
-
 const sanitizeImageAttachments = (value: unknown): ImageAttachmentMeta[] | undefined => {
   if (!Array.isArray(value)) {
     return undefined;
@@ -202,7 +180,6 @@ export const sanitizeSessionHistory = (value: unknown): Session[] => {
           ? item.completedAt
           : undefined,
       error: sanitizeError(item.error),
-      resolvedMedia: sanitizeResolvedMedia(item.resolvedMedia),
       imageAttachments: sanitizeImageAttachments(item.imageAttachments),
       parentLocalId: typeof item.parentLocalId === "string" ? item.parentLocalId : undefined
     });

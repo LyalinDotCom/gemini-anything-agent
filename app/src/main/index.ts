@@ -4,7 +4,6 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   existsSync,
   createReadStream,
-  createWriteStream,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -16,8 +15,6 @@ import {
 import { copyFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
-import type { ReadableStream as NodeWebReadableStream } from "node:stream/web";
 import { promisify } from "node:util";
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -195,16 +192,16 @@ const sandboxEnvContent = (): string =>
     `GEMINI_ANYTHING_TRANSCRIBE_MODEL=${envValueOrDefault(process.env.GEMINI_ANYTHING_TRANSCRIBE_MODEL, "gemini-3.5-flash")}`
   ].join("\n") + "\n";
 
-const readAgentAsset = (relativePath: string, fallback: string): string => {
+// agents/ is the single source of truth for everything deployed into the
+// managed agent — a missing file is a hard error, never a silent fallback,
+// so the folder can be inspected and tuned as exactly what the agent runs.
+const readAgentAsset = (relativePath: string): string => {
   const path = join(AGENT_ASSETS_ROOT, relativePath);
-  return existsSync(path) ? readFileSync(path, "utf8") : fallback;
+  if (!existsSync(path)) {
+    throw new Error(`Agent asset missing: ${path} (see agents/README.md).`);
+  }
+  return readFileSync(path, "utf8");
 };
-
-const defaultAnythingSystemInstruction =
-  "You are Gemini Anything Agent. Use native tools for text, coding, planning, research, file work, and artifact transformations. Use gai only for new image, video, text-to-speech, music generation, and audio transcription. For transcription, save a transcript file and report its path instead of pasting transcript contents.";
-
-const defaultPlainAgentSystemInstruction =
-  "You are Gemini Anything Agent running in plain native mode. Use only the managed agent's built-in tools for text, coding, planning, research, file work, analysis, and artifacts. Do not assume a project-specific media CLI, media skill, or sandbox .env exists.";
 
 const anythingAgentId = (): string => process.env.GEMINI_ANYTHING_AGENT_ID?.trim() || DEFAULT_AGENT_ID;
 
@@ -237,9 +234,7 @@ const currentInvocationContext = (includeSpecializedTools = specializedToolsEnab
 
 const anythingSystemInstructionForRequest = (request: InteractionCreateRequest): string => {
   const includeSpecializedTools = specializedToolsEnabled();
-  const base = includeSpecializedTools
-    ? readAgentAsset("system-prompt.md", defaultAnythingSystemInstruction)
-    : defaultPlainAgentSystemInstruction;
+  const base = readAgentAsset(includeSpecializedTools ? "system-prompt.md" : "system-prompt-plain.md");
   const override = request.system_instruction?.trim();
   return [
     base,
@@ -330,35 +325,17 @@ const buildAnythingAgentDefinition = (
         {
           type: "inline" as const,
           target: ".agents/bin/gai",
-          content: readAgentAsset(
-            "bin/gai",
-            [
-              "#!/usr/bin/env bash",
-              "set -euo pipefail",
-              "if [ \"${GEMINI_API_KEY:-}\" = \"PLACEHOLDER\" ]; then unset GEMINI_API_KEY; fi",
-              "if [ -f /.env ]; then set -a; . /.env; set +a; fi",
-              "if [ \"${GEMINI_API_KEY:-}\" = \"PLACEHOLDER\" ]; then unset GEMINI_API_KEY; fi",
-              "export NODE_USE_ENV_PROXY=\"${NODE_USE_ENV_PROXY:-1}\"",
-              "exec npx -y \"${GEMINI_ANYTHING_NPM_PACKAGE:-@lyalindotcom/gai}@${GEMINI_ANYTHING_NPM_VERSION:-latest}\" \"$@\"",
-              ""
-            ].join("\n")
-          )
+          content: readAgentAsset("bin/gai")
         },
         {
           type: "inline" as const,
           target: ".agents/AGENTS.md",
-          content: readAgentAsset(
-            "AGENTS.md",
-            "# Gemini Anything Agent\n\nUse native managed-agent tools for normal work. Use gai only for image, video, text-to-speech, music generation, and audio transcription. For transcription, write a file and report its path instead of pasting transcript contents.\n"
-          )
+          content: readAgentAsset("AGENTS.md")
         },
         {
           type: "inline" as const,
           target: ".agents/skills/gemini-anything/SKILL.md",
-          content: readAgentAsset(
-            "skills/gemini-anything/SKILL.md",
-            "# Gemini Anything Media Skill\n\nUse bash /.agents/bin/gai for image, video, tts, music generation, and audio transcription. For transcription, write a file and report its path instead of pasting transcript contents.\n"
-          )
+          content: readAgentAsset("skills/gemini-anything/SKILL.md")
         },
         {
           type: "inline" as const,
@@ -370,9 +347,9 @@ const buildAnythingAgentDefinition = (
   const definition: AgentDefinition = {
     id: agentId,
     base_agent: ANTIGRAVITY_BASE_AGENT,
-    system_instruction: includeSpecializedTools
-      ? readAgentAsset("system-prompt.md", defaultAnythingSystemInstruction)
-      : defaultPlainAgentSystemInstruction,
+    system_instruction: readAgentAsset(
+      includeSpecializedTools ? "system-prompt.md" : "system-prompt-plain.md"
+    ),
     tools: [
       { type: "code_execution" },
       { type: "google_search" },
@@ -909,25 +886,17 @@ const withEnvironmentSnapshotLock = async <T,>(
 };
 
 /**
- * Streams an environment snapshot tar straight to disk. The old path buffered
- * the entire tar as an ArrayBuffer plus a Buffer copy (2x peak memory) and
- * wrote it with a blocking writeFileSync — a multi-GB snapshot froze the app.
+ * Downloads an environment snapshot tar straight to disk via the GenAI SDK.
  * Writes to a temp file and renames so readers never see a truncated tar.
  */
 const downloadSnapshotTarTo = async (environmentId: string, filePath: string): Promise<void> => {
   const partialPath = `${filePath}.partial`;
-  const download = await createClient().downloadEnvironmentSnapshotStream(environmentId);
   try {
-    await pipeline(
-      Readable.fromWeb(download.stream as unknown as NodeWebReadableStream<Uint8Array>),
-      createWriteStream(partialPath)
-    );
+    await createClient().downloadEnvironmentSnapshotTo(environmentId, partialPath);
     renameSync(partialPath, filePath);
   } catch (error) {
     rmSync(partialPath, { force: true });
     throw error;
-  } finally {
-    download.cleanup();
   }
 };
 
@@ -1139,7 +1108,7 @@ const scheduleStreamBufferCleanup = (streamId: string, buffer: StreamBuffer): vo
 };
 
 // Seeded from wall-clock so sequence values stay above anything persisted by a
-// previous app run; the renderer dedups events by seq across push + snapshot.
+// previous app run; the renderer sorts merged events by seq for canonical order.
 let nextStreamEventSeq = Date.now() * 1000;
 
 const rememberStreamEvent = (

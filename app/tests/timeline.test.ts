@@ -383,14 +383,38 @@ describe("firstLine", () => {
 });
 
 describe("stream event merging", () => {
-  it("keeps legitimately identical deltas that carry distinct seq values", () => {
+  it("keeps legitimately identical deltas delivered in the same batch", () => {
     const delta = { event_type: "step.delta", index: 1, delta: { text: "\n\n" } };
-    const merged = mergeStreamEvents(
-      [{ ...delta, seq: 10 }],
-      [{ ...delta, seq: 11 }]
-    );
+    const merged = mergeStreamEvents([], [{ ...delta, seq: 10 }, { ...delta, seq: 11 }]);
 
     expect(merged).toHaveLength(2);
+  });
+
+  it("dedups a full id-less replay whose events carry fresh seq stamps", () => {
+    // The live API currently sends no event ids, and a reconnect replays the
+    // whole stream with new local seqs — content identity must absorb it.
+    const original: InteractionStreamEvent[] = [
+      { event_type: "step.start", index: 0, step: { type: "thought" }, seq: 1 },
+      { event_type: "step.delta", index: 0, delta: { text: "hello" }, seq: 2 },
+      { event_type: "step.delta", index: 0, delta: { text: "hello" }, seq: 3 }
+    ];
+    const replayed = original.map((event, position) => ({ ...event, seq: 100 + position }));
+    const merged = mergeStreamEvents(original, replayed);
+
+    expect(merged).toHaveLength(3);
+    expect(merged.map((event) => event.seq)).toEqual([1, 2, 3]);
+  });
+
+  it("appends replay events beyond the copies it already has", () => {
+    const delta = { event_type: "step.delta", index: 0, delta: { text: "hi" } };
+    const merged = mergeStreamEvents(
+      [{ ...delta, seq: 1 }],
+      [{ ...delta, seq: 50 }, { ...delta, seq: 51 }]
+    );
+
+    // First replay copy matches the existing one; the second is genuinely new.
+    expect(merged).toHaveLength(2);
+    expect(merged.map((event) => event.seq)).toEqual([1, 51]);
   });
 
   it("dedups the same event arriving via push and snapshot channels", () => {

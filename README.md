@@ -90,11 +90,15 @@ Path: `agents/`
 
 Mounted into the remote sandbox:
 
-- `agents/system-prompt.md`
+- `agents/system-prompt.md` (or `agents/system-prompt-plain.md` when specialized tools are off)
 - `agents/AGENTS.md`
 - `agents/skills/gemini-anything/SKILL.md`
 - `agents/bin/gai`
 - generated `.env`
+
+This folder is the single source of truth — edit any file and the app
+redeploys the agent automatically on the next run (config-hash drift
+detection). See `agents/README.md` for the full mapping.
 
 The managed agent is the action brain: code, tasks, analysis, research, browsing, file work, and deciding when media generation is needed.
 

@@ -121,32 +121,45 @@ export const completedAtForInteraction = (
     ? terminalCompletedAt(session, completedAt)
     : session.completedAt;
 
-// Identity priority: the server's event_id first (a resume replay re-sends
-// events with fresh local seq stamps, so seq must not shadow it), then the
-// main-process seq, which lets two legitimately identical id-less deltas
-// both survive while push/snapshot double-delivery dedups.
+// Content identity for an event. The server does not currently send event
+// ids, and the local seq changes on every delivery (a resume replay re-stamps
+// everything), so identity must come from the payload itself — with seq
+// stripped so a replayed copy hashes identically to the original.
 const streamEventKey = (event: InteractionStreamEvent): string => {
   if (typeof event.event_id === "string" && event.event_id) {
     return `id:${event.event_id}`;
   }
-  if (typeof event.seq === "number") {
-    return `seq:${event.seq}`;
-  }
-  return `${event.event_type}:${event.index ?? ""}:${JSON.stringify(event).slice(0, 500)}`;
+  const { seq: _seq, ...payload } = event;
+  return `${event.event_type}:${event.index ?? ""}:${JSON.stringify(payload).slice(0, 500)}`;
 };
 
+/**
+ * Merges stream events idempotently across all delivery paths (live push,
+ * 1s snapshot polls, and full replays after a stream reconnect). Identity is
+ * content + occurrence count: the nth identical id-less event matches the nth
+ * existing copy, so replays dedupe while a run that legitimately emits the
+ * same delta twice keeps both.
+ */
 export const mergeStreamEvents = (
   current: InteractionStreamEvent[] | undefined,
   incoming: InteractionStreamEvent[]
 ): InteractionStreamEvent[] => {
   const merged = [...(current ?? [])];
-  const seen = new Set(merged.map(streamEventKey));
+  const existingCounts = new Map<string, number>();
+  for (const event of merged) {
+    const key = streamEventKey(event);
+    existingCounts.set(key, (existingCounts.get(key) ?? 0) + 1);
+  }
+  const incomingCounts = new Map<string, number>();
   for (const event of incoming) {
     const key = streamEventKey(event);
-    if (!seen.has(key)) {
-      merged.push(event);
-      seen.add(key);
+    const occurrence = (incomingCounts.get(key) ?? 0) + 1;
+    incomingCounts.set(key, occurrence);
+    if (occurrence <= (existingCounts.get(key) ?? 0)) {
+      continue; // this copy is already represented (replay / double delivery)
     }
+    merged.push(event);
+    existingCounts.set(key, (existingCounts.get(key) ?? 0) + 1);
   }
   // Canonical order by seq (push and snapshot arrivals interleave); the sort
   // is stable, so anything without a seq keeps its arrival order.

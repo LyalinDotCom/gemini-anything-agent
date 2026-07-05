@@ -352,8 +352,7 @@ const run = async () => {
       return;
     }
     const out = values["snapshot-out"] ?? "snapshot_env.tar";
-    const buffer = await client.downloadEnvironmentSnapshot(environmentId);
-    await writeFile(out, Buffer.from(buffer));
+    await client.downloadEnvironmentSnapshotTo(environmentId, out);
     console.log(`Wrote ${out}.`);
     return;
   }

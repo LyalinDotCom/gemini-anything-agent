@@ -1,465 +1,252 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  ctorOptions: [] as Array<Record<string, unknown>>,
+  agents: {
+    create: vi.fn(),
+    list: vi.fn(),
+    get: vi.fn(),
+    delete: vi.fn()
+  },
+  interactions: {
+    create: vi.fn(),
+    get: vi.fn(),
+    delete: vi.fn(),
+    cancel: vi.fn()
+  },
+  files: {
+    download: vi.fn()
+  }
+}));
+
+vi.mock("@google/genai", () => {
+  class ApiError extends Error {
+    status: number;
+    constructor(options: { message: string; status: number }) {
+      super(options.message);
+      this.name = "ApiError";
+      this.status = options.status;
+    }
+  }
+  class GoogleGenAI {
+    agents = mocks.agents;
+    interactions = mocks.interactions;
+    files = mocks.files;
+    constructor(options: Record<string, unknown>) {
+      mocks.ctorOptions.push(options);
+    }
+  }
+  return { GoogleGenAI, ApiError };
+});
+
+import { ApiError } from "@google/genai";
 import {
   GeminiApiConnectionError,
+  GeminiApiError,
   GeminiApiKeyMissingError,
-  GeminiManagedAgentsClient,
-  createStarterAgentDefinition,
-  extractInteractionOutputText,
-  readInteractionStream,
-  validateAgentDefinition,
-  validateInteractionCreate
+  GeminiApiValidationError,
+  GeminiManagedAgentsClient
 } from "../src/sdk";
 
-describe("managed agents SDK", () => {
-  it("normalizes starter definitions into the Gemini agent payload", () => {
-    const result = validateAgentDefinition(createStarterAgentDefinition("agent-lab-test"));
+const client = (overrides: Record<string, unknown> = {}) =>
+  new GeminiManagedAgentsClient({ apiKey: "test-key", ...overrides });
 
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value).toMatchObject({
-        id: "agent-lab-test",
-        base_agent: "antigravity-preview-05-2026",
-        tools: [
-          { type: "code_execution" },
-          { type: "google_search" },
-          { type: "url_context" }
-        ]
-      });
-      expect(result.value.base_environment).toMatchObject({
-        type: "remote",
-        sources: expect.arrayContaining([
-          expect.objectContaining({
-            type: "inline",
-            target: ".agents/AGENTS.md"
-          })
-        ])
-      });
+const streamOf = (events: unknown[], options: { hang?: boolean } = {}) => ({
+  async *[Symbol.asyncIterator]() {
+    for (const event of events) {
+      yield event;
     }
-  });
-
-  it("sends the expected create request headers and body", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      new Response(JSON.stringify({ id: "agent-lab-test" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" }
-      })
-    );
-    const client = new GeminiManagedAgentsClient({
-      apiKey: "test-key",
-      fetch: fetchMock,
-      timeoutMs: 1_000
-    });
-
-    await client.createAgent(createStarterAgentDefinition("agent-lab-test"));
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as Parameters<typeof fetch>;
-    expect(url).toBe("https://generativelanguage.googleapis.com/v1beta/agents");
-    expect(init?.method).toBe("POST");
-    expect(init?.headers).toMatchObject({
-      "x-goog-api-key": "test-key",
-      "Api-Revision": "2026-05-20",
-      "Content-Type": "application/json"
-    });
-    expect(JSON.parse(init?.body as string)).toMatchObject({
-      id: "agent-lab-test",
-      base_agent: "antigravity-preview-05-2026"
-    });
-  });
-
-  it("requires interaction environment before making live calls", () => {
-    const result = validateInteractionCreate({
-      agent: "agent-lab-test",
-      input: "hello"
-    } as never);
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.errors.join("\n")).toContain("environment");
+    if (options.hang) {
+      await new Promise(() => undefined); // never settles
     }
-  });
+  }
+});
 
-  it("rejects background interactions when store is explicitly off", () => {
-    const result = validateInteractionCreate({
-      agent: "agent-lab-test",
-      input: "hello",
-      environment: "remote",
-      store: false,
-      background: true
-    });
+const validRequest = {
+  agent: "gemini-anything-agent",
+  input: "hello",
+  environment: "remote" as const,
+  store: true
+};
 
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.errors.join("\n")).toContain("background=true requires store=true");
+beforeEach(() => {
+  mocks.ctorOptions.length = 0;
+  for (const group of [mocks.agents, mocks.interactions, mocks.files]) {
+    for (const fn of Object.values(group)) {
+      fn.mockReset();
     }
+  }
+});
+
+describe("GenAI SDK adapter", () => {
+  it("requires an API key before any live call", async () => {
+    const bare = new GeminiManagedAgentsClient({});
+    await expect(bare.getInteraction("int-1")).rejects.toBeInstanceOf(GeminiApiKeyMissingError);
+    expect(mocks.interactions.get).not.toHaveBeenCalled();
   });
 
-  it("sends environment in interaction requests", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      new Response(JSON.stringify({ id: "interaction-test", environment_id: "env-test" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" }
-      })
-    );
-    const client = new GeminiManagedAgentsClient({
-      apiKey: "test-key",
-      fetch: fetchMock,
-      timeoutMs: 1_000
-    });
+  it("splits the versioned base URL and configures headers and no auto-retries", async () => {
+    mocks.interactions.get.mockResolvedValue({ id: "int-1" });
+    await client({
+      baseUrl: "https://example.test/v1beta",
+      apiRevision: "2026-05-20"
+    }).getInteraction("int-1");
 
-    await client.createInteraction({
-      agent: "agent-lab-test",
-      input: "hello",
-      environment: "remote",
-      store: true
-    });
-
-    const [url, init] = fetchMock.mock.calls[0] as Parameters<typeof fetch>;
-    expect(url).toBe("https://generativelanguage.googleapis.com/v1beta/interactions");
-    expect(JSON.parse(init?.body as string)).toMatchObject({
-      agent: "agent-lab-test",
-      input: "hello",
-      environment: "remote",
-      store: true
-    });
+    const options = mocks.ctorOptions[0] as {
+      apiKey: string;
+      httpOptions: { baseUrl: string; apiVersion: string; headers: Record<string, string>; retryOptions: { attempts: number } };
+    };
+    expect(options.apiKey).toBe("test-key");
+    expect(options.httpOptions.baseUrl).toBe("https://example.test");
+    expect(options.httpOptions.apiVersion).toBe("v1beta");
+    expect(options.httpOptions.headers["Api-Revision"]).toBe("2026-05-20");
+    // POST /interactions must never be silently replayed by client retries.
+    expect(options.httpOptions.retryOptions.attempts).toBe(1);
   });
 
-  it("sends GA interaction options in create requests", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      new Response(JSON.stringify({ id: "interaction-test", status: "queued" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" }
-      })
-    );
-    const client = new GeminiManagedAgentsClient({
-      apiKey: "test-key",
-      fetch: fetchMock,
-      timeoutMs: 1_000
-    });
+  it("validates interaction requests before calling the SDK", async () => {
+    await expect(
+      client().createInteraction({ ...validRequest, store: false, background: true })
+    ).rejects.toBeInstanceOf(GeminiApiValidationError);
+    expect(mocks.interactions.create).not.toHaveBeenCalled();
+  });
 
-    await client.createInteraction({
-      agent: "agent-lab-test",
+  it("creates non-streaming interactions with stream:false and normalized fields", async () => {
+    mocks.interactions.create.mockResolvedValue({ id: "int-1", status: "in_progress" });
+    const interaction = await client().createInteraction({ ...validRequest, background: true });
+
+    expect(interaction.id).toBe("int-1");
+    const params = mocks.interactions.create.mock.calls[0][0];
+    expect(params).toMatchObject({
+      agent: "gemini-anything-agent",
       input: "hello",
       environment: "remote",
       store: true,
       background: true,
-      service_tier: "flex",
-      agent_config: {
-        type: "dynamic",
-        thinking_summaries: "auto"
-      }
-    });
-
-    const [, init] = fetchMock.mock.calls[0] as Parameters<typeof fetch>;
-    expect(JSON.parse(init?.body as string)).toMatchObject({
-      agent: "agent-lab-test",
-      input: "hello",
-      environment: "remote",
-      store: true,
-      background: true,
-      service_tier: "flex",
-      agent_config: {
-        type: "dynamic",
-        thinking_summaries: "auto"
-      }
+      stream: false
     });
   });
 
-  it("extracts final text from model_output steps when output_text is absent", () => {
-    expect(
-      extractInteractionOutputText({
-        id: "interaction-test",
-        status: "completed",
-        environment_id: "env-test",
-        steps: [
-          {
-            type: "thought",
-            summary: [{ type: "text", text: "hidden reasoning summary" }]
-          },
-          {
-            type: "model_output",
-            content: [{ type: "text", text: "READY" }]
-          }
-        ]
-      })
-    ).toBe("READY");
+  it("validates agent definitions before creating agents", async () => {
+    await expect(
+      client().createAgent({ id: "x", base_agent: "not-a-real-base" as never })
+    ).rejects.toBeInstanceOf(GeminiApiValidationError);
+    expect(mocks.agents.create).not.toHaveBeenCalled();
   });
 
-  it("parses interaction server-sent events", async () => {
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(
-          encoder.encode(
-            'event: interaction.created\ndata: {"interaction":{"id":"int-1","status":"in_progress"},"event_type":"interaction.created"}\n\n'
-          )
-        );
-        controller.enqueue(
-          encoder.encode(
-            'event: step.delta\ndata: {"index":0,"delta":{"type":"text","text":"hello"},"event_type":"step.delta"}\n\n'
-          )
-        );
-        controller.enqueue(encoder.encode("event: done\ndata: [DONE]\n\n"));
-        controller.close();
-      }
-    });
+  it("maps SDK ApiError to GeminiApiError with the HTTP status", async () => {
+    mocks.agents.get.mockRejectedValue(new ApiError({ message: "unknown agent name", status: 404 }));
+    const error = await client().getAgent("missing").catch((thrown: unknown) => thrown);
 
-    const events = [];
-    for await (const event of readInteractionStream(stream)) {
-      events.push(event);
-    }
-
-    expect(events).toEqual([
-      {
-        event_type: "interaction.created",
-        event_id: undefined,
-        interaction: { id: "int-1", status: "in_progress" }
-      },
-      {
-        event_type: "step.delta",
-        event_id: undefined,
-        index: 0,
-        delta: { type: "text", text: "hello" }
-      },
-      {
-        event_type: "done",
-        event_id: undefined
-      }
-    ]);
+    expect(error).toBeInstanceOf(GeminiApiError);
+    expect((error as GeminiApiError).status).toBe(404);
+    expect((error as GeminiApiError).message).toContain("unknown agent name");
   });
 
-  it("streams interactions with stream=true", async () => {
-    const encoder = new TextEncoder();
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      new Response(
-        new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(
-              encoder.encode(
-                'event: interaction.completed\ndata: {"interaction":{"id":"int-1","status":"completed","usage":{"total_tokens":12}},"event_type":"interaction.completed"}\n\n'
-              )
-            );
-            controller.close();
-          }
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "text/event-stream" }
-        }
-      )
+  it("wraps transport failures as connection errors but lets aborts surface as themselves", async () => {
+    mocks.interactions.get.mockRejectedValue(new TypeError("fetch failed"));
+    await expect(client().getInteraction("int-1")).rejects.toBeInstanceOf(GeminiApiConnectionError);
+
+    const abort = new Error("stream cancelled");
+    abort.name = "AbortError";
+    mocks.interactions.get.mockRejectedValue(abort);
+    await expect(client().getInteraction("int-1")).rejects.toBe(abort);
+  });
+
+  it("requests idempotent GET retries from the SDK", async () => {
+    mocks.interactions.get.mockResolvedValue({ id: "int-1" });
+    await client().getInteraction("int-1");
+    expect(mocks.interactions.get).toHaveBeenCalledWith("int-1", null, { maxRetries: 3 });
+  });
+
+  it("streams interaction events and throws on stream error events", async () => {
+    mocks.interactions.create.mockResolvedValue(
+      streamOf([
+        { event_type: "step.start", index: 0, step: { type: "model_output" }, event_id: "evt-1" },
+        { event_type: "error", error: { message: "boom" } }
+      ])
     );
-    const client = new GeminiManagedAgentsClient({
-      apiKey: "test-key",
-      fetch: fetchMock,
-      timeoutMs: 1_000
-    });
 
-    const events = [];
-    for await (const event of client.createInteractionStream({
-      agent: "agent-lab-test",
-      input: "hello",
-      environment: "remote",
-      store: true
-    })) {
-      events.push(event);
-    }
-
-    const [, init] = fetchMock.mock.calls[0] as Parameters<typeof fetch>;
-    expect(JSON.parse(init?.body as string)).toMatchObject({
-      agent: "agent-lab-test",
-      input: "hello",
-      environment: "remote",
-      store: true,
-      stream: true
-    });
-    expect(events[0].interaction?.usage?.total_tokens).toBe(12);
-  });
-
-  it("does not arm the default request timeout for foreground streams", async () => {
-    vi.useFakeTimers();
-    const outer = new AbortController();
-    let fetchSignal: AbortSignal | undefined;
-    const fetchMock = vi.fn<typeof fetch>(
-      async (_url, init) =>
-        new Promise<Response>((_resolve, reject) => {
-          fetchSignal = init?.signal as AbortSignal | undefined;
-          fetchSignal?.addEventListener("abort", () => reject(fetchSignal?.reason), { once: true });
-        })
-    );
-    const client = new GeminiManagedAgentsClient({
-      apiKey: "test-key",
-      fetch: fetchMock,
-      timeoutMs: 1
-    });
-
-    const stream = (async () => {
-      const events = [];
-      for await (const event of client.createInteractionStream({
-        agent: "agent-lab-test",
-        input: "hello",
-        environment: "remote",
-        store: false
-      }, { signal: outer.signal })) {
+    const events: unknown[] = [];
+    const consume = async () => {
+      for await (const event of client().createInteractionStream(validRequest)) {
         events.push(event);
       }
-      return events;
-    })();
+    };
 
+    await expect(consume()).rejects.toThrow("boom");
+    expect(events).toHaveLength(1);
+    const params = mocks.interactions.create.mock.calls[0][0];
+    expect(params.stream).toBe(true);
+  });
+
+  it("passes the caller's abort signal through to the SDK stream request", async () => {
+    mocks.interactions.create.mockResolvedValue(streamOf([{ event_type: "done" }]));
+    const controller = new AbortController();
+
+    for await (const _event of client().createInteractionStream(validRequest, {
+      signal: controller.signal
+    })) {
+      // drain
+    }
+
+    const requestOptions = mocks.interactions.create.mock.calls[0][1];
+    expect(requestOptions.fetchOptions.signal).toBe(controller.signal);
+  });
+
+  it("resumes streams from the last event id and stops on the done event", async () => {
+    mocks.interactions.get.mockResolvedValue(
+      streamOf(
+        [
+          { event_type: "step.delta", index: 0, delta: { text: "hi" }, event_id: "evt-4" },
+          { event_type: "done" },
+          { event_type: "step.delta", index: 0, delta: { text: "never seen" } }
+        ],
+        { hang: true }
+      )
+    );
+
+    const events: Array<{ event_type: string }> = [];
+    for await (const event of client().resumeInteractionStream("int-1", { lastEventId: "evt-3" })) {
+      events.push(event as { event_type: string });
+    }
+
+    expect(events.map((event) => event.event_type)).toEqual(["step.delta", "done"]);
+    const [id, params] = mocks.interactions.get.mock.calls[0];
+    expect(id).toBe("int-1");
+    expect(params).toMatchObject({ stream: true, last_event_id: "evt-3" });
+  });
+
+  it("abandons a stalled stream via the inactivity watchdog", async () => {
+    vi.useFakeTimers();
     try {
-      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-      await vi.advanceTimersByTimeAsync(10);
-      expect(fetchSignal?.aborted).toBe(false);
-      outer.abort(new Error("stream cancelled"));
-      // Deliberate cancellation surfaces as the abort reason itself, not as a
-      // connection failure.
-      await expect(stream).rejects.toMatchObject({
-        message: "stream cancelled"
-      });
+      mocks.interactions.create.mockResolvedValue(streamOf([], { hang: true }));
+
+      const consume = (async () => {
+        for await (const _event of client().createInteractionStream(validRequest)) {
+          // never yields
+        }
+      })();
+      const guarded = expect(consume).rejects.toThrow(/stalled/);
+      // Let the generator reach the read race and register its watchdog timer
+      // before advancing the clock past the inactivity deadline.
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(180_001);
+      await guarded;
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("resumes a background interaction stream from the last event id", async () => {
-    const encoder = new TextEncoder();
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      new Response(
-        new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(
-              encoder.encode(
-                'id: evt-4\nevent: interaction.completed\ndata: {"interaction":{"id":"int-1","status":"completed"},"event_type":"interaction.completed"}\n\n'
-              )
-            );
-            controller.close();
-          }
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "text/event-stream" }
-        }
-      )
-    );
-    const client = new GeminiManagedAgentsClient({
-      apiKey: "test-key",
-      fetch: fetchMock,
-      timeoutMs: 1_000
-    });
+  it("downloads environment snapshots to a path via the SDK files API", async () => {
+    mocks.files.download.mockResolvedValue(undefined);
+    await client().downloadEnvironmentSnapshotTo("env-42", "/tmp/snapshot.tar");
 
-    const events = [];
-    for await (const event of client.resumeInteractionStream("int-1", { lastEventId: "evt-3" })) {
-      events.push(event);
-    }
-
-    const [url, init] = fetchMock.mock.calls[0] as Parameters<typeof fetch>;
-    expect(url).toBe(
-      "https://generativelanguage.googleapis.com/v1beta/interactions/int-1?stream=true&last_event_id=evt-3"
-    );
-    expect(init?.method).toBe("GET");
-    expect(events[0].event_id).toBe("evt-4");
-    expect(events[0].interaction?.status).toBe("completed");
-  });
-
-  it("cancels a server-side interaction", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      new Response(JSON.stringify({ id: "int-1", status: "cancelled" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" }
+    expect(mocks.files.download).toHaveBeenCalledWith(
+      expect.objectContaining({
+        file: "environment-env-42",
+        downloadPath: "/tmp/snapshot.tar"
       })
     );
-    const client = new GeminiManagedAgentsClient({
-      apiKey: "test-key",
-      fetch: fetchMock,
-      timeoutMs: 1_000
-    });
-
-    const interaction = await client.cancelInteraction("int-1");
-
-    const [url, init] = fetchMock.mock.calls[0] as Parameters<typeof fetch>;
-    expect(url).toBe("https://generativelanguage.googleapis.com/v1beta/interactions/int-1/cancel");
-    expect(init?.method).toBe("POST");
-    expect(interaction.status).toBe("cancelled");
-  });
-
-  it("passes abort signals to environment snapshot downloads", async () => {
-    const controller = new AbortController();
-    const fetchMock = vi.fn<typeof fetch>(
-      async (_url, init) =>
-        new Promise<Response>((resolve, reject) => {
-          const signal = init?.signal as AbortSignal | undefined;
-          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
-          controller.abort(new Error("snapshot cancelled"));
-          resolve(new Response(new Uint8Array([1, 2, 3])));
-        })
-    );
-    const client = new GeminiManagedAgentsClient({
-      apiKey: "test-key",
-      fetch: fetchMock,
-      timeoutMs: 1_000
-    });
-
-    // Deliberate cancellation surfaces as the abort reason itself, not as a
-    // connection failure.
-    await expect(client.downloadEnvironmentSnapshot("env-test", { signal: controller.signal })).rejects.toMatchObject({
-      message: "snapshot cancelled"
-    });
-    const [, init] = fetchMock.mock.calls[0] as Parameters<typeof fetch>;
-    expect((init?.signal as AbortSignal).aborted).toBe(true);
-  });
-
-  it("fails before network calls when the API key is missing", async () => {
-    const fetchMock = vi.fn();
-    const client = new GeminiManagedAgentsClient({
-      apiKey: "",
-      fetch: fetchMock,
-      timeoutMs: 1_000
-    });
-
-    await expect(client.listAgents()).rejects.toBeInstanceOf(GeminiApiKeyMissingError);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("does not read GEMINI_API_KEY from process.env", async () => {
-    const previous = process.env.GEMINI_API_KEY;
-    process.env.GEMINI_API_KEY = "ambient-key";
-    try {
-      const fetchMock = vi.fn();
-      const client = new GeminiManagedAgentsClient({
-        fetch: fetchMock,
-        timeoutMs: 1_000
-      });
-
-      await expect(client.listAgents()).rejects.toBeInstanceOf(GeminiApiKeyMissingError);
-      expect(fetchMock).not.toHaveBeenCalled();
-    } finally {
-      if (previous === undefined) {
-        delete process.env.GEMINI_API_KEY;
-      } else {
-        process.env.GEMINI_API_KEY = previous;
-      }
-    }
-  });
-
-  it("wraps transport failures with endpoint context", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => {
-      throw new TypeError("fetch failed");
-    });
-    const client = new GeminiManagedAgentsClient({
-      apiKey: "test-key",
-      fetch: fetchMock,
-      timeoutMs: 1_000
-    });
-
-    await expect(client.listAgents()).rejects.toMatchObject({
-      name: "GeminiApiConnectionError",
-      message: expect.stringContaining("GET https://generativelanguage.googleapis.com/v1beta/agents"),
-      details: expect.objectContaining({
-        method: "GET",
-        url: "https://generativelanguage.googleapis.com/v1beta/agents",
-        causeName: "TypeError",
-        causeMessage: "fetch failed"
-      })
-    });
-    await expect(client.listAgents()).rejects.toBeInstanceOf(GeminiApiConnectionError);
   });
 });

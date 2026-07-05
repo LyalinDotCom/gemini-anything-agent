@@ -76,6 +76,61 @@ const STREAM_REQUEST_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 const isAbortError = (error: unknown): boolean =>
   error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError");
 
+const toPlainData = <T>(value: unknown, seen = new WeakSet<object>()): T => {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value as T;
+  }
+  if (typeof value === "bigint") {
+    return value.toString() as T;
+  }
+  if (typeof value !== "object") {
+    return undefined as T;
+  }
+  if (value instanceof Date) {
+    return value.toISOString() as T;
+  }
+  if (seen.has(value)) {
+    return undefined as T;
+  }
+  seen.add(value);
+  try {
+    if (Array.isArray(value)) {
+      return value.map((item) => toPlainData(item, seen)) as T;
+    }
+    if (value instanceof Map) {
+      return Object.fromEntries(
+        [...value.entries()].map(([key, item]) => [String(key), toPlainData(item, seen)])
+      ) as T;
+    }
+    if (value instanceof Set) {
+      return [...value].map((item) => toPlainData(item, seen)) as T;
+    }
+
+    const plain: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value)) {
+      if (key === "sdkHttpResponse") {
+        continue;
+      }
+      const type = typeof item;
+      if (type === "function" || type === "symbol") {
+        continue;
+      }
+      const normalized = toPlainData(item, seen);
+      if (normalized !== undefined) {
+        plain[key] = normalized;
+      }
+    }
+    return plain as T;
+  } finally {
+    seen.delete(value);
+  }
+};
+
 /**
  * Thin adapter over the official @google/genai SDK, scoped to the Managed
  * Agents surface this app uses: agents CRUD, interactions (create/stream/
@@ -146,7 +201,7 @@ export class GeminiManagedAgentsClient {
       // from the SDK's top-level ApiError. Duck-type on the numeric status.
       const status = (error as { status?: unknown }).status;
       if (error instanceof Error && typeof status === "number") {
-        throw new GeminiApiError(status, error.message, (error as { error?: unknown }).error);
+        throw new GeminiApiError(status, error.message, toPlainData((error as { error?: unknown }).error));
       }
       throw new GeminiApiConnectionError(operation, error);
     }
@@ -159,21 +214,21 @@ export class GeminiManagedAgentsClient {
     }
     return this.call("createAgent", async () => {
       const created = await this.sdk().agents.create({ ...validation.value } as never);
-      return created as unknown as ManagedAgent;
+      return toPlainData<ManagedAgent>(created);
     });
   }
 
   async listAgents(): Promise<AgentListResponse> {
     return this.call("listAgents", async () => {
       const response = await this.sdk().agents.list(null, { maxRetries: 3 });
-      return response as unknown as AgentListResponse;
+      return toPlainData<AgentListResponse>(response);
     });
   }
 
   async getAgent(id: string): Promise<ManagedAgent> {
     return this.call("getAgent", async () => {
       const agent = await this.sdk().agents.get(id, null, { maxRetries: 3 });
-      return agent as unknown as ManagedAgent;
+      return toPlainData<ManagedAgent>(agent);
     });
   }
 
@@ -191,7 +246,7 @@ export class GeminiManagedAgentsClient {
         ...validation.value,
         stream: false
       } as never);
-      return interaction as unknown as Interaction;
+      return toPlainData<Interaction>(interaction);
     });
   }
 
@@ -235,7 +290,7 @@ export class GeminiManagedAgentsClient {
   async getInteraction(id: string): Promise<Interaction> {
     return this.call("getInteraction", async () => {
       const interaction = await this.sdk().interactions.get(id, null, { maxRetries: 3 });
-      return interaction as unknown as Interaction;
+      return toPlainData<Interaction>(interaction);
     });
   }
 
@@ -246,7 +301,7 @@ export class GeminiManagedAgentsClient {
   async cancelInteraction(id: string): Promise<Interaction> {
     return this.call("cancelInteraction", async () => {
       const interaction = await this.sdk().interactions.cancel(id);
-      return interaction as unknown as Interaction;
+      return toPlainData<Interaction>(interaction);
     });
   }
 
@@ -302,7 +357,7 @@ export class GeminiManagedAgentsClient {
         if (result.done) {
           return;
         }
-        const event = result.value as InteractionStreamEvent;
+        const event = toPlainData<InteractionStreamEvent>(result.value);
         if (event.event_type === "error" || event.error) {
           throw new Error(event.error?.message ?? "Gemini interaction stream failed.");
         }

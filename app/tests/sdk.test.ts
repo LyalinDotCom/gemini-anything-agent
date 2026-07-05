@@ -143,6 +143,57 @@ describe("GenAI SDK adapter", () => {
     expect((error as GeminiApiError).message).toContain("unknown agent name");
   });
 
+  it("returns clone-safe plain data from SDK response models", async () => {
+    const cyclic: Record<string, unknown> = { keep: "yes" };
+    cyclic.self = cyclic;
+    const response = Object.assign(new (class AgentModel {
+      helper() {
+        return "sdk helper";
+      }
+    })(), {
+      id: "gemini-anything-agent",
+      base_agent: "antigravity-preview-05-2026",
+      created_at: new Date("2026-07-05T12:00:00.000Z"),
+      metadata: new Map([["mode", "test"]]),
+      nested: {
+        keep: "value",
+        helper: () => "not cloneable",
+        cyclic
+      },
+      sdkHttpResponse: {
+        headers: { "content-type": "application/json" },
+        responseInternal: new Response("{}"),
+        json: async () => ({})
+      },
+      ownHelper: () => "not cloneable",
+      [Symbol("sdk")]: "not cloneable"
+    });
+    Object.defineProperty(response, "transport", {
+      value: { request: "internal" },
+      enumerable: false
+    });
+    mocks.agents.get.mockResolvedValue(response);
+
+    const agent = await client().getAgent("gemini-anything-agent");
+
+    expect(() => structuredClone(agent)).not.toThrow();
+    expect(Object.getPrototypeOf(agent)).toBe(Object.prototype);
+    expect(agent).toMatchObject({
+      id: "gemini-anything-agent",
+      base_agent: "antigravity-preview-05-2026",
+      created_at: "2026-07-05T12:00:00.000Z",
+      metadata: { mode: "test" },
+      nested: {
+        keep: "value",
+        cyclic: { keep: "yes" }
+      }
+    });
+    expect(agent).not.toHaveProperty("ownHelper");
+    expect(agent).not.toHaveProperty("transport");
+    expect(agent).not.toHaveProperty("sdkHttpResponse");
+    expect((agent.nested as Record<string, unknown>)).not.toHaveProperty("helper");
+  });
+
   it("wraps transport failures as connection errors but lets aborts surface as themselves", async () => {
     mocks.interactions.get.mockRejectedValue(new TypeError("fetch failed"));
     await expect(client().getInteraction("int-1")).rejects.toBeInstanceOf(GeminiApiConnectionError);

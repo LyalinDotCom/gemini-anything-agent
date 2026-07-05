@@ -90,7 +90,6 @@ Path: `agents/`
 
 Mounted into the remote sandbox:
 
-- `agents/system-prompt.md` (or `agents/system-prompt-plain.md` when specialized tools are off)
 - `agents/AGENTS.md`
 - `agents/skills/gemini-anything/SKILL.md`
 - `agents/bin/gai`
@@ -166,7 +165,7 @@ npm run build
 
 ```text
 app/           Electron chat harness
-agents/        Managed-agent prompt, skill, and wrapper
+agents/        Managed-agent instructions (AGENTS.md), skill, and wrapper
 cli/           @lyalindotcom/gai package source
 chats/         Local conversation history written by the app, ignored by git
 docs/          Walk-through and README assets

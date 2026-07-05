@@ -6,11 +6,20 @@ this content anywhere in the code.
 
 | File | Where it goes |
 | --- | --- |
-| `system-prompt.md` | Agent `system_instruction`, and re-injected on every interaction (with live invocation context appended: date/time, sandbox paths, continuity notes). |
-| `system-prompt-plain.md` | Same, but used when specialized tools are disabled (plain native mode). |
-| `AGENTS.md` | Mounted in the sandbox at `/.agents/AGENTS.md`. |
-| `skills/gemini-anything/SKILL.md` | Mounted at `/.agents/skills/gemini-anything/SKILL.md`. |
+| `AGENTS.md` | Mounted at `/.agents/AGENTS.md` — the durable instruction layer: extended abilities, routing rules, artifact conventions, response style. |
+| `skills/gemini-anything/SKILL.md` | Mounted at `/.agents/skills/gemini-anything/SKILL.md` — detailed gai usage and guardrails. |
 | `bin/gai` | Mounted at `/.agents/bin/gai` — the media CLI wrapper the skill invokes. |
+
+## Why there is no system prompt file
+
+The base Antigravity agent's built-in prompt is always present and append-only
+— nothing a caller sends can remove it. A request-level `system_instruction`
+silently **replaces** an agent-level one, so an agent-level prompt is a
+footgun: any caller that injects per-request context would knock it out.
+AGENTS.md has neither problem — it stacks with everything and nothing can
+displace it — so all durable instructions live there. The app injects only a
+small per-request "invocation context" block (current date/time, sandbox
+paths, continuity notes), which is the one thing that must be fresh per call.
 
 The sandbox `/.env` is **not** a file here: it is generated at deploy time from
 the host `.env` (`GEMINI_API_KEY`, npm package/version, model overrides). API

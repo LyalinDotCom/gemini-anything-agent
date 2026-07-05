@@ -232,18 +232,19 @@ const currentInvocationContext = (includeSpecializedTools = specializedToolsEnab
   ].join("\n");
 };
 
+// The base agent's built-in prompt is always present and append-only, and a
+// request-level system_instruction REPLACES any agent-level one. Durable
+// behavior therefore lives in the mounted AGENTS.md (which nothing can knock
+// out); the per-request instruction carries only what must be fresh per call.
 const anythingSystemInstructionForRequest = (request: InteractionCreateRequest): string => {
-  const includeSpecializedTools = specializedToolsEnabled();
-  const base = readAgentAsset(includeSpecializedTools ? "system-prompt.md" : "system-prompt-plain.md");
   const override = request.system_instruction?.trim();
   return [
-    base,
-    currentInvocationContext(includeSpecializedTools),
+    currentInvocationContext(),
     override
       ? [
           "## Additional Per-Interaction Instruction",
           "",
-          "The following instruction was explicitly supplied for this interaction. Apply it unless it conflicts with higher-priority safety, runtime, artifact, or tool-routing rules above.",
+          "The following instruction was explicitly supplied for this interaction. Apply it unless it conflicts with higher-priority safety, runtime, artifact, or tool-routing rules.",
           "",
           override
         ].join("\n")
@@ -344,12 +345,12 @@ const buildAnythingAgentDefinition = (
         }
       ]
     : undefined;
+  // No agent-level system_instruction: the app sends a request-level one on
+  // every interaction, which would silently replace it anyway. AGENTS.md is
+  // the durable instruction layer.
   const definition: AgentDefinition = {
     id: agentId,
     base_agent: ANTIGRAVITY_BASE_AGENT,
-    system_instruction: readAgentAsset(
-      includeSpecializedTools ? "system-prompt.md" : "system-prompt-plain.md"
-    ),
     tools: [
       { type: "code_execution" },
       { type: "google_search" },

@@ -122,8 +122,8 @@ loadEnvIfPresent(ENV_LOCAL_PATH, true);
 const createClient = (): GeminiManagedAgentsClient =>
   new GeminiManagedAgentsClient({
     apiKey: envValue(process.env.GEMINI_API_KEY),
-    baseUrl: process.env.GEMINI_API_BASE_URL ?? GEMINI_API_BASE_URL,
-    apiRevision: process.env.GEMINI_API_REVISION ?? GEMINI_API_REVISION
+    baseUrl: envValueOrDefault(process.env.GEMINI_API_BASE_URL, GEMINI_API_BASE_URL),
+    apiRevision: envValueOrDefault(process.env.GEMINI_API_REVISION, GEMINI_API_REVISION)
   });
 
 const maskKey = (key?: string): string | undefined => {
@@ -1288,8 +1288,8 @@ const createWindow = (): void => {
 handle(ipcChannels.runtimeConfig, () => ({
   hasApiKey: Boolean(process.env.GEMINI_API_KEY),
   apiKeyMasked: maskKey(process.env.GEMINI_API_KEY),
-  apiRevision: process.env.GEMINI_API_REVISION ?? GEMINI_API_REVISION,
-  baseUrl: process.env.GEMINI_API_BASE_URL ?? GEMINI_API_BASE_URL,
+  apiRevision: envValueOrDefault(process.env.GEMINI_API_REVISION, GEMINI_API_REVISION),
+  baseUrl: envValueOrDefault(process.env.GEMINI_API_BASE_URL, GEMINI_API_BASE_URL),
   envPath: ENV_PATH,
   chatStorePath: LOCAL_CHAT_ROOT,
   docsLastChecked: "2026-06-22",

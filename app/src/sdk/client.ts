@@ -58,6 +58,10 @@ export class GeminiApiConnectionError extends Error {
 }
 
 const trimTrailingSlash = (value: string): string => value.replace(/\/+$/, "");
+const nonEmptyOrDefault = (value: string | undefined, fallback: string): string => {
+  const normalized = value?.trim();
+  return normalized || fallback;
+};
 
 type SendOptions = {
   signal?: AbortSignal;
@@ -148,13 +152,13 @@ export class GeminiManagedAgentsClient {
 
   constructor(options: GeminiClientOptions = {}) {
     this.apiKey = options.apiKey;
-    this.apiRevision = options.apiRevision ?? GEMINI_API_REVISION;
+    this.apiRevision = nonEmptyOrDefault(options.apiRevision, GEMINI_API_REVISION);
     this.timeoutMs = options.timeoutMs ?? 300_000;
 
     // GEMINI_API_BASE_URL historically includes the version suffix
     // ("https://…googleapis.com/v1beta"); the SDK wants host and apiVersion
     // separately.
-    const base = trimTrailingSlash(options.baseUrl ?? GEMINI_API_BASE_URL);
+    const base = trimTrailingSlash(nonEmptyOrDefault(options.baseUrl, GEMINI_API_BASE_URL));
     const versionMatch = base.match(/^(.+)\/(v[0-9]+[a-z0-9]*)$/i);
     this.baseUrl = versionMatch ? versionMatch[1] : base;
     this.apiVersion = versionMatch ? versionMatch[2] : "v1beta";

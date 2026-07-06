@@ -104,6 +104,21 @@ describe("GenAI SDK adapter", () => {
     expect(options.httpOptions.retryOptions.attempts).toBe(1);
   });
 
+  it("ignores blank API override options", async () => {
+    mocks.interactions.get.mockResolvedValue({ id: "int-1" });
+    await client({
+      baseUrl: "  ",
+      apiRevision: ""
+    }).getInteraction("int-1");
+
+    const options = mocks.ctorOptions[0] as {
+      httpOptions: { baseUrl: string; apiVersion: string; headers: Record<string, string> };
+    };
+    expect(options.httpOptions.baseUrl).toBe("https://generativelanguage.googleapis.com");
+    expect(options.httpOptions.apiVersion).toBe("v1beta");
+    expect(options.httpOptions.headers["Api-Revision"]).toBe("2026-05-20");
+  });
+
   it("validates interaction requests before calling the SDK", async () => {
     await expect(
       client().createInteraction({ ...validRequest, store: false, background: true })

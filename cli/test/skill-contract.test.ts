@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 
 const skill = readFileSync(resolve("..", "agents", "skills", "gemini-anything", "SKILL.md"), "utf8");
 const agents = readFileSync(resolve("..", "agents", "AGENTS.md"), "utf8");
-const systemPrompt = readFileSync(resolve("..", "agents", "system-prompt.md"), "utf8");
 
 describe("agent skill contract", () => {
   it("routes only specialized media work to gai", () => {
@@ -17,15 +16,18 @@ describe("agent skill contract", () => {
     expect(skill).toContain("Do not use this skill for ordinary text");
     expect(skill).toContain("audio transcription");
     expect(agents).toContain("use native managed-agent tools");
-    expect(agents).toContain("use `gai transcribe`");
+    expect(agents).toContain('use `bash "$GAI" transcribe ...`');
     expect(agents).toContain("music generation");
     expect(agents).toContain("Do not paste transcript contents");
     expect(agents).toContain("Workspace root: `/workspace`");
     expect(agents).toContain("inspect `/workspace/output`");
-    expect(systemPrompt).toContain("## Runtime Facts");
-    expect(systemPrompt).toContain("## Operating Loop");
-    expect(systemPrompt).toContain("Do not use `gai` for ordinary text answers");
-    expect(systemPrompt).toContain("do not paste the full transcript");
+  });
+
+  it("routes agent orchestration to gai agent with help discovery", () => {
+    expect(agents).toContain("Delegate work to another managed agent");
+    expect(agents).toContain("Agent orchestration:");
+    expect(agents).toContain('bash "$GAI" agent --help');
+    expect(agents).toContain("Only delete agents you created for the current task");
   });
 
   it("uses the wrapper, help discovery, and JSON output", () => {

@@ -42,7 +42,7 @@ For clear simple video requests, proceed with the lite/default route shown by `v
 
 For podcast or long narration requests, write the script to `/workspace/output/<name>.txt`, inspect `bash "$GAI" tts --help`, then use the CLI's script-file option if available while respecting whether the prompt argument is required.
 
-For music generation requests, inspect `bash "$GAI" music --help`, then use `gai music` with `--json`. Use TTS for spoken words and podcasts; use music for musical output. For clear simple music requests, use the default/clip route. Ask the user before using longer, premium, or unusually expensive music generation options.
+For music generation requests, inspect `bash "$GAI" music --help`, then use `bash "$GAI" music ... --json`. Use TTS for spoken words and podcasts; use music for musical output. For clear simple music requests, use the default/clip route. Ask the user before using longer, premium, or unusually expensive music generation options.
 
 For audio transcription requests, resolve the source first:
 
@@ -51,7 +51,7 @@ For audio transcription requests, resolve the source first:
 - If the user gives a web page URL, inspect the page with native URL/web tools and resolve the episode audio link. Look for `<audio>` sources, `og:audio`, podcast/RSS feed links, enclosure URLs, or direct `.mp3`, `.m4a`, `.wav`, `.aac`, `.ogg`, or `.flac` links. Download the resolved audio file to `/workspace/output` before transcription. If multiple plausible audio sources exist, ask a short clarification.
 - If the user refers to "this podcast", "the audio", or similar, inspect `/workspace/output` and use the newest plausible audio file when unambiguous.
 
-After resolving the local audio file, inspect `bash "$GAI" transcribe --help`, then run `gai transcribe` with `--format markdown`, `--out /workspace/output/<descriptive-transcript-name>.md`, and `--json` unless the user asks for another format. Parse the JSON for the output path, verify the transcript file exists, and do not paste the transcript contents into chat. Final response should only say whether transcription succeeded and list the transcript path for download or preview.
+After resolving the local audio file, inspect `bash "$GAI" transcribe --help`, then run `bash "$GAI" transcribe ...` with `--format markdown`, `--out /workspace/output/<descriptive-transcript-name>.md`, and `--json` unless the user asks for another format. Parse the JSON for the output path, verify the transcript file exists, and do not paste the transcript contents into chat. Final response should only say whether transcription succeeded and list the transcript path for download or preview.
 
 ## Guardrails
 

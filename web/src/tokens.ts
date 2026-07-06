@@ -1,0 +1,23 @@
+// Design tokens (Spark convention: inline styles, one dark palette).
+export const T = {
+  bg: "#0B0B0D",
+  bgElev: "#141419",
+  bgHover: "#1C1C23",
+  bgInput: "#17171D",
+  border: "#26262E",
+  borderSoft: "#1E1E25",
+  text: "#ECECF1",
+  textDim: "#9B9BA7",
+  textFaint: "#6C6C78",
+  accent: "#7C9CFF",
+  accentSoft: "rgba(124, 156, 255, 0.14)",
+  danger: "#FF6B6B",
+  dangerSoft: "rgba(255, 107, 107, 0.12)",
+  ok: "#6EE7A0",
+  warn: "#FFC66B",
+  font: "'Inter', system-ui, -apple-system, sans-serif",
+  mono: "'JetBrains Mono', ui-monospace, SFMono-Regular, monospace",
+  radius: 14,
+  radiusSm: 9,
+  sidebarW: 264,
+} as const;

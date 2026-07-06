@@ -19,7 +19,7 @@ export const MODEL_REGISTRY = [
     label: "AGY runtime",
     status: "preview",
     apiSurface: "managed-agent",
-    notes: "Preconfigured managed-agent brain; documented here but not wrapped by media commands."
+    notes: "Managed-agent brain; default base agent for `gai agent create` and runnable via `gai agent run`."
   },
   {
     id: "gemini-3.1-flash-image",
@@ -111,6 +111,9 @@ export const DEPRECATED_DEFAULT_DENYLIST = [
   "gemini-3-pro-preview",
   "lyria-2"
 ] as const;
+
+export const defaultBaseAgent = (): string =>
+  process.env.GEMINI_ANYTHING_BASE_AGENT || "antigravity-preview-05-2026";
 
 export const defaultImageModel = (): string =>
   process.env.GEMINI_ANYTHING_IMAGE_MODEL || "gemini-3.1-flash-image";

@@ -1,0 +1,19 @@
+# dependencies / build
+node_modules/
+dist/
+*.tsbuildinfo
+
+# secrets — the user-provided key must never be committed
+.env
+.env.*
+!.env.example
+
+# firebase
+.firebase/
+firebase-debug.log
+
+# misc
+.DS_Store
+coverage/
+.tmp/
+.claude/

@@ -37,6 +37,7 @@ notes/agent-bug-reports/
 !app/src/renderer/assets/
 !app/src/renderer/assets/sample-prompts/
 !app/src/renderer/assets/sample-prompts/*.png
+!web/public/*.png
 
 # Logs and local state
 *.log

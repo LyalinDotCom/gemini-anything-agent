@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0B0B0D" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Gemini Anything" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta
+      name="description"
+      content="A static AI chat app powered by your own Gemini key and server-side managed agents."
+    />
+    <title>Gemini Anything</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/app-icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      *, *::before, *::after { box-sizing: border-box; }
+      html { height: 100%; -webkit-text-size-adjust: 100%; }
+      body { height: 100%; overflow: hidden; }
+      #root { height: 100%; height: 100dvh; }
+      body {
+        margin: 0;
+        background: #0b0b0d;
+        color: #ececf1;
+        font-family: "Inter", system-ui, -apple-system, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        overscroll-behavior: none;
+        touch-action: manipulation;
+      }
+      /* iOS zooms the page when a focused field's font is <16px — keep fields ≥16px on touch. */
+      @media (pointer: coarse) {
+        input, textarea, select { font-size: 16px !important; }
+      }
+      ::selection { background: rgba(124, 156, 255, 0.35); }
+      *::-webkit-scrollbar { width: 10px; height: 10px; }
+      *::-webkit-scrollbar-thumb { background: #26262e; border-radius: 8px; border: 2px solid #0b0b0d; }
+      *::-webkit-scrollbar-track { background: transparent; }
+      textarea, input, button { font-family: inherit; }
+      @keyframes aichat-spin { to { transform: rotate(360deg); } }
+      @keyframes aichat-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+      @keyframes aichat-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+      @keyframes aichat-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.1; } }
+      /* Markdown element rhythm */
+      .md p { margin: 8px 0; }
+      .md h1, .md h2, .md h3 { margin: 16px 0 8px; line-height: 1.3; }
+      .md ul, .md ol { margin: 8px 0; padding-left: 22px; }
+      .md li { margin: 3px 0; }
+      .md blockquote { margin: 10px 0; padding: 2px 14px; border-left: 3px solid #26262e; color: #9b9ba7; }
+      .md hr { border: none; border-top: 1px solid #26262e; margin: 14px 0; }
+      /* highlight.js tokens (github-dark-ish, hand-rolled to avoid a CSS dep) */
+      .hljs { color: #e6edf3; }
+      .hljs-keyword, .hljs-selector-tag, .hljs-meta .hljs-keyword, .hljs-doctag { color: #ff7b72; }
+      .hljs-title, .hljs-title.class_, .hljs-title.function_ { color: #d2a8ff; }
+      .hljs-attr, .hljs-attribute, .hljs-literal, .hljs-number, .hljs-operator, .hljs-variable,
+      .hljs-selector-attr, .hljs-selector-class, .hljs-selector-id { color: #79c0ff; }
+      .hljs-string, .hljs-regexp, .hljs-meta .hljs-string { color: #a5d6ff; }
+      .hljs-built_in, .hljs-symbol { color: #ffa657; }
+      .hljs-comment, .hljs-code, .hljs-formula { color: #8b949e; }
+      .hljs-name, .hljs-quote, .hljs-selector-pseudo, .hljs-tag { color: #7ee787; }
+      .hljs-subst { color: #e6edf3; }
+      .hljs-section { color: #1f6feb; font-weight: bold; }
+      .hljs-bullet { color: #f2cc60; }
+      .hljs-emphasis { font-style: italic; }
+      .hljs-strong { font-weight: bold; }
+      .hljs-addition { color: #aff5b4; background-color: #033a16; }
+      .hljs-deletion { color: #ffdcd7; background-color: #67060c; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

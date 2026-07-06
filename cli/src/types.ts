@@ -5,7 +5,7 @@ export type OutputFile = {
 
 export type CommandResult = {
   ok: true;
-  capability: "image" | "video" | "tts" | "music" | "transcribe" | "models" | "doctor";
+  capability: "image" | "video" | "tts" | "music" | "transcribe" | "agent" | "models" | "doctor";
   model?: string;
   outputs?: OutputFile[];
   operation?: {

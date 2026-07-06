@@ -165,10 +165,15 @@ npm run build
 
 ```text
 app/           Electron chat harness
-agents/        Managed-agent instructions (AGENTS.md), skill, and wrapper
+web/           Browser chat app (static, Firebase-hosted; user-supplied key)
+agents/        Managed-agent instructions (AGENTS.md), skill, and wrapper — SHARED by app/ and web/
 cli/           @lyalindotcom/gai package source
 chats/         Local conversation history written by the app, ignored by git
 docs/          Walk-through and README assets
 outputs/       Local downloaded artifacts, ignored by git
 readme.html    Optional rich standalone overview
 ```
+
+Both UIs deploy the exact same agent payload from `agents/` (the web app bundles the files
+via Vite `?raw` imports; the Electron app reads them from disk) — edit once, both agents
+update on their next message via the payload fingerprint.

@@ -3,6 +3,18 @@
 import { Command } from "commander";
 import { loadEnvironment } from "./config.js";
 import { printResult } from "./output.js";
+import {
+  runAgentCancel,
+  runAgentCreate,
+  runAgentDelete,
+  runAgentDeleteInteraction,
+  runAgentGet,
+  runAgentList,
+  runAgentLs,
+  runAgentPull,
+  runAgentRun,
+  runAgentStatus
+} from "./subcommands/agent.js";
 import { runDoctor } from "./subcommands/doctor.js";
 import { runImage } from "./subcommands/image.js";
 import { listModels } from "./subcommands/models.js";
@@ -16,7 +28,7 @@ loadEnvironment();
 
 const program = new Command();
 
-const packageVersion = "0.1.5";
+const packageVersion = "0.2.0";
 
 const failureFromError = (error: unknown, capability?: string, model?: string): CommandFailure => ({
   ok: false,
@@ -53,18 +65,19 @@ const runAction = async (
 
 program
   .name("gai")
-  .description("Gemini Anything media capability CLI for managed agents")
+  .description("Gemini Anything CLI: media capabilities plus managed-agent creation and control")
   .version(packageVersion)
   .addHelpText(
     "after",
     `
 
-Run a command help page before using a media capability:
+Run a command help page before using a capability:
   gai image --help
   gai video --help
   gai tts --help
   gai music --help
   gai transcribe --help
+  gai agent --help
 
 Use --json for machine-readable output. Generated files are written to --out when provided.`
   );
@@ -176,6 +189,129 @@ Examples:
   )
   .action((file: string, options) =>
     runAction(options.json, () => runTranscribe(file, options), "transcribe")
+  );
+
+const agent = program
+  .command("agent")
+  .description("Create, run, and manage Gemini managed agents")
+  .addHelpText(
+    "after",
+    `
+
+Examples:
+  gai agent create researcher --description "web research helper" --tool google_search --json
+  gai agent run researcher "Summarize today's top AI news" --json
+  gai agent run builder "Build the report" --background --json
+  gai agent status <interaction-id> --wait --json
+  gai agent ls --interaction <interaction-id> --json
+  gai agent pull --interaction <interaction-id> --extract ./artifacts --json`
+  );
+
+agent
+  .command("create")
+  .description("Create a managed agent")
+  .argument("<id>", "agent id (unique within the project)")
+  .option("--base <base-agent>", "base agent id")
+  .option("--description <text>", "agent description")
+  .option("--system <text>", "durable system instruction")
+  .option("--system-file <path>", "read the system instruction from a file")
+  .option("--tool <tool...>", "enable tool(s): code_execution, google_search, url_context")
+  .option("--dry-run", "show the agent definition without calling the API")
+  .option("--json", "print machine-readable JSON")
+  .action((id: string, options) => runAction(options.json, () => runAgentCreate(id, options), "agent"));
+
+agent
+  .command("list")
+  .description("List managed agents")
+  .option("--json", "print machine-readable JSON")
+  .action((options: { json?: boolean }) => runAction(options.json, runAgentList, "agent"));
+
+agent
+  .command("get")
+  .description("Show one managed agent")
+  .argument("<id>", "agent id")
+  .option("--json", "print machine-readable JSON")
+  .action((id: string, options) => runAction(options.json, () => runAgentGet(id), "agent"));
+
+agent
+  .command("delete")
+  .description("Delete a managed agent")
+  .argument("<id>", "agent id")
+  .option("--json", "print machine-readable JSON")
+  .action((id: string, options) => runAction(options.json, () => runAgentDelete(id), "agent"));
+
+agent
+  .command("run")
+  .description("Start an interaction with an agent (waits for the result by default)")
+  .argument("<agent>", "agent id (custom or base agent)")
+  .argument("[input]", "task prompt. Optional when --input-file is provided")
+  .option("--input-file <path>", "read the task prompt from a file")
+  .option("--env <environment>", "environment: 'remote' or an existing environment id", "remote")
+  .option("--previous <interaction-id>", "continue from a previous interaction")
+  .option("--system <text>", "request-level system instruction (replaces the agent's)")
+  .option("--system-file <path>", "read the request-level system instruction from a file")
+  .option("--background", "return immediately after starting; check with 'gai agent status'")
+  .option("--out <path>", "write the final output text to a file")
+  .option("--poll-interval <seconds>", "poll interval while waiting", "10")
+  .option("--timeout <seconds>", "max seconds to wait for completion", "1800")
+  .option("--dry-run", "show the interaction request without calling the API")
+  .option("--json", "print machine-readable JSON")
+  .action((agentId: string, input: string | undefined, options) =>
+    runAction(options.json, () => runAgentRun(agentId, input, options), "agent")
+  );
+
+agent
+  .command("status")
+  .description("Check an interaction; --wait polls until it finishes")
+  .argument("<interaction-id>", "interaction id")
+  .option("--wait", "poll until the interaction reaches a terminal status")
+  .option("--out <path>", "with --wait, write the final output text to a file")
+  .option("--poll-interval <seconds>", "poll interval while waiting", "10")
+  .option("--timeout <seconds>", "max seconds to wait for completion", "1800")
+  .option("--json", "print machine-readable JSON")
+  .action((interactionId: string, options) =>
+    runAction(options.json, () => runAgentStatus(interactionId, options), "agent")
+  );
+
+agent
+  .command("cancel")
+  .description("Cancel a running interaction")
+  .argument("<interaction-id>", "interaction id")
+  .option("--json", "print machine-readable JSON")
+  .action((interactionId: string, options) =>
+    runAction(options.json, () => runAgentCancel(interactionId), "agent")
+  );
+
+agent
+  .command("delete-interaction")
+  .description("Delete a stored interaction")
+  .argument("<interaction-id>", "interaction id")
+  .option("--json", "print machine-readable JSON")
+  .action((interactionId: string, options) =>
+    runAction(options.json, () => runAgentDeleteInteraction(interactionId), "agent")
+  );
+
+agent
+  .command("ls")
+  .description("List files in an agent environment snapshot")
+  .argument("[environment-id]", "environment id. Optional when --interaction is provided")
+  .option("--interaction <interaction-id>", "resolve the environment from an interaction")
+  .option("--json", "print machine-readable JSON")
+  .action((environmentId: string | undefined, options) =>
+    runAction(options.json, () => runAgentLs(environmentId, options), "agent")
+  );
+
+agent
+  .command("pull")
+  .description("Download an agent environment snapshot (the container's files)")
+  .argument("[environment-id]", "environment id. Optional when --interaction is provided")
+  .option("--interaction <interaction-id>", "resolve the environment from an interaction")
+  .option("--out <path>", "output tar path")
+  .option("--extract <dir>", "also extract the snapshot into a directory")
+  .option("--dry-run", "show the download plan without calling the API")
+  .option("--json", "print machine-readable JSON")
+  .action((environmentId: string | undefined, options) =>
+    runAction(options.json, () => runAgentPull(environmentId, options), "agent")
   );
 
 program

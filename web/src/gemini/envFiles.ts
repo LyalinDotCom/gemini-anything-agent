@@ -2,10 +2,9 @@
 // GET /files/environment-{envId}:download (a ustar tar, verified live incl. browser
 // CORS), parse client-side, import new /workspace/output files into IndexedDB.
 import { useStore } from "../state/store";
-import type { ContentPart } from "../state/types";
+import type { OutputFileRecord } from "../state/types";
 import { mediaId as makeMediaId, putMedia } from "../storage/messages";
 import { parseTar, type TarEntry } from "../utils/tar";
-import { uid } from "../utils/id";
 import { resolveApiKey } from "./client";
 import { FriendlyError, toFriendly } from "./errors";
 
@@ -61,54 +60,94 @@ export function downloadSnapshot(envId: string): Promise<TarEntry[]> {
 }
 
 export interface SyncedFile {
+  fingerprint: string;
   path: string;
+  label: string;
   kind: "image" | "audio" | "video" | "file";
   mediaId: string;
   mimeType: string;
   size: number;
+  syncedAt: number;
 }
 
-/** Import files under output/ that we haven't seen before into IDB media storage. */
+export function outputLabel(path: string): string {
+  return path.replace(/^workspace\/output\//, "");
+}
+
+export function normalizeOutputPath(path: string): string | null {
+  const clean = path.trim().replace(/^resource:/, "").replace(/^\/+/, "");
+  if (clean.startsWith("workspace/output/")) return clean;
+  if (clean.startsWith("output/")) return `workspace/${clean}`;
+  return null;
+}
+
+export function outputFileMatchesPath(file: OutputFileRecord, requestedPath: string): boolean {
+  const normalized = normalizeOutputPath(requestedPath);
+  if (!normalized) return false;
+  return file.path === normalized || outputLabel(file.path) === outputLabel(normalized);
+}
+
+function isVisibleOutputPath(path: string): boolean {
+  const normalized = normalizeOutputPath(path);
+  if (!normalized) return false;
+  const rel = outputLabel(normalized);
+  if (!rel || rel.endsWith("/")) return false;
+  return rel.split("/").every((segment) => segment && !segment.startsWith("."));
+}
+
+function outputEntries(entries: TarEntry[]): TarEntry[] {
+  return entries.filter((entry) => entry.size > 0 && isVisibleOutputPath(entry.name));
+}
+
+function recordsSignature(records: OutputFileRecord[] | undefined): string {
+  return (records ?? []).map((record) => record.fingerprint).join("\n");
+}
+
+/** Import visible files under /workspace/output into IDB media storage. */
 export async function syncOutputMedia(sessionId: string, envId: string): Promise<SyncedFile[]> {
-  const entries = await downloadSnapshot(envId);
+  const entries = outputEntries(await downloadSnapshot(envId));
   const store = useStore.getState();
   const session = store.sessions[sessionId];
   if (!session) return [];
   const seen = new Set(session.envSeen ?? []);
+  const existingByFingerprint = new Map((session.envFiles ?? []).map((file) => [file.fingerprint, file]));
+  const nextFiles: OutputFileRecord[] = [];
   const fresh: SyncedFile[] = [];
+  const now = Date.now();
 
   for (const entry of entries) {
-    const normalized = entry.name.replace(/^\/+/, "");
-    if (!normalized.startsWith("workspace/output/")) continue;
+    const normalized = normalizeOutputPath(entry.name);
+    if (!normalized) continue;
     const fingerprint = `${normalized}@${entry.size}`;
-    if (seen.has(fingerprint) || entry.size === 0) continue;
+    const existing = existingByFingerprint.get(fingerprint);
     const { kind, mime } = classify(normalized);
-    const id = makeMediaId(sessionId, `env-${normalized.replace(/[^a-z0-9.-]/gi, "_")}-${entry.size}`);
-    const bytes = new Uint8Array(entry.data);
-    await putMedia(id, sessionId, new Blob([bytes.buffer as ArrayBuffer], { type: mime }), mime);
-    seen.add(fingerprint);
-    fresh.push({ path: normalized, kind, mediaId: id, mimeType: mime, size: entry.size });
-  }
-
-  if (fresh.length > 0) {
-    useStore.getState().patchSession(sessionId, { envSeen: [...seen].slice(-SEEN_CAP) });
-  }
-  return fresh;
-}
-
-export function syncedFilesToParts(files: SyncedFile[]): ContentPart[] {
-  const parts: ContentPart[] = [];
-  for (const f of files) {
-    const label = f.path.replace(/^workspace\/output\//, "");
-    if (f.kind === "image") {
-      parts.push({ kind: "image", id: uid(), mediaId: f.mediaId, mimeType: f.mimeType, origin: "agent", prompt: label });
-    } else if (f.kind === "audio") {
-      parts.push({ kind: "audio", id: uid(), mediaId: f.mediaId, mimeType: f.mimeType, label });
-    } else if (f.kind === "video") {
-      parts.push({ kind: "video", id: uid(), mediaId: f.mediaId, mimeType: f.mimeType, label });
-    } else {
-      parts.push({ kind: "file", id: uid(), mediaId: f.mediaId, mimeType: f.mimeType, label });
+    const mediaId = existing?.mediaId ?? makeMediaId(sessionId, `env-${normalized.replace(/[^a-z0-9.-]/gi, "_")}-${entry.size}`);
+    if (!existing || !seen.has(fingerprint)) {
+      const bytes = new Uint8Array(entry.data);
+      await putMedia(mediaId, sessionId, new Blob([bytes.buffer as ArrayBuffer], { type: mime }), mime);
+    }
+    const record: OutputFileRecord = {
+      fingerprint,
+      path: normalized,
+      label: outputLabel(normalized),
+      kind,
+      mediaId,
+      mimeType: mime,
+      size: entry.size,
+      syncedAt: existing?.syncedAt ?? now,
+    };
+    nextFiles.push(record);
+    if (!seen.has(fingerprint)) {
+      seen.add(fingerprint);
+      fresh.push(record);
     }
   }
-  return parts;
+
+  if (fresh.length > 0 || recordsSignature(session.envFiles) !== recordsSignature(nextFiles)) {
+    useStore.getState().patchSession(sessionId, {
+      envSeen: [...seen].slice(-SEEN_CAP),
+      envFiles: nextFiles.slice(-SEEN_CAP),
+    });
+  }
+  return fresh;
 }

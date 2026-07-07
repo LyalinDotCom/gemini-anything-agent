@@ -298,6 +298,17 @@ export const renameSessionsForAgent = (
   fromAgentId: string,
   toAgentId: string
 ): Session[] =>
-  sessions.map((session) =>
-    session.agentId === fromAgentId ? { ...session, agentId: toAgentId } : session
-  );
+  sessions.map((session) => {
+    if (session.agentId !== fromAgentId) {
+      return session;
+    }
+    return {
+      ...session,
+      agentId: toAgentId,
+      agentSnapshot: { ...session.agentSnapshot, id: toAgentId } as ManagedAgent,
+      request:
+        session.request.agent === fromAgentId
+          ? { ...session.request, agent: toAgentId }
+          : session.request
+    };
+  });

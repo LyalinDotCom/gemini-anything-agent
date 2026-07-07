@@ -10,13 +10,13 @@ import {
 } from "../src/main/chatStore";
 
 const session = (overrides: Partial<PersistedSession> & { localId: string; startedAt: number }): PersistedSession => ({
-  agentId: "gemini-anything-agent",
+  agentId: "gemini-anything-v1",
   agentSnapshot: {
-    id: "gemini-anything-agent",
+    id: "gemini-anything-v1",
     base_agent: "antigravity-preview-05-2026"
   },
   request: {
-    agent: "gemini-anything-agent",
+    agent: "gemini-anything-v1",
     input: "Create a cozy cat image",
     environment: "remote",
     store: true,
@@ -41,7 +41,7 @@ describe("chat store", () => {
         parentLocalId: "root",
         startedAt: Date.UTC(2026, 5, 30, 12, 1, 0),
         request: {
-          agent: "gemini-anything-agent",
+          agent: "gemini-anything-v1",
           input: "Turn that into an MP3",
           environment: "env-1",
           previous_interaction_id: "int-root",

@@ -30,7 +30,7 @@ your browser as files.
 Browser (static, key in localStorage)
   │  interactions.create({agent, previous_interaction_id, environment})   ← the ONLY think-path
   ▼
-Managed agent chat-companion-v1  (base: antigravity-preview-05-2026)
+Managed agent gemini-anything-v1  (base: antigravity-preview-05-2026)
   ├─ persistent remote container per session (environment_id chained turn to turn)
   ├─ /.agents/AGENTS.md            persona + artifact contract   (shared: ../agents/)
   ├─ /.env                         GEMINI_API_KEY=… — sourced by the launcher, never printed

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Bot } from "lucide-react";
 import {
+  extractInteractionOutputText,
   isDeepResearchAgentId,
   validateInteractionCreate,
   type Interaction,
@@ -9,21 +10,13 @@ import {
 import type {
   EnvironmentOutputFile,
   EnsureAnythingAgentResult,
+  IpcError,
   IpcResult,
   ResolvedEnvironmentMedia,
   RuntimeConfig
 } from "../shared/electron-api";
-import {
-  initialCompose,
-  uid,
-  type ComposeState,
-  type ImagePartDraft,
-  type Session
-} from "./lib/builderState";
-import {
-  readStoredSessions,
-  writeStoredSessions
-} from "./lib/sessionStore";
+import { initialCompose, uid, type ComposeState, type ImagePartDraft, type Session } from "./lib/builderState";
+import { readStoredSessions, renameSessionsForAgent, writeStoredSessions } from "./lib/sessionStore";
 import {
   latestContinuableSession,
   latestReusableEnvironmentSession,
@@ -82,18 +75,9 @@ import { TextPreview } from "./components/TextPreview";
 import { SamplePromptGallery } from "./components/SamplePromptGallery";
 import { SessionControls } from "./components/SessionControls";
 import { ConversationSidebar } from "./components/ConversationSidebar";
-import {
-  AppStatusBar,
-  ChatHeader,
-  OutputPanelToggle,
-  TopBar,
-  type StatusEvent
-} from "./components/AppChrome";
+import { AppStatusBar, ChatHeader, OutputPanelToggle, TopBar, type StatusEvent } from "./components/AppChrome";
 
-const snapshotAgentForRun = async (
-  agentId: string,
-  fallback: ManagedAgent
-): Promise<ManagedAgent> => {
+const snapshotAgentForRun = async (agentId: string, fallback: ManagedAgent): Promise<ManagedAgent> => {
   if (!window.managedAgents) {
     return fallback;
   }
@@ -108,6 +92,26 @@ const snapshotAgentForRun = async (
 // Backoff for reattaching a dropped background stream before surfacing the
 // error and the manual Reconnect button.
 const STREAM_RECONNECT_DELAYS_MS = [2000, 5000, 12000];
+const LEGACY_ANYTHING_AGENT_IDS = ["gemini-anything-agent", "chat-companion-v1"];
+const OUTPUT_REFRESH_RETRY_DELAYS_MS = [1200, 2500, 5000, 10000];
+const OUTPUT_ENVIRONMENT_RETRY_DELAYS_MS = [1000, 2500, 5000, 10000];
+const OUTPUT_REFERENCE_PATTERN = /(?:^|[\s([`'"])(?:\/workspace\/output|workspace\/output|output\/)/i;
+
+const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+const nonEmptyString = (value: unknown): string | undefined =>
+  typeof value === "string" && value.trim() ? value.trim() : undefined;
+
+const outputFilesSignature = (files: EnvironmentOutputFile[] | undefined): string =>
+  (files ?? [])
+    .map((file) => `${file.relativePath}:${Math.round(file.modifiedAt)}:${file.bytes}`)
+    .sort()
+    .join("|");
+
+const sessionReferencesOutputFiles = (session: Session): boolean => {
+  const text = session.seed ? (extractInteractionOutputText(session.seed) ?? "") : "";
+  return OUTPUT_REFERENCE_PATTERN.test(text);
+};
 
 export const App = () => {
   const [runtime, setRuntime] = useState<RuntimeConfig | null>(null);
@@ -137,8 +141,10 @@ export const App = () => {
   const pendingRunInputs = useRef<Map<string, PendingComposeInput>>(new Map());
   const completedOutputHydrationKeys = useRef<Set<string>>(new Set());
   const runtimeOutputHydrationSessionIds = useRef<Set<string>>(new Set());
+  const environmentOutputHydrationKeys = useRef<Set<string>>(new Set());
   const outputFilesRequestSeq = useRef<Record<string, number>>({});
   const outputFilesPending = useRef<Record<string, number>>({});
+  const outputFilesByEnvironmentRef = useRef<Record<string, EnvironmentOutputState>>({});
   const autoOpenedOutputEnvironments = useRef<Set<string>>(new Set());
   const ensureAgentPromise = useRef<Promise<EnsureAnythingAgentResult | undefined> | null>(null);
   const activeConversationIdRef = useRef(activeConversationId);
@@ -153,10 +159,7 @@ export const App = () => {
   const keyMissing = hasBridge && runtimeLoaded && !hasKey;
   const appReady = hasBridge && hasKey && sessionsLoaded;
   const agentSessions = useMemo(
-    () =>
-      sessions.filter(
-        (session) => session.agentId === agentId || isDeepResearchAgentId(session.agentId)
-      ),
+    () => sessions.filter((session) => session.agentId === agentId || isDeepResearchAgentId(session.agentId)),
     [agentId, sessions]
   );
   const conversations = useMemo(
@@ -165,9 +168,7 @@ export const App = () => {
   );
 
   const conversationIdForSession = (localId: string): string | undefined =>
-    conversations.find((conversation) =>
-      conversation.sessions.some((session) => session.localId === localId)
-    )?.id;
+    conversations.find((conversation) => conversation.sessions.some((session) => session.localId === localId))?.id;
 
   function reorderConversation(dragId: string, dropSlot: number) {
     // Snapshot the full current order so every conversation gets a manual
@@ -222,10 +223,7 @@ export const App = () => {
       ]),
     [activeConversationId, chatSessions, optimisticSentImages]
   );
-  const baseInteraction = useMemo(
-    () => buildChatInteraction(agentId, compose),
-    [agentId, compose]
-  );
+  const baseInteraction = useMemo(() => buildChatInteraction(agentId, compose), [agentId, compose]);
   const autoContinuation = useMemo(
     () =>
       compose.store && compose.autoContinue && !baseInteraction.previous_interaction_id
@@ -244,33 +242,25 @@ export const App = () => {
       compose.reuseEnvironment && baseInteraction.environment === "remote"
         ? latestReusableEnvironmentSession(selectedSessions, baseInteraction.agent)
         : undefined,
-    [
-      baseInteraction.agent,
-      baseInteraction.environment,
-      compose.reuseEnvironment,
-      selectedSessions
-    ]
+    [baseInteraction.agent, baseInteraction.environment, compose.reuseEnvironment, selectedSessions]
   );
   const interaction = useMemo(
-    () => withAutoContinuity(baseInteraction, selectedSessions, {
-      autoContinue: compose.autoContinue,
-      reuseEnvironment: compose.reuseEnvironment
-    }),
+    () =>
+      withAutoContinuity(baseInteraction, selectedSessions, {
+        autoContinue: compose.autoContinue,
+        reuseEnvironment: compose.reuseEnvironment
+      }),
     [baseInteraction, compose.autoContinue, compose.reuseEnvironment, selectedSessions]
   );
-  const runningSession = useMemo(
-    () => selectedSessions.find((session) => session.streaming),
-    [selectedSessions]
-  );
+  const runningSession = useMemo(() => selectedSessions.find((session) => session.streaming), [selectedSessions]);
   const selectedConversationStarting = Boolean(startingConversationIds[activeConversationId]);
   const selectedConversationRunning = Boolean(runningSession || selectedConversationStarting);
   const latestEnvironmentId = selectedConversation?.environmentId;
   const activeOutputState = latestEnvironmentId ? outputFilesByEnvironment[latestEnvironmentId] : undefined;
   const activeOutputFileCount = activeOutputState?.items.length ?? 0;
+  const activeOutputSignature = outputFilesSignature(activeOutputState?.items);
   const outputPanelVisible = outputPanelOpen;
-  const latestRunSession = latestRunId
-    ? chatSessions.find((session) => session.localId === latestRunId)
-    : undefined;
+  const latestRunSession = latestRunId ? chatSessions.find((session) => session.localId === latestRunId) : undefined;
   const canRun = appReady && !selectedConversationRunning && hasComposeInput(compose);
 
   const updateScrollStickiness = () => {
@@ -303,12 +293,20 @@ export const App = () => {
   useEffect(() => clearAllRetryTimers, []);
 
   useEffect(() => {
+    if (!runtimeLoaded) {
+      return;
+    }
     let canceled = false;
     void readStoredSessions().then((stored) => {
       if (canceled) {
         return;
       }
-      setSessions(stored.sessions);
+      const sessions = LEGACY_ANYTHING_AGENT_IDS.reduce(
+        (current, legacyAgentId) =>
+          legacyAgentId === agentId ? current : renameSessionsForAgent(current, legacyAgentId, agentId),
+        stored.sessions
+      );
+      setSessions(sessions);
       if (stored.ok) {
         setSessionsLoaded(true);
       } else {
@@ -320,7 +318,7 @@ export const App = () => {
     return () => {
       canceled = true;
     };
-  }, []);
+  }, [agentId, runtimeLoaded]);
 
   useEffect(() => {
     activeConversationIdRef.current = activeConversationId;
@@ -370,9 +368,7 @@ export const App = () => {
   // When a refresh produces a new version of the previewed file (new ?v= in
   // its url), swap the open preview to it so stale content doesn't persist.
   useEffect(() => {
-    const items = latestEnvironmentId
-      ? outputFilesByEnvironment[latestEnvironmentId]?.items
-      : undefined;
+    const items = latestEnvironmentId ? outputFilesByEnvironment[latestEnvironmentId]?.items : undefined;
     if (!items?.length) {
       return;
     }
@@ -406,6 +402,7 @@ export const App = () => {
     activeResumeIds.current.clear();
     completedOutputHydrationKeys.current.clear();
     runtimeOutputHydrationSessionIds.current.clear();
+    environmentOutputHydrationKeys.current.clear();
     clearAllRetryTimers();
     autoOpenedOutputEnvironments.current.clear();
   }, [keyMissing]);
@@ -432,7 +429,18 @@ export const App = () => {
         continue;
       }
       if (!environmentId) {
-        runtimeOutputHydrationSessionIds.current.delete(session.localId);
+        const hydrationKey = `${session.localId}:${session.completedAt}`;
+        const interactionId = session.seed?.id;
+        if (!interactionId) {
+          runtimeOutputHydrationSessionIds.current.delete(session.localId);
+          completedOutputHydrationKeys.current.add(hydrationKey);
+          continue;
+        }
+        const environmentHydrationKey = `${hydrationKey}:environment`;
+        if (!environmentOutputHydrationKeys.current.has(environmentHydrationKey)) {
+          environmentOutputHydrationKeys.current.add(environmentHydrationKey);
+          void hydrateCompletedSessionEnvironment(session, hydrationKey, environmentHydrationKey);
+        }
         continue;
       }
       const hydrationKey = `${session.localId}:${session.completedAt}`;
@@ -443,9 +451,10 @@ export const App = () => {
 
       completedOutputHydrationKeys.current.add(hydrationKey);
       runtimeOutputHydrationSessionIds.current.delete(session.localId);
-      // Run completed → pull the final snapshot ONCE; everything downstream
-      // (output panel, previews, the media viewer) reads the extracted files.
-      void loadOutputFiles(environmentId, true);
+      // Run completed → pull the final snapshot. The snapshot endpoint can lag
+      // terminal status by a few seconds, so output-producing turns get bounded
+      // retries when the first pull is empty or unchanged.
+      void refreshCompletedOutputFiles(session, environmentId);
     }
   }, [agentSessions]);
 
@@ -456,8 +465,7 @@ export const App = () => {
     if (!latestEnvironmentId || selectedConversationRunning || !window.managedAgents?.listEnvironmentOutputFiles) {
       return;
     }
-    const shouldDiscoverOutputs =
-      outputPanelOpen || Boolean(latestRunSession && !latestRunSession.streaming);
+    const shouldDiscoverOutputs = outputPanelOpen || Boolean(latestRunSession && !latestRunSession.streaming);
     if (!shouldDiscoverOutputs) {
       return;
     }
@@ -466,28 +474,27 @@ export const App = () => {
       return;
     }
     void loadOutputFiles(latestEnvironmentId, false);
-  }, [
-    latestEnvironmentId,
-    latestRunSession,
-    outputPanelOpen,
-    outputFilesByEnvironment,
-    selectedConversationRunning
-  ]);
+  }, [latestEnvironmentId, latestRunSession, outputPanelOpen, outputFilesByEnvironment, selectedConversationRunning]);
 
   useEffect(() => {
-    if (!latestEnvironmentId || activeOutputFileCount === 0) {
+    if (!latestEnvironmentId || activeOutputFileCount === 0 || !activeOutputSignature) {
       return;
     }
-    if (autoOpenedOutputEnvironments.current.has(latestEnvironmentId)) {
+    const autoOpenKey = `${latestEnvironmentId}:${activeOutputSignature}`;
+    if (autoOpenedOutputEnvironments.current.has(autoOpenKey)) {
       return;
     }
-    autoOpenedOutputEnvironments.current.add(latestEnvironmentId);
+    autoOpenedOutputEnvironments.current.add(autoOpenKey);
     setOutputPanelOpen(true);
-  }, [activeOutputFileCount, latestEnvironmentId]);
+  }, [activeOutputFileCount, activeOutputSignature, latestEnvironmentId]);
 
   useEffect(() => {
     sessionsRef.current = sessions;
   }, [sessions]);
+
+  useEffect(() => {
+    outputFilesByEnvironmentRef.current = outputFilesByEnvironment;
+  }, [outputFilesByEnvironment]);
 
   useEffect(() => {
     if (!hasBridge || !runtime?.hasApiKey || !window.managedAgents?.resumeInteractionStream) {
@@ -544,6 +551,9 @@ export const App = () => {
     completedOutputHydrationKeys.current = new Set(
       [...completedOutputHydrationKeys.current].filter((key) => !key.startsWith(`${sessionId}:`))
     );
+    environmentOutputHydrationKeys.current = new Set(
+      [...environmentOutputHydrationKeys.current].filter((key) => !key.startsWith(`${sessionId}:`))
+    );
   }
 
   const setOptimisticSentImagesForKeys = (keys: string[], images: ImagePartDraft[]) => {
@@ -592,9 +602,16 @@ export const App = () => {
     completedOutputHydrationKeys.current = new Set(
       [...completedOutputHydrationKeys.current].filter((key) => !deletedIds.has(key.split(":", 1)[0]))
     );
+    environmentOutputHydrationKeys.current = new Set(
+      [...environmentOutputHydrationKeys.current].filter((key) => !deletedIds.has(key.split(":", 1)[0]))
+    );
     for (const environmentId of deletedEnvironmentIds) {
       if (!remainingEnvironmentIds.has(environmentId)) {
-        autoOpenedOutputEnvironments.current.delete(environmentId);
+        for (const key of [...autoOpenedOutputEnvironments.current]) {
+          if (key === environmentId || key.startsWith(`${environmentId}:`)) {
+            autoOpenedOutputEnvironments.current.delete(key);
+          }
+        }
       }
     }
   };
@@ -638,7 +655,11 @@ export const App = () => {
     ensureAgentPromise.current = (async () => {
       const result = await bridge.ensureAnythingAgent(targetAgentId);
       if (!result.ok) {
-        pushStatus({ level: "error", title: result.error.name, detail: result.error.message });
+        pushStatus({
+          level: "error",
+          title: result.error.name,
+          detail: result.error.message
+        });
         return undefined;
       }
       pushStatus({
@@ -659,7 +680,11 @@ export const App = () => {
 
   async function runInteraction() {
     if (!hasComposeInput(compose)) {
-      pushStatus({ level: "error", title: "Prompt required", detail: "Type a message or attach an image." });
+      pushStatus({
+        level: "error",
+        title: "Prompt required",
+        detail: "Type a message or attach an image."
+      });
       return;
     }
     if (selectedConversationRunning) {
@@ -671,23 +696,39 @@ export const App = () => {
       return;
     }
     if (!hasBridge) {
-      pushStatus({ level: "error", title: bridgeUnavailable.name, detail: bridgeUnavailable.message });
+      pushStatus({
+        level: "error",
+        title: bridgeUnavailable.name,
+        detail: bridgeUnavailable.message
+      });
       return;
     }
     const bridge = window.managedAgents;
     if (!bridge) {
-      pushStatus({ level: "error", title: bridgeUnavailable.name, detail: bridgeUnavailable.message });
+      pushStatus({
+        level: "error",
+        title: bridgeUnavailable.name,
+        detail: bridgeUnavailable.message
+      });
       return;
     }
     if (!hasKey) {
-      pushStatus({ level: "error", title: "API key required", detail: "Open Settings and add GEMINI_API_KEY." });
+      pushStatus({
+        level: "error",
+        title: "API key required",
+        detail: "Open Settings and add GEMINI_API_KEY."
+      });
       setSettingsOpen(true);
       return;
     }
 
     const check = validateInteractionCreate(interaction);
     if (!check.ok) {
-      pushStatus({ level: "error", title: "Interaction invalid", detail: check.errors.join("\n") });
+      pushStatus({
+        level: "error",
+        title: "Interaction invalid",
+        detail: check.errors.join("\n")
+      });
       return;
     }
 
@@ -697,8 +738,7 @@ export const App = () => {
     const streamId = uid();
     const parent = selectedSessions.find((session) => session.seed?.id === request.previous_interaction_id);
     const startsNewConversation = !parent;
-    const consumesNewConversationDraft =
-      startsNewConversation && sourceConversationId === NEW_CONVERSATION_ID;
+    const consumesNewConversationDraft = startsNewConversation && sourceConversationId === NEW_CONVERSATION_ID;
     const pendingImageParts = compose.parts.filter((part): part is ImagePartDraft => part.kind === "image");
     const imageAttachments = imageAttachmentsFromCompose(compose);
     const diagnosticsConversationId = startsNewConversation ? localId : sourceConversationId;
@@ -755,19 +795,20 @@ export const App = () => {
         createInteractionStream &&
         (onInteractionStreamEvent || getInteractionStreamSnapshot);
       if (shouldCreateWithStream) {
-        const unsubscribe = onInteractionStreamEvent?.(streamId, (event) => {
-          setSessions((current) =>
-            current.map((session) =>
-              session.localId === localId
-                ? {
-                    ...session,
-                    seed: patchSeedFromStreamEvent(session.seed, event),
-                    events: mergeStreamEvents(session.events, [event])
-                  }
-                : session
-            )
-          );
-        }) ?? (() => undefined);
+        const unsubscribe =
+          onInteractionStreamEvent?.(streamId, (event) => {
+            setSessions((current) =>
+              current.map((session) =>
+                session.localId === localId
+                  ? {
+                      ...session,
+                      seed: patchSeedFromStreamEvent(session.seed, event),
+                      events: mergeStreamEvents(session.events, [event])
+                    }
+                  : session
+              )
+            );
+          }) ?? (() => undefined);
 
         setSessions((current) => [{ ...base, events: [], streaming: true, streamId }, ...current]);
         setConversationStarting(sourceConversationId, false);
@@ -854,7 +895,11 @@ export const App = () => {
             )
           );
           if (request.store === true && activeConversationIdRef.current === sourceConversationId) {
-            setCompose((current) => ({ ...current, previousInteractionId: "", autoContinue: true }));
+            setCompose((current) => ({
+              ...current,
+              previousInteractionId: "",
+              autoContinue: true
+            }));
           }
         } else {
           logConversationDiagnostic(diagnosticsConversationId, "run.failed", {
@@ -876,7 +921,11 @@ export const App = () => {
                 : session
             )
           );
-          pushStatus({ level: "error", title: result.error.name, detail: result.error.message });
+          pushStatus({
+            level: "error",
+            title: result.error.name,
+            detail: result.error.message
+          });
         }
         return;
       }
@@ -890,7 +939,11 @@ export const App = () => {
         });
         forgetPendingRunInputIfTerminal(localId, result.value);
         setSessions((current) => [
-          { ...base, seed: result.value, completedAt: interactionIsTerminal(result.value) ? Date.now() : undefined },
+          {
+            ...base,
+            seed: result.value,
+            completedAt: interactionIsTerminal(result.value) ? Date.now() : undefined
+          },
           ...current
         ]);
         setConversationStarting(sourceConversationId, false);
@@ -901,7 +954,11 @@ export const App = () => {
           setActiveConversationId((current) => (current === sourceConversationId ? localId : current));
         }
         if (request.store === true && activeConversationIdRef.current === sourceConversationId) {
-          setCompose((current) => ({ ...current, previousInteractionId: "", autoContinue: true }));
+          setCompose((current) => ({
+            ...current,
+            previousInteractionId: "",
+            autoContinue: true
+          }));
         }
       } else {
         logConversationDiagnostic(diagnosticsConversationId, "run.failed", {
@@ -918,7 +975,11 @@ export const App = () => {
         if (startsNewConversation) {
           setActiveConversationId((current) => (current === sourceConversationId ? localId : current));
         }
-        pushStatus({ level: "error", title: result.error.name, detail: result.error.message });
+        pushStatus({
+          level: "error",
+          title: result.error.name,
+          detail: result.error.message
+        });
       }
     } finally {
       setConversationStarting(sourceConversationId, false);
@@ -942,24 +1003,31 @@ export const App = () => {
     setSessions((current) =>
       current.map((session) =>
         session.localId === sessionToResume.localId
-          ? { ...session, error: undefined, completedAt: undefined, streaming: true, streamId }
+          ? {
+              ...session,
+              error: undefined,
+              completedAt: undefined,
+              streaming: true,
+              streamId
+            }
           : session
       )
     );
 
-    const unsubscribe = window.managedAgents.onInteractionStreamEvent?.(streamId, (event) => {
-      setSessions((current) =>
-        current.map((session) =>
-          session.localId === sessionToResume.localId
-            ? {
-                ...session,
-                seed: patchSeedFromStreamEvent(session.seed, event),
-                events: mergeStreamEvents(session.events, [event])
-              }
-            : session
-        )
-      );
-    }) ?? (() => undefined);
+    const unsubscribe =
+      window.managedAgents.onInteractionStreamEvent?.(streamId, (event) => {
+        setSessions((current) =>
+          current.map((session) =>
+            session.localId === sessionToResume.localId
+              ? {
+                  ...session,
+                  seed: patchSeedFromStreamEvent(session.seed, event),
+                  events: mergeStreamEvents(session.events, [event])
+                }
+              : session
+          )
+        );
+      }) ?? (() => undefined);
 
     const getInteractionStreamSnapshot = window.managedAgents.getInteractionStreamSnapshot;
     let snapshotTimer: ReturnType<typeof setInterval> | undefined;
@@ -987,9 +1055,7 @@ export const App = () => {
                   seed: nextSeed,
                   events: mergeStreamEvents(session.events, snapshot.value.events),
                   streaming: !snapshot.value.done,
-                  completedAt: snapshot.value.done
-                    ? completedAtForInteraction(session, nextSeed)
-                    : session.completedAt
+                  completedAt: snapshot.value.done ? completedAtForInteraction(session, nextSeed) : session.completedAt
                 };
               })()
             : session
@@ -1020,11 +1086,11 @@ export const App = () => {
 
       if (result.ok) {
         streamRetryCounts.current.delete(sessionToResume.localId);
-        logConversationDiagnostic(
-          conversationIdForSession(sessionToResume.localId),
-          "stream.resume.completed",
-          { localId: sessionToResume.localId, interactionId, status: result.value.status }
-        );
+        logConversationDiagnostic(conversationIdForSession(sessionToResume.localId), "stream.resume.completed", {
+          localId: sessionToResume.localId,
+          interactionId,
+          status: result.value.status
+        });
         setSessions((current) =>
           current.map((session) =>
             session.localId === sessionToResume.localId
@@ -1042,9 +1108,7 @@ export const App = () => {
       } else if (
         sessionsRef.current.some(
           (session) =>
-            session.localId === sessionToResume.localId &&
-            session.seed &&
-            interactionIsTerminal(session.seed)
+            session.localId === sessionToResume.localId && session.seed && interactionIsTerminal(session.seed)
         )
       ) {
         // The run already finished (streamed events patched the seed terminal
@@ -1054,7 +1118,11 @@ export const App = () => {
         logConversationDiagnostic(
           conversationIdForSession(sessionToResume.localId),
           "stream.error.ignored-run-terminal",
-          { localId: sessionToResume.localId, name: result.error.name, message: result.error.message }
+          {
+            localId: sessionToResume.localId,
+            name: result.error.name,
+            message: result.error.message
+          }
         );
         setSessions((current) =>
           current.map((session) =>
@@ -1081,11 +1149,11 @@ export const App = () => {
         );
       } else {
         streamRetryCounts.current.delete(sessionToResume.localId);
-        logConversationDiagnostic(
-          conversationIdForSession(sessionToResume.localId),
-          "stream.failed",
-          { localId: sessionToResume.localId, name: result.error.name, message: result.error.message }
-        );
+        logConversationDiagnostic(conversationIdForSession(sessionToResume.localId), "stream.failed", {
+          localId: sessionToResume.localId,
+          name: result.error.name,
+          message: result.error.message
+        });
         setSessions((current) =>
           current.map((session) =>
             session.localId === sessionToResume.localId
@@ -1099,7 +1167,11 @@ export const App = () => {
               : session
           )
         );
-        pushStatus({ level: "error", title: result.error.name, detail: result.error.message });
+        pushStatus({
+          level: "error",
+          title: result.error.name,
+          detail: result.error.message
+        });
       }
     } finally {
       activeResumeIds.current.delete(sessionToResume.localId);
@@ -1136,25 +1208,36 @@ export const App = () => {
       title: "Stream disconnected",
       detail: `Reconnecting (attempt ${attempt}/${STREAM_RECONNECT_DELAYS_MS.length})…`
     });
-    const timer = setTimeout(() => {
-      streamRetryTimers.current.delete(localId);
-      const latest = sessionsRef.current.find((session) => session.localId === localId);
-      if (latest && shouldResumeBackgroundSession(latest) && !activeResumeIds.current.has(localId)) {
-        void resumeSessionStream(latest);
-      }
-    }, STREAM_RECONNECT_DELAYS_MS[attempt - 1]);
+    const timer = setTimeout(
+      () => {
+        streamRetryTimers.current.delete(localId);
+        const latest = sessionsRef.current.find((session) => session.localId === localId);
+        if (latest && shouldResumeBackgroundSession(latest) && !activeResumeIds.current.has(localId)) {
+          void resumeSessionStream(latest);
+        }
+      },
+      STREAM_RECONNECT_DELAYS_MS[attempt - 1]
+    );
     streamRetryTimers.current.set(localId, timer);
     return true;
   }
 
   async function reconnectSessionStream(sessionToReconnect: Session) {
     if (!window.managedAgents?.resumeInteractionStream) {
-      pushStatus({ level: "error", title: "Reconnect unavailable", detail: "Run the Electron app to reconnect streams." });
+      pushStatus({
+        level: "error",
+        title: "Reconnect unavailable",
+        detail: "Run the Electron app to reconnect streams."
+      });
       return;
     }
     const interactionId = sessionToReconnect.seed?.id;
     if (!interactionId) {
-      pushStatus({ level: "error", title: "Reconnect unavailable", detail: "This turn has no interaction id yet." });
+      pushStatus({
+        level: "error",
+        title: "Reconnect unavailable",
+        detail: "This turn has no interaction id yet."
+      });
       return;
     }
     if (activeResumeIds.current.has(sessionToReconnect.localId)) {
@@ -1190,7 +1273,11 @@ export const App = () => {
 
   async function cancelSession(sessionToCancel: Session) {
     if (!window.managedAgents) {
-      pushStatus({ level: "error", title: bridgeUnavailable.name, detail: bridgeUnavailable.message });
+      pushStatus({
+        level: "error",
+        title: bridgeUnavailable.name,
+        detail: bridgeUnavailable.message
+      });
       return;
     }
     if (cancelingSessionIds[sessionToCancel.localId]) {
@@ -1199,7 +1286,11 @@ export const App = () => {
     const interactionId = sessionToCancel.seed?.id;
     const streamId = sessionToCancel.streamId;
     if (!interactionId && !streamId) {
-      pushStatus({ level: "error", title: "Cancel unavailable", detail: "This run has no active interaction id." });
+      pushStatus({
+        level: "error",
+        title: "Cancel unavailable",
+        detail: "This run has no active interaction id."
+      });
       return;
     }
     logConversationDiagnostic(conversationIdForSession(sessionToCancel.localId), "run.cancel.requested", {
@@ -1210,17 +1301,22 @@ export const App = () => {
     setSessionCanceling(sessionToCancel.localId, true);
     try {
       let cancelledInteraction: Interaction | undefined;
+      let cancelError: IpcError | undefined;
+      let streamCancelError: IpcError | undefined;
       if (interactionId) {
         const cancelled = await window.managedAgents.cancelInteraction(interactionId);
-        if (!cancelled.ok) {
-          pushStatus({ level: "error", title: cancelled.error.name, detail: cancelled.error.message });
-          return;
+        if (cancelled.ok) {
+          cancelledInteraction = cancelled.value;
+        } else {
+          cancelError = cancelled.error;
         }
-        cancelledInteraction = cancelled.value;
       }
 
       if (streamId && window.managedAgents.cancelInteractionStream) {
-        await window.managedAgents.cancelInteractionStream(streamId);
+        const streamCancelled = await window.managedAgents.cancelInteractionStream(streamId);
+        if (!streamCancelled.ok) {
+          streamCancelError = streamCancelled.error;
+        }
       }
 
       setSessions((current) =>
@@ -1229,22 +1325,44 @@ export const App = () => {
             ? {
                 ...session,
                 seed: cancelledInteraction
-                  ? { ...(session.seed ?? cancelledInteraction), ...cancelledInteraction }
+                  ? {
+                      ...(session.seed ?? cancelledInteraction),
+                      ...cancelledInteraction
+                    }
                   : session.seed,
                 error: cancelledInteraction
                   ? undefined
-                  : { name: "Cancelled", message: "Run stream cancelled locally." },
+                  : {
+                      name: cancelError?.name ?? streamCancelError?.name ?? "Cancelled",
+                      message: cancelError
+                        ? `Run stream stopped locally; server cancel was not confirmed. ${cancelError.message}`
+                        : streamCancelError
+                          ? `Server cancel requested, but local stream cleanup reported an error. ${streamCancelError.message}`
+                          : "Run stream cancelled locally."
+                    },
                 streaming: false,
                 streamId: undefined,
                 completedAt: cancelledInteraction
-                  ? completedAtForInteraction(session, cancelledInteraction) ?? terminalCompletedAt(session)
+                  ? (completedAtForInteraction(session, cancelledInteraction) ?? terminalCompletedAt(session))
                   : terminalCompletedAt(session)
               }
             : session
         )
       );
       restorePendingRunInput(sessionToCancel.localId);
-      pushStatus({ level: "success", title: "Cancelled run", detail: interactionId ?? sessionToCancel.localId });
+      if (cancelError || streamCancelError) {
+        pushStatus({
+          level: "error",
+          title: "Cancelled locally",
+          detail: [cancelError?.message, streamCancelError?.message].filter(Boolean).join("\n")
+        });
+      } else {
+        pushStatus({
+          level: "success",
+          title: "Cancelled run",
+          detail: interactionId ?? sessionToCancel.localId
+        });
+      }
     } finally {
       setSessionCanceling(sessionToCancel.localId, false);
     }
@@ -1252,16 +1370,28 @@ export const App = () => {
 
   async function snapshotEnvironment(environmentId: string) {
     if (!window.managedAgents) {
-      pushStatus({ level: "error", title: bridgeUnavailable.name, detail: bridgeUnavailable.message });
+      pushStatus({
+        level: "error",
+        title: bridgeUnavailable.name,
+        detail: bridgeUnavailable.message
+      });
       return;
     }
     setBusy("snapshot");
     try {
       const result = await window.managedAgents.downloadEnvironmentSnapshot(environmentId);
       if (result.ok && result.value.saved) {
-        pushStatus({ level: "success", title: "Snapshot saved", detail: result.value.path });
+        pushStatus({
+          level: "success",
+          title: "Snapshot saved",
+          detail: result.value.path
+        });
       } else if (!result.ok) {
-        pushStatus({ level: "error", title: result.error.name, detail: result.error.message });
+        pushStatus({
+          level: "error",
+          title: result.error.name,
+          detail: result.error.message
+        });
       }
     } finally {
       setBusy(null);
@@ -1270,18 +1400,30 @@ export const App = () => {
 
   async function saveApiKey(key: string): Promise<boolean> {
     if (!window.managedAgents) {
-      pushStatus({ level: "error", title: bridgeUnavailable.name, detail: bridgeUnavailable.message });
+      pushStatus({
+        level: "error",
+        title: bridgeUnavailable.name,
+        detail: bridgeUnavailable.message
+      });
       return false;
     }
     setBusy("save-key");
     try {
       const result = await window.managedAgents.setApiKey(key);
       if (!result.ok) {
-        pushStatus({ level: "error", title: result.error.name, detail: result.error.message });
+        pushStatus({
+          level: "error",
+          title: result.error.name,
+          detail: result.error.message
+        });
         return false;
       }
       await loadRuntime();
-      pushStatus({ level: "success", title: "API key saved", detail: result.value.envPath });
+      pushStatus({
+        level: "success",
+        title: "API key saved",
+        detail: result.value.envPath
+      });
       return true;
     } finally {
       setBusy(null);
@@ -1297,14 +1439,22 @@ export const App = () => {
 
   async function setSpecializedToolsEnabled(enabled: boolean) {
     if (!window.managedAgents?.setSpecializedToolsEnabled) {
-      pushStatus({ level: "error", title: bridgeUnavailable.name, detail: bridgeUnavailable.message });
+      pushStatus({
+        level: "error",
+        title: bridgeUnavailable.name,
+        detail: bridgeUnavailable.message
+      });
       return;
     }
     setBusy("save-tools");
     try {
       const result = await window.managedAgents.setSpecializedToolsEnabled(enabled);
       if (!result.ok) {
-        pushStatus({ level: "error", title: result.error.name, detail: result.error.message });
+        pushStatus({
+          level: "error",
+          title: result.error.name,
+          detail: result.error.message
+        });
         return;
       }
       await loadRuntime();
@@ -1323,37 +1473,159 @@ export const App = () => {
   async function copyText(text: string, label: string) {
     try {
       await navigator.clipboard.writeText(text);
-      pushStatus({ level: "success", title: label, detail: "Copied to clipboard" });
+      pushStatus({
+        level: "success",
+        title: label,
+        detail: "Copied to clipboard"
+      });
     } catch {
-      pushStatus({ level: "error", title: "Copy failed", detail: "Clipboard unavailable" });
+      pushStatus({
+        level: "error",
+        title: "Copy failed",
+        detail: "Clipboard unavailable"
+      });
     }
   }
 
   async function saveText(text: string, label: string) {
     if (!window.managedAgents?.saveText) {
-      pushStatus({ level: "error", title: "Save unavailable", detail: "Run the Electron app to save text." });
+      pushStatus({
+        level: "error",
+        title: "Save unavailable",
+        detail: "Run the Electron app to save text."
+      });
       return;
     }
     const result = await window.managedAgents.saveText(text, textFileNameForLabel(label));
     if (!result.ok) {
-      pushStatus({ level: "error", title: result.error.name, detail: result.error.message });
+      pushStatus({
+        level: "error",
+        title: result.error.name,
+        detail: result.error.message
+      });
       return;
     }
     if (result.value.saved) {
-      pushStatus({ level: "success", title: "Text saved", detail: result.value.path });
+      pushStatus({
+        level: "success",
+        title: "Text saved",
+        detail: result.value.path
+      });
+    }
+  }
+
+  async function hydrateCompletedSessionEnvironment(
+    sessionToHydrate: Session,
+    hydrationKey: string,
+    environmentHydrationKey: string
+  ) {
+    const interactionId = sessionToHydrate.seed?.id;
+    if (!interactionId || !window.managedAgents?.getInteraction) {
+      runtimeOutputHydrationSessionIds.current.delete(sessionToHydrate.localId);
+      completedOutputHydrationKeys.current.add(hydrationKey);
+      environmentOutputHydrationKeys.current.delete(environmentHydrationKey);
+      return;
+    }
+
+    try {
+      for (let attempt = 0; attempt <= OUTPUT_ENVIRONMENT_RETRY_DELAYS_MS.length; attempt += 1) {
+        const result = await window.managedAgents.getInteraction(interactionId);
+        if (result.ok) {
+          const hydratedEnvironmentId = nonEmptyString(result.value.environment_id);
+          logConversationDiagnostic(
+            conversationIdForSession(sessionToHydrate.localId) ?? activeConversationIdRef.current,
+            "outputs.environment.hydrated",
+            {
+              localId: sessionToHydrate.localId,
+              interactionId,
+              attempt,
+              hasEnvironment: Boolean(hydratedEnvironmentId)
+            }
+          );
+          setSessions((current) =>
+            current.map((session) => {
+              if (session.localId !== sessionToHydrate.localId) {
+                return session;
+              }
+              const nextSeed: Interaction = {
+                ...(session.seed ?? { id: result.value.id }),
+                ...result.value,
+                environment_id: hydratedEnvironmentId ?? nonEmptyString(session.seed?.environment_id)
+              };
+              return {
+                ...session,
+                seed: nextSeed,
+                completedAt: completedAtForInteraction(session, nextSeed) ?? session.completedAt
+              };
+            })
+          );
+          if (hydratedEnvironmentId) {
+            return;
+          }
+        } else {
+          logConversationDiagnostic(
+            conversationIdForSession(sessionToHydrate.localId) ?? activeConversationIdRef.current,
+            "outputs.environment.hydrate-failed",
+            {
+              localId: sessionToHydrate.localId,
+              interactionId,
+              attempt,
+              name: result.error.name,
+              message: result.error.message
+            }
+          );
+        }
+
+        const delay = OUTPUT_ENVIRONMENT_RETRY_DELAYS_MS[attempt];
+        if (delay === undefined) {
+          break;
+        }
+        await wait(delay);
+      }
+
+      runtimeOutputHydrationSessionIds.current.delete(sessionToHydrate.localId);
+      completedOutputHydrationKeys.current.add(hydrationKey);
+    } finally {
+      environmentOutputHydrationKeys.current.delete(environmentHydrationKey);
+    }
+  }
+
+  async function refreshCompletedOutputFiles(session: Session, environmentId: string) {
+    const initialSignature = outputFilesSignature(outputFilesByEnvironmentRef.current[environmentId]?.items);
+    const shouldRetry = sessionReferencesOutputFiles(session);
+
+    for (let attempt = 0; attempt <= OUTPUT_REFRESH_RETRY_DELAYS_MS.length; attempt += 1) {
+      const files = await loadOutputFiles(environmentId, true);
+      const nextSignature = outputFilesSignature(files);
+      if (!shouldRetry || (nextSignature && nextSignature !== initialSignature)) {
+        return;
+      }
+
+      const delay = OUTPUT_REFRESH_RETRY_DELAYS_MS[attempt];
+      if (delay === undefined) {
+        return;
+      }
+      logConversationDiagnostic(
+        conversationIdForSession(session.localId) ?? activeConversationIdRef.current,
+        "outputs.list.retry",
+        {
+          localId: session.localId,
+          environmentId,
+          attempt: attempt + 1,
+          previousSignature: initialSignature || undefined,
+          nextSignature: nextSignature || undefined
+        }
+      );
+      await wait(delay);
     }
   }
 
   /**
-   * One-shot output listing: fetch, show what's there, done. The run's
-   * snapshot is final once the interaction completes, so there is no retry
-   * ladder — completion triggers a single forced fetch, and the Refresh
-   * button covers anything exotic.
+   * Output listing is request-scoped: fetch, show what's there, and let the
+   * caller decide whether a terminal run needs bounded retries while the
+   * server snapshot catches up.
    */
-  async function loadOutputFiles(
-    environmentId: string,
-    force = false
-  ): Promise<EnvironmentOutputFile[] | undefined> {
+  async function loadOutputFiles(environmentId: string, force = false): Promise<EnvironmentOutputFile[] | undefined> {
     if (!window.managedAgents?.listEnvironmentOutputFiles) {
       return undefined;
     }
@@ -1388,10 +1660,7 @@ export const App = () => {
         message: thrown instanceof Error ? thrown.message : String(thrown)
       });
     } finally {
-      outputFilesPending.current[environmentId] = Math.max(
-        0,
-        (outputFilesPending.current[environmentId] ?? 1) - 1
-      );
+      outputFilesPending.current[environmentId] = Math.max(0, (outputFilesPending.current[environmentId] ?? 1) - 1);
     }
     logConversationDiagnostic(activeConversationIdRef.current, "outputs.list.settled", {
       environmentId,
@@ -1426,7 +1695,12 @@ export const App = () => {
         nextItems = resolvedItems;
         return {
           ...current,
-          [environmentId]: { loading: false, items: resolvedItems, checked: true, error: undefined }
+          [environmentId]: {
+            loading: false,
+            items: resolvedItems,
+            checked: true,
+            error: undefined
+          }
         };
       }
       nextItems = previousItems;
@@ -1445,23 +1719,33 @@ export const App = () => {
 
   async function saveOutputFile(file: EnvironmentOutputFile) {
     if (!window.managedAgents?.saveEnvironmentOutputFile) {
-      pushStatus({ level: "error", title: "Save unavailable", detail: "Run the Electron app to save output files." });
+      pushStatus({
+        level: "error",
+        title: "Save unavailable",
+        detail: "Run the Electron app to save output files."
+      });
       return;
     }
     const result = await window.managedAgents.saveEnvironmentOutputFile(file.path);
     if (!result.ok) {
-      pushStatus({ level: "error", title: result.error.name, detail: result.error.message });
+      pushStatus({
+        level: "error",
+        title: result.error.name,
+        detail: result.error.message
+      });
       return;
     }
     if (result.value.saved) {
-      pushStatus({ level: "success", title: "File saved", detail: result.value.path });
+      pushStatus({
+        level: "success",
+        title: "File saved",
+        detail: result.value.path
+      });
     }
   }
 
   function openLinkedOutputFile(url: string) {
-    const items = latestEnvironmentId
-      ? outputFilesByEnvironment[latestEnvironmentId]?.items
-      : undefined;
+    const items = latestEnvironmentId ? outputFilesByEnvironment[latestEnvironmentId]?.items : undefined;
     if (!items?.length) {
       return;
     }
@@ -1509,23 +1793,39 @@ export const App = () => {
 
   async function openOutputFileExternally(file: EnvironmentOutputFile) {
     if (!window.managedAgents?.openEnvironmentOutputFile) {
-      pushStatus({ level: "error", title: "Open unavailable", detail: "Run the Electron app to open output files." });
+      pushStatus({
+        level: "error",
+        title: "Open unavailable",
+        detail: "Run the Electron app to open output files."
+      });
       return;
     }
     const result = await window.managedAgents.openEnvironmentOutputFile(file.path);
     if (!result.ok) {
-      pushStatus({ level: "error", title: result.error.name, detail: result.error.message });
+      pushStatus({
+        level: "error",
+        title: result.error.name,
+        detail: result.error.message
+      });
     }
   }
 
   async function openPreviewLinkExternally(url: string) {
     if (!window.managedAgents?.openExternal) {
-      pushStatus({ level: "error", title: "Open link unavailable", detail: "Run the Electron app to open links." });
+      pushStatus({
+        level: "error",
+        title: "Open link unavailable",
+        detail: "Run the Electron app to open links."
+      });
       return;
     }
     const result = await window.managedAgents.openExternal(url);
     if (!result.ok) {
-      pushStatus({ level: "error", title: result.error.name, detail: result.error.message });
+      pushStatus({
+        level: "error",
+        title: result.error.name,
+        detail: result.error.message
+      });
     }
   }
 
@@ -1544,7 +1844,11 @@ export const App = () => {
     setLatestRunId(null);
     setActiveConversationId(NEW_CONVERSATION_ID);
     setNewConversationDraftVisible(true);
-    pushStatus({ level: "success", title: "Conversation deleted locally", detail: selectedConversation.title });
+    pushStatus({
+      level: "success",
+      title: "Conversation deleted locally",
+      detail: selectedConversation.title
+    });
   }
 
   function startNewConversation() {
@@ -1553,7 +1857,11 @@ export const App = () => {
     clearOptimisticSentImagesForKeys([NEW_CONVERSATION_ID]);
     setCompose(initialCompose);
     setLatestRunId(null);
-    pushStatus({ level: "info", title: "New conversation", detail: "Next message starts fresh." });
+    pushStatus({
+      level: "info",
+      title: "New conversation",
+      detail: "Next message starts fresh."
+    });
   }
 
   function selectConversation(conversationId: string) {
@@ -1589,7 +1897,11 @@ export const App = () => {
       setCompose(initialCompose);
       setLatestRunId(null);
     }
-    pushStatus({ level: "success", title: "Conversation deleted locally", detail: conversation.title });
+    pushStatus({
+      level: "success",
+      title: "Conversation deleted locally",
+      detail: conversation.title
+    });
   }
 
   function loadSamplePrompt(prompt: string) {
@@ -1692,8 +2004,7 @@ export const App = () => {
                         </span>
                         <strong>Deep Research</strong>
                         <span className="chat-empty-subtitle">
-                          Ask a research question. Runs happen in the background and can take up
-                          to 60 minutes.
+                          Ask a research question. Runs happen in the background and can take up to 60 minutes.
                         </span>
                       </div>
                     )
@@ -1703,9 +2014,7 @@ export const App = () => {
                         <Bot size={28} />
                       </span>
                       <strong>No local turns in this conversation</strong>
-                      <span className="chat-empty-subtitle">
-                        Session and environment continuity are on by default.
-                      </span>
+                      <span className="chat-empty-subtitle">Session and environment continuity are on by default.</span>
                     </div>
                   )
                 ) : (
@@ -1726,15 +2035,15 @@ export const App = () => {
                         reconnecting={activeResumeIds.current.has(session.localId)}
                         canReconnect={Boolean(
                           appReady &&
-                            window.managedAgents?.resumeInteractionStream &&
-                            sessionCanReconnect(session) &&
-                            !activeResumeIds.current.has(session.localId)
+                          window.managedAgents?.resumeInteractionStream &&
+                          sessionCanReconnect(session) &&
+                          !activeResumeIds.current.has(session.localId)
                         )}
                         canRetry={Boolean(appReady && session.error && !selectedConversationRunning)}
                         canCancel={Boolean(
                           session.streaming &&
-                            !cancelingSessionIds[session.localId] &&
-                            (session.seed?.id || session.streamId)
+                          !cancelingSessionIds[session.localId] &&
+                          (session.seed?.id || session.streamId)
                         )}
                         onReconnect={() => void reconnectSessionStream(session)}
                         onRetry={() => restoreSessionPromptForRetry(session)}
@@ -1766,7 +2075,13 @@ export const App = () => {
                   cancelDisabled={!runningSession || Boolean(cancelingSessionIds[runningSession.localId])}
                   onRun={() => void runInteraction()}
                   onCancel={() => runningSession && void cancelSession(runningSession)}
-                  onAttachmentError={(message) => pushStatus({ level: "error", title: "Attachment failed", detail: message })}
+                  onAttachmentError={(message) =>
+                    pushStatus({
+                      level: "error",
+                      title: "Attachment failed",
+                      detail: message
+                    })
+                  }
                 />
               </div>
             </>
@@ -1774,11 +2089,7 @@ export const App = () => {
         </section>
 
         {!outputPanelOpen && (
-          <OutputPanelToggle
-            fileCount={activeOutputFileCount}
-            appReady={appReady}
-            onClick={toggleOutputPanel}
-          />
+          <OutputPanelToggle fileCount={activeOutputFileCount} appReady={appReady} onClick={toggleOutputPanel} />
         )}
 
         {outputPanelOpen && (

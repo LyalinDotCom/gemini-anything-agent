@@ -13,6 +13,10 @@ const ICON_PATHS: Record<string, string> = {
   x: "M6 6l12 12M18 6 6 18",
   copy: "M9 9h10v12H9zM5 15V3h10",
   download: "M12 3v12m0 0 4-4m-4 4-4-4M4 19h16",
+  refresh: "M20 6v5h-5M4 18v-5h5M18.8 10A7 7 0 0 0 6.2 7.2M5.2 14A7 7 0 0 0 17.8 16.8",
+  file: "M7 3h7l4 4v14H7zM14 3v5h5",
+  audio: "M9 18V5l10-2v13M9 10l10-2M6 18a3 3 0 1 0 6 0 3 3 0 0 0-6 0Zm10-2a3 3 0 1 0 6 0 3 3 0 0 0-6 0Z",
+  video: "M4 6h11v12H4zM15 10l5-3v10l-5-3",
   chevron: "M8 10l4 4 4-4",
   search: "M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Zm9.5 16-4.4-4.4",
   globe: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm-9 9h18M12 3c2.5 2.5 3.5 5.5 3.5 9s-1 6.5-3.5 9c-2.5-2.5-3.5-5.5-3.5-9s1-6.5 3.5-9Z",
@@ -75,6 +79,7 @@ export function IconButton({
   disabled?: boolean;
   style?: CSSProperties;
 }) {
+  const restBackground = typeof style?.background === "string" ? style.background : "transparent";
   return (
     <button
       type="button"
@@ -90,7 +95,7 @@ export function IconButton({
         height: 32,
         borderRadius: T.radiusSm,
         border: "none",
-        background: "transparent",
+        background: restBackground,
         color: danger ? T.danger : T.textDim,
         cursor: disabled ? "default" : "pointer",
         opacity: disabled ? 0.4 : 1,
@@ -100,7 +105,7 @@ export function IconButton({
         (e.currentTarget as HTMLButtonElement).style.background = T.bgHover;
       }}
       onMouseLeave={(e) => {
-        (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+        (e.currentTarget as HTMLButtonElement).style.background = restBackground;
       }}
     >
       <Icon name={name} size={size} />

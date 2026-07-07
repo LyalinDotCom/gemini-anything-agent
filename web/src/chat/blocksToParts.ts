@@ -245,7 +245,17 @@ export function groupParts(parts: ContentPart[]): ContentPart[] {
         continue;
       }
       if (item.kind === "code") {
-        const prev = [...merged].reverse().find((m): m is Extract<ContentPart, { kind: "code" }> => m.kind === "code");
+        const prevIndex = (() => {
+          for (let j = merged.length - 1; j >= 0; j--) {
+            if (merged[j].kind === "tool") return -1;
+            if (merged[j].kind === "code") return j;
+          }
+          return -1;
+        })();
+        const prev =
+          prevIndex >= 0 && merged[prevIndex].kind === "code"
+            ? (merged[prevIndex] as Extract<ContentPart, { kind: "code" }>)
+            : undefined;
         if (prev) {
           prev.runs = [...prev.runs, ...item.runs];
           prev.done = prev.done && item.done;

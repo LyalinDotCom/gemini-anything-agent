@@ -8,7 +8,7 @@ export const FALLBACK_RUNTIME: RuntimeConfig = {
   envPath: ".env",
   chatStorePath: "chats",
   docsLastChecked: "2026-06-22",
-  agentId: "gemini-anything-agent",
+  agentId: "gemini-anything-v1",
   npmPackage: "@lyalindotcom/gai",
   npmVersion: "latest",
   specializedToolsEnabled: true

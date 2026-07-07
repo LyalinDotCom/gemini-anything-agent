@@ -74,7 +74,7 @@ protocol.registerSchemesAsPrivileged([
   }
 ]);
 
-const DEFAULT_AGENT_ID = "gemini-anything-agent";
+const DEFAULT_AGENT_ID = "gemini-anything-v1";
 const DEFAULT_NPM_PACKAGE = "@lyalindotcom/gai";
 const DEFAULT_NPM_VERSION = "latest";
 const SPECIALIZED_TOOLS_ENV_KEY = "GEMINI_ANYTHING_SPECIALIZED_TOOLS_ENABLED";
@@ -91,18 +91,14 @@ const REPO_ROOT = existsSync(join(CWD, "app", "package.json"))
   : existsSync(join(CWD, "..", "cli", "package.json"))
     ? join(CWD, "..")
     : CWD;
-const APP_ROOT = existsSync(join(REPO_ROOT, "app", "package.json"))
-  ? join(REPO_ROOT, "app")
-  : CWD;
+const APP_ROOT = existsSync(join(REPO_ROOT, "app", "package.json")) ? join(REPO_ROOT, "app") : CWD;
 const ROOT_ENV_PATH = join(REPO_ROOT, ".env");
 const ROOT_ENV_LOCAL_PATH = join(REPO_ROOT, ".env.local");
 const ENV_PATH = join(APP_ROOT, ".env");
 const ENV_LOCAL_PATH = join(APP_ROOT, ".env.local");
 const AGENT_ASSETS_ROOT = join(REPO_ROOT, "agents");
 const APP_ICON_PNG_PATH = join(APP_ROOT, "assets", "app-icon.png");
-const APP_ICON_PATH = process.platform === "darwin"
-  ? join(APP_ROOT, "assets", "app-icon.icns")
-  : APP_ICON_PNG_PATH;
+const APP_ICON_PATH = process.platform === "darwin" ? join(APP_ROOT, "assets", "app-icon.icns") : APP_ICON_PNG_PATH;
 const LOCAL_OUTPUT_ROOT = join(REPO_ROOT, "outputs", "managed-agent");
 const LOCAL_CHAT_ROOT = chatStoreRootPath(REPO_ROOT);
 const mediaCacheRoot = (): string => join(app.getPath("userData"), "environment-media");
@@ -143,8 +139,7 @@ const envValue = (value: string | undefined): string =>
     .replace(/^(['"])(.*)\1$/, "$2")
     .replace(/[\r\n]/g, "");
 
-const envValueOrDefault = (value: string | undefined, fallback: string): string =>
-  envValue(value) || fallback;
+const envValueOrDefault = (value: string | undefined, fallback: string): string => envValue(value) || fallback;
 
 const envFlagEnabled = (value: string | undefined, fallback: boolean): boolean => {
   const normalized = envValue(value).toLowerCase();
@@ -272,8 +267,7 @@ const comparableAgentDefinition = (agent: ManagedAgent | AgentDefinition): Agent
     base_environment: agent.base_environment
   });
 
-const isEnvTarget = (target: string): boolean =>
-  basename(target.replace(/\\/g, "/")) === ".env";
+const isEnvTarget = (target: string): boolean => basename(target.replace(/\\/g, "/")) === ".env";
 
 const redactEnvContent = (content: string): string =>
   content.replace(/^([A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD|PRIVATE_KEY)[A-Z0-9_]*)=.*$/gim, "$1=<configured>");
@@ -305,8 +299,7 @@ const redactDefinitionSecrets = (agent: AgentDefinition): AgentDefinition => {
   return comparable;
 };
 
-const redactAgentForRenderer = (agent: ManagedAgent): ManagedAgent =>
-  redactEnvironmentSecrets(agent);
+const redactAgentForRenderer = (agent: ManagedAgent): ManagedAgent => redactEnvironmentSecrets(agent);
 
 const redactAgentListForRenderer = (response: AgentListResponse): AgentListResponse => ({
   ...response,
@@ -314,7 +307,10 @@ const redactAgentListForRenderer = (response: AgentListResponse): AgentListRespo
 });
 
 const agentConfigHash = (agent: AgentDefinition): string =>
-  createHash("sha256").update(JSON.stringify(redactDefinitionSecrets(agent))).digest("hex").slice(0, 12);
+  createHash("sha256")
+    .update(JSON.stringify(redactDefinitionSecrets(agent)))
+    .digest("hex")
+    .slice(0, 12);
 
 const buildAnythingAgentDefinition = (
   agentId: string,
@@ -351,11 +347,7 @@ const buildAnythingAgentDefinition = (
   const definition: AgentDefinition = {
     id: agentId,
     base_agent: ANTIGRAVITY_BASE_AGENT,
-    tools: [
-      { type: "code_execution" },
-      { type: "google_search" },
-      { type: "url_context" }
-    ],
+    tools: [{ type: "code_execution" }, { type: "google_search" }, { type: "url_context" }],
     base_environment: sources ? { type: "remote", sources } : { type: "remote" }
   };
 
@@ -430,8 +422,7 @@ const SERVABLE_OUTPUT_EXTENSIONS = new Set([
   ".wasm"
 ]);
 
-const canServeOutputPath = (path: string): boolean =>
-  SERVABLE_OUTPUT_EXTENSIONS.has(extname(path).toLowerCase());
+const canServeOutputPath = (path: string): boolean => SERVABLE_OUTPUT_EXTENSIONS.has(extname(path).toLowerCase());
 
 const MEDIA_MIME_TYPES = new Map<string, string>([
   [".png", "image/png"],
@@ -512,13 +503,7 @@ const byteRangeForHeader = (rangeHeader: string | null, size: number): ByteRange
     end = endText ? Number(endText) : size - 1;
   }
 
-  if (
-    !Number.isSafeInteger(start) ||
-    !Number.isSafeInteger(end) ||
-    start < 0 ||
-    end < start ||
-    start >= size
-  ) {
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || start >= size) {
     return "invalid";
   }
 
@@ -631,7 +616,9 @@ const safeCacheSegment = (value: string): string =>
     .slice(0, 120) || "environment";
 
 const normalizedRelativeTarPath = (value: string): string | undefined => {
-  const normalized = normalize(value).replace(/^(\.\.[/\\])+/, "").replace(/^[/\\]+/, "");
+  const normalized = normalize(value)
+    .replace(/^(\.\.[/\\])+/, "")
+    .replace(/^[/\\]+/, "");
   if (!normalized || normalized === "." || isAbsolute(normalized) || normalized.split(/[\\/]/).includes("..")) {
     return undefined;
   }
@@ -659,7 +646,7 @@ const outputRelativePathForEntry = (value: string): string | undefined => {
   return relativeOutputPath;
 };
 
-const unique = <T,>(values: T[]): T[] => [...new Set(values)];
+const unique = <T>(values: T[]): T[] => [...new Set(values)];
 
 // Hashes incrementally so comparing two multi-GB videos never loads either
 // into memory or blocks the main thread in one long readFileSync.
@@ -726,8 +713,7 @@ const autoSaveMedia = async (environmentId: string, sourcePath: string): Promise
   return target;
 };
 
-const localOutputRoot = (environmentId: string): string =>
-  join(LOCAL_OUTPUT_ROOT, safeCacheSegment(environmentId));
+const localOutputRoot = (environmentId: string): string => join(LOCAL_OUTPUT_ROOT, safeCacheSegment(environmentId));
 
 const localOutputMediaEntries = (root: string, current = root): string[] => {
   if (!existsSync(current)) {
@@ -741,7 +727,11 @@ const localOutputMediaEntries = (root: string, current = root): string[] => {
     if (!entry.isFile() || !mediaTypeForPath(fullPath)) {
       return [];
     }
-    return [normalize(fullPath.slice(root.length)).replace(/^[/\\]+/, "").replace(/\\/g, "/")];
+    return [
+      normalize(fullPath.slice(root.length))
+        .replace(/^[/\\]+/, "")
+        .replace(/\\/g, "/")
+    ];
   });
 };
 
@@ -761,8 +751,9 @@ const copyAutoSavedMediaToCache = async (
         requestedPaths.flatMap((requestedPath) => {
           const outputRelativePath = outputRelativePathForEntry(requestedPath);
           return unique(
-            [outputRelativePath, outputRelativePath ? basename(outputRelativePath) : basename(requestedPath)]
-              .filter((value): value is string => Boolean(value))
+            [outputRelativePath, outputRelativePath ? basename(outputRelativePath) : basename(requestedPath)].filter(
+              (value): value is string => Boolean(value)
+            )
           );
         })
       )
@@ -794,11 +785,7 @@ const mediaUrl = (environmentId: string, relativeEntry: string, version?: string
   return `${MEDIA_PROTOCOL}://${safeCacheSegment(environmentId)}/${encodedPath}${cacheBust}`;
 };
 
-const cachedEnvironmentOutputFiles = (
-  environmentId: string,
-  root: string,
-  current = root
-): EnvironmentOutputFile[] => {
+const cachedEnvironmentOutputFiles = (environmentId: string, root: string, current = root): EnvironmentOutputFile[] => {
   const resolvedRoot = resolve(root);
   if (!existsSync(current)) {
     return [];
@@ -835,9 +822,10 @@ const cachedEnvironmentOutputFiles = (
         modifiedAt: stats.mtimeMs,
         fileType,
         mediaType,
-        url: mediaType || fileType === "html" || fileType === "markdown" || fileType === "text"
-          ? mediaUrl(environmentId, relativeEntry, version)
-          : undefined
+        url:
+          mediaType || fileType === "html" || fileType === "markdown" || fileType === "text"
+            ? mediaUrl(environmentId, relativeEntry, version)
+            : undefined
       };
       return [file];
     })
@@ -863,10 +851,7 @@ const extractTarEntries = async (
 
 const snapshotCacheLocks = new Map<string, Promise<void>>();
 
-const withEnvironmentSnapshotLock = async <T,>(
-  environmentId: string,
-  task: () => Promise<T>
-): Promise<T> => {
+const withEnvironmentSnapshotLock = async <T>(environmentId: string, task: () => Promise<T>): Promise<T> => {
   const previous = snapshotCacheLocks.get(environmentId) ?? Promise.resolve();
   let release: () => void = () => undefined;
   const currentWait = new Promise<void>((resolveWait) => {
@@ -955,7 +940,9 @@ const listEnvironmentOutputFilesFromSnapshot = async (
     try {
       await downloadSnapshotTarTo(environmentId, tarPath);
 
-      const listed = await execFileAsync("tar", ["-tf", tarPath], { maxBuffer: 64 * 1024 * 1024 });
+      const listed = await execFileAsync("tar", ["-tf", tarPath], {
+        maxBuffer: 64 * 1024 * 1024
+      });
       const selectedEntries = unique(
         listed.stdout
           .split("\n")
@@ -1046,9 +1033,7 @@ const upsertEnvKey = (envPath: string, name: string, value: string): void => {
   const line = `${name}=${value}`;
   const pattern = new RegExp(`^${name}=.*$`, "m");
   if (!value) {
-    content = content
-      .replace(new RegExp(`^${name}=.*(?:\\r?\\n)?`, "m"), "")
-      .replace(/\n{3,}/g, "\n\n");
+    content = content.replace(new RegExp(`^${name}=.*(?:\\r?\\n)?`, "m"), "").replace(/\n{3,}/g, "\n\n");
     writeFileSync(envPath, content, "utf8");
     return;
   }
@@ -1082,7 +1067,10 @@ const serializeError = (error: unknown): IpcError => {
 };
 
 const ok = <T>(value: T): IpcResult<T> => ({ ok: true, value });
-const fail = <T>(error: unknown): IpcResult<T> => ({ ok: false, error: serializeError(error) });
+const fail = <T>(error: unknown): IpcResult<T> => ({
+  ok: false,
+  error: serializeError(error)
+});
 const streamControllers = new Map<string, AbortController>();
 const STREAM_BUFFER_TTL_MS = 5 * 60_000;
 type StreamBuffer = {
@@ -1119,8 +1107,14 @@ const rememberStreamEvent = (
     lastEventId?: string;
   },
   streamEvent: InteractionStreamEvent
-): { event: InteractionStreamEvent; latestInteraction: Interaction | undefined } => {
-  const event: InteractionStreamEvent = { ...streamEvent, seq: nextStreamEventSeq };
+): {
+  event: InteractionStreamEvent;
+  latestInteraction: Interaction | undefined;
+} => {
+  const event: InteractionStreamEvent = {
+    ...streamEvent,
+    seq: nextStreamEventSeq
+  };
   nextStreamEventSeq += 1;
   buffer.events = [...buffer.events, event].slice(-300);
   if (event.event_id) {
@@ -1162,6 +1156,9 @@ const interactionStatusIsTerminal = (interaction: Interaction | undefined): bool
   return Boolean(status && !NON_TERMINAL_INTERACTION_STATUS.has(status));
 };
 
+const nonEmptyString = (value: unknown): string | undefined =>
+  typeof value === "string" && value.trim() ? value.trim() : undefined;
+
 const hydrateStreamInteraction = async (
   client: GeminiManagedAgentsClient,
   latestInteraction: Interaction | undefined,
@@ -1178,7 +1175,7 @@ const hydrateStreamInteraction = async (
       ...hydrated,
       usage: latestInteraction?.usage ?? hydrated.usage,
       status: hydrated.status ?? latestInteraction?.status,
-      environment_id: latestInteraction?.environment_id ?? hydrated.environment_id
+      environment_id: nonEmptyString(latestInteraction?.environment_id) ?? nonEmptyString(hydrated.environment_id)
     };
   } catch {
     return latestInteraction;
@@ -1329,58 +1326,55 @@ handle<[boolean], SetSpecializedToolsResult>(ipcChannels.setSpecializedToolsEnab
   };
 });
 
-handle<[string | undefined], EnsureAnythingAgentResult>(
-  ipcChannels.ensureAnythingAgent,
-  async (requestedAgentId) => {
-    const agentId = requestedAgentId?.trim() || process.env.GEMINI_ANYTHING_AGENT_ID || DEFAULT_AGENT_ID;
-    const client = createClient();
-    const definition = buildAnythingAgentDefinition(agentId);
-    const sourceTargets =
-      typeof definition.base_environment === "object"
-        ? definition.base_environment.sources?.map((source) => source.target) ?? []
-        : [];
+handle<[string | undefined], EnsureAnythingAgentResult>(ipcChannels.ensureAnythingAgent, async (requestedAgentId) => {
+  const agentId = requestedAgentId?.trim() || process.env.GEMINI_ANYTHING_AGENT_ID || DEFAULT_AGENT_ID;
+  const client = createClient();
+  const definition = buildAnythingAgentDefinition(agentId);
+  const sourceTargets =
+    typeof definition.base_environment === "object"
+      ? (definition.base_environment.sources?.map((source) => source.target) ?? [])
+      : [];
 
-    try {
-      const existing = await client.getAgent(agentId);
-      if (agentDefinitionsMatch(existing, definition)) {
-        return {
-          agent: redactAgentForRenderer(existing),
-          created: false,
-          sourceTargets
-        };
-      }
-
-      await client.deleteAgent(agentId);
+  try {
+    const existing = await client.getAgent(agentId);
+    if (agentDefinitionsMatch(existing, definition)) {
       return {
-        agent: redactAgentForRenderer(await client.createAgent(definition)),
-        created: true,
-        recreated: true,
-        sourceTargets
-      };
-    } catch (error) {
-      if (!isMissingAgentError(error)) {
-        throw error;
-      }
-    }
-
-    try {
-      return {
-        agent: redactAgentForRenderer(await client.createAgent(definition)),
-        created: true,
-        sourceTargets
-      };
-    } catch (error) {
-      if (!isMissingAgentError(error) && !(error instanceof GeminiApiError && error.status === 409)) {
-        throw error;
-      }
-      return {
-        agent: redactAgentForRenderer(await client.getAgent(agentId)),
+        agent: redactAgentForRenderer(existing),
         created: false,
         sourceTargets
       };
     }
+
+    await client.deleteAgent(agentId);
+    return {
+      agent: redactAgentForRenderer(await client.createAgent(definition)),
+      created: true,
+      recreated: true,
+      sourceTargets
+    };
+  } catch (error) {
+    if (!isMissingAgentError(error)) {
+      throw error;
+    }
   }
-);
+
+  try {
+    return {
+      agent: redactAgentForRenderer(await client.createAgent(definition)),
+      created: true,
+      sourceTargets
+    };
+  } catch (error) {
+    if (!isMissingAgentError(error) && !(error instanceof GeminiApiError && error.status === 409)) {
+      throw error;
+    }
+    return {
+      agent: redactAgentForRenderer(await client.getAgent(agentId)),
+      created: false,
+      sourceTargets
+    };
+  }
+});
 
 handle<[AgentDefinition], Awaited<ReturnType<GeminiManagedAgentsClient["createAgent"]>>>(
   ipcChannels.createAgent,
@@ -1388,9 +1382,8 @@ handle<[AgentDefinition], Awaited<ReturnType<GeminiManagedAgentsClient["createAg
 );
 
 handle(ipcChannels.listAgents, async () => redactAgentListForRenderer(await createClient().listAgents()));
-handle<[string], Awaited<ReturnType<GeminiManagedAgentsClient["getAgent"]>>>(
-  ipcChannels.getAgent,
-  async (id) => redactAgentForRenderer(await createClient().getAgent(id))
+handle<[string], Awaited<ReturnType<GeminiManagedAgentsClient["getAgent"]>>>(ipcChannels.getAgent, async (id) =>
+  redactAgentForRenderer(await createClient().getAgent(id))
 );
 handle<[string], boolean>(ipcChannels.deleteAgent, async (id) => {
   await createClient().deleteAgent(id);
@@ -1419,7 +1412,9 @@ ipcMain.handle(
     event.sender.once("destroyed", abortForDestroyedSender);
 
     try {
-      for await (const streamEvent of client.createInteractionStream(augmentInteractionRequest(request), { signal: controller.signal })) {
+      for await (const streamEvent of client.createInteractionStream(augmentInteractionRequest(request), {
+        signal: controller.signal
+      })) {
         const remembered = rememberStreamEvent(buffer, streamEvent);
         latestInteraction = remembered.latestInteraction;
         if (event.sender.isDestroyed()) {
@@ -1476,7 +1471,10 @@ ipcMain.handle(
     streamControllers.set(streamId, controller);
     const buffer = {
       events: [] as InteractionStreamEvent[],
-      latestInteraction: { id: interactionId, status: "in_progress" } as Interaction,
+      latestInteraction: {
+        id: interactionId,
+        status: "in_progress"
+      } as Interaction,
       done: false,
       lastEventId,
       cleanupTimer: undefined as ReturnType<typeof setTimeout> | undefined
@@ -1542,22 +1540,24 @@ handle<[string], boolean>(ipcChannels.cancelInteractionStream, async (streamId) 
 });
 handle<
   [string],
-  { events: InteractionStreamEvent[]; latestInteraction?: Interaction; done: boolean; lastEventId?: string }
->(
-  ipcChannels.getInteractionStreamSnapshot,
-  async (streamId) => {
-    const buffer = streamBuffers.get(streamId);
-    if (!buffer) {
-      return { events: [], done: true };
-    }
-    return {
-      events: buffer.events,
-      latestInteraction: buffer.latestInteraction,
-      done: buffer.done,
-      lastEventId: buffer.lastEventId
-    };
+  {
+    events: InteractionStreamEvent[];
+    latestInteraction?: Interaction;
+    done: boolean;
+    lastEventId?: string;
   }
-);
+>(ipcChannels.getInteractionStreamSnapshot, async (streamId) => {
+  const buffer = streamBuffers.get(streamId);
+  if (!buffer) {
+    return { events: [], done: true };
+  }
+  return {
+    events: buffer.events,
+    latestInteraction: buffer.latestInteraction,
+    done: buffer.done,
+    lastEventId: buffer.lastEventId
+  };
+});
 handle<[string], Awaited<ReturnType<GeminiManagedAgentsClient["getInteraction"]>>>(
   ipcChannels.getInteraction,
   async (id) => createClient().getInteraction(id)
@@ -1579,7 +1579,11 @@ handle<[string], SnapshotDownloadResult>(ipcChannels.downloadSnapshot, async (en
     return { saved: false, canceled: true };
   }
   await downloadSnapshotTarTo(environmentId, result.filePath);
-  return { saved: true, path: result.filePath, bytes: statSync(result.filePath).size };
+  return {
+    saved: true,
+    path: result.filePath,
+    bytes: statSync(result.filePath).size
+  };
 });
 
 handle<[string, boolean | undefined], EnvironmentOutputFile[]>(
@@ -1603,7 +1607,11 @@ handle<[string], SaveResolvedMediaResult>(ipcChannels.saveEnvironmentOutputFile,
   }
 
   await copyFile(source, result.filePath);
-  return { saved: true, path: result.filePath, bytes: statSync(result.filePath).size };
+  return {
+    saved: true,
+    path: result.filePath,
+    bytes: statSync(result.filePath).size
+  };
 });
 
 handle<[string], boolean>(ipcChannels.openEnvironmentOutputFile, async (sourcePath) => {
@@ -1662,7 +1670,11 @@ handle<[string, string | undefined], SaveTextResult>(ipcChannels.saveText, async
   }
 
   writeFileSync(result.filePath, content, "utf8");
-  return { saved: true, path: result.filePath, bytes: statSync(result.filePath).size };
+  return {
+    saved: true,
+    path: result.filePath,
+    bytes: statSync(result.filePath).size
+  };
 });
 
 handle(ipcChannels.loadStoredSessions, (): ChatSessionStoreSnapshot => ({
@@ -1680,28 +1692,20 @@ handle<[PersistedSession[]], ChatSessionStoreSnapshot>(ipcChannels.saveStoredSes
   };
 });
 
-ipcMain.on(
-  ipcChannels.appendConversationDiagnostics,
-  (_event, conversationId: unknown, entry: unknown) => {
-    if (
-      typeof conversationId !== "string" ||
-      !conversationId.trim() ||
-      typeof entry !== "object" ||
-      entry === null
-    ) {
-      return;
-    }
-    const { at, event: eventName, detail } = entry as Record<string, unknown>;
-    if (typeof at !== "string" || typeof eventName !== "string") {
-      return;
-    }
-    queueConversationDiagnostics(conversationId, {
-      at,
-      event: eventName,
-      detail: typeof detail === "string" ? detail : undefined
-    });
+ipcMain.on(ipcChannels.appendConversationDiagnostics, (_event, conversationId: unknown, entry: unknown) => {
+  if (typeof conversationId !== "string" || !conversationId.trim() || typeof entry !== "object" || entry === null) {
+    return;
   }
-);
+  const { at, event: eventName, detail } = entry as Record<string, unknown>;
+  if (typeof at !== "string" || typeof eventName !== "string") {
+    return;
+  }
+  queueConversationDiagnostics(conversationId, {
+    at,
+    event: eventName,
+    detail: typeof detail === "string" ? detail : undefined
+  });
+});
 
 // Blocking variant for window unload: renderer saves are coalesced, so the
 // final pending snapshot must land on disk before the process goes away.

@@ -58,7 +58,38 @@ function Pre({ children }: { children?: React.ReactNode }) {
   );
 }
 
-export const Markdown = memo(function Markdown({ text }: { text: string }) {
+const OUTPUT_PATH_RE = /\/workspace\/output\/[^\s<>"'`]+/g;
+const TRAILING_PUNCTUATION_RE = /[.,;:!?)}\]]+$/;
+
+function basename(path: string): string {
+  return path.split("/").filter(Boolean).pop() || path;
+}
+
+function escapeMarkdownLabel(label: string): string {
+  return label.replace(/\\/g, "\\\\").replace(/\[/g, "\\[").replace(/\]/g, "\\]");
+}
+
+function linkifyOutputPaths(text: string): string {
+  return text
+    .split(/(```[\s\S]*?```)/g)
+    .map((chunk, index) => {
+      if (index % 2 === 1) return chunk;
+      return chunk.replace(OUTPUT_PATH_RE, (match) => {
+        const trailing = match.match(TRAILING_PUNCTUATION_RE)?.[0] ?? "";
+        const path = trailing ? match.slice(0, -trailing.length) : match;
+        return `[${escapeMarkdownLabel(basename(path))}](resource:${encodeURIComponent(path)})${trailing}`;
+      });
+    })
+    .join("");
+}
+
+export const Markdown = memo(function Markdown({
+  text,
+  onOpenResourcePath,
+}: {
+  text: string;
+  onOpenResourcePath?: (path: string) => void;
+}) {
   return (
     <div className="md" style={{ fontSize: 14.5, lineHeight: 1.65, wordBreak: "break-word" }}>
       <ReactMarkdown
@@ -66,11 +97,32 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
         rehypePlugins={[rehypeHighlight]}
         components={{
           pre: Pre,
-          a: ({ href, children }) => (
-            <a href={href} target="_blank" rel="noreferrer" style={{ color: T.accent }}>
-              {children}
-            </a>
-          ),
+          a: ({ href, children }) => {
+            const resourcePath = href?.startsWith("resource:") ? decodeURIComponent(href.slice("resource:".length)) : null;
+            return resourcePath ? (
+              <button
+                type="button"
+                onClick={() => onOpenResourcePath?.(resourcePath)}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  padding: 0,
+                  color: T.accent,
+                  font: "inherit",
+                  cursor: onOpenResourcePath ? "pointer" : "default",
+                  textDecoration: "underline",
+                  textDecorationThickness: "1px",
+                  textUnderlineOffset: 3,
+                }}
+              >
+                {children}
+              </button>
+            ) : (
+              <a href={href} target="_blank" rel="noreferrer" style={{ color: T.accent }}>
+                {children}
+              </a>
+            );
+          },
           table: ({ children }) => (
             <div style={{ overflowX: "auto", margin: "10px 0" }}>
               <table style={{ borderCollapse: "collapse", fontSize: 13.5 }}>{children}</table>
@@ -105,7 +157,7 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
           },
         }}
       >
-        {text}
+        {linkifyOutputPaths(text)}
       </ReactMarkdown>
     </div>
   );

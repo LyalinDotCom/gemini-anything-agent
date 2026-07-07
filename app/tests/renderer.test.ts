@@ -25,14 +25,14 @@ import { DEEP_RESEARCH_AGENT, DEEP_RESEARCH_MAX_AGENT } from "../src/sdk";
 
 describe("chat interaction builder", () => {
   it("builds a multimodal request with attached images", () => {
-    const request = buildChatInteraction("gemini-anything-agent", {
+    const request = buildChatInteraction("gemini-anything-v1", {
       ...initialCompose,
       input: "Describe this",
       parts: [
         { id: "i", kind: "image", data: "AAAA", mimeType: "image/png", name: "x.png", bytes: 3 }
       ]
     });
-    expect(request.agent).toBe("gemini-anything-agent");
+    expect(request.agent).toBe("gemini-anything-v1");
     expect(request.input).toEqual([
       { type: "text", text: "Describe this" },
       { type: "image", data: "AAAA", mime_type: "image/png" }
@@ -40,7 +40,7 @@ describe("chat interaction builder", () => {
   });
 
   it("builds a Deep Research request invoked by base-agent id", () => {
-    const request = buildChatInteraction("gemini-anything-agent", {
+    const request = buildChatInteraction("gemini-anything-v1", {
       ...initialCompose,
       agentMode: "deep-research",
       input: "Research the history of Google TPUs.",
@@ -64,7 +64,7 @@ describe("chat interaction builder", () => {
   });
 
   it("keeps Deep Research follow-ups chained to the previous interaction", () => {
-    const request = buildChatInteraction("gemini-anything-agent", {
+    const request = buildChatInteraction("gemini-anything-v1", {
       ...initialCompose,
       agentMode: "deep-research-max",
       input: "Expand the report with a competitor table.",
@@ -89,7 +89,7 @@ describe("chat interaction builder", () => {
       background: true
     });
     const anything = composeFromRequest({
-      agent: "gemini-anything-agent",
+      agent: "gemini-anything-v1",
       input: "Do something.",
       environment: "remote"
     });
@@ -289,7 +289,8 @@ describe("session history storage", () => {
     );
 
     expect(renamed.map((item) => item.agentId)).toEqual(["agent-c", "agent-b"]);
-    expect(renamed[0].request.agent).toBe("agent-a");
+    expect(renamed[0].request.agent).toBe("agent-c");
+    expect(renamed[0].agentSnapshot?.id).toBe("agent-c");
   });
 });
 

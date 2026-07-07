@@ -1,14 +1,20 @@
 import { memo, useMemo, useState } from "react";
-import { groupParts } from "../chat/blocksToParts";
+import { groupParts, settleParts } from "../chat/blocksToParts";
 import type { ContentPart, Message } from "../state/types";
 import { T } from "../tokens";
 import { Icon, Spinner } from "./atoms";
 import { ImagePart } from "./ImagePart";
 import { Markdown } from "./Markdown";
-import { AudioPart, FilePart, VideoPart } from "./MediaParts";
+import { AudioPart } from "./MediaParts";
 import { ToolActivityChip } from "./ToolActivityChip";
 
-function ThoughtPart({ text, streaming }: { text: string; streaming: boolean }) {
+function ThoughtPart({
+  text,
+  streaming,
+}: {
+  text: string;
+  streaming: boolean;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <div style={{ margin: "4px 0" }}>
@@ -29,7 +35,11 @@ function ThoughtPart({ text, streaming }: { text: string; streaming: boolean }) 
       >
         {streaming ? <Spinner size={11} /> : <Icon name="brain" size={13} />}
         {streaming ? "Thinking…" : "Thought for a moment"}
-        <Icon name="chevron" size={12} style={{ transform: open ? "rotate(180deg)" : undefined }} />
+        <Icon
+          name="chevron"
+          size={12}
+          style={{ transform: open ? "rotate(180deg)" : undefined }}
+        />
       </button>
       {open && (
         <div
@@ -83,12 +93,27 @@ function CodePart({ part }: { part: Extract<ContentPart, { kind: "code" }> }) {
           cursor: "pointer",
         }}
       >
-        {running ? <Spinner size={12} color={T.accent} /> : <Icon name="code" size={13} />}
+        {running ? (
+          <Spinner size={12} color={T.accent} />
+        ) : (
+          <Icon name="code" size={13} />
+        )}
         {label}
-        <Icon name="chevron" size={12} style={{ transform: open ? "rotate(180deg)" : undefined }} />
+        <Icon
+          name="chevron"
+          size={12}
+          style={{ transform: open ? "rotate(180deg)" : undefined }}
+        />
       </button>
       {open && (
-        <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 8 }}>
+        <div
+          style={{
+            marginTop: 6,
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}
+        >
           {part.runs.map((run, i) => (
             <div key={i}>
               <pre
@@ -98,7 +123,9 @@ function CodePart({ part }: { part: Extract<ContentPart, { kind: "code" }> }) {
                   background: "#101014",
                   border: `1px solid ${T.borderSoft}`,
                   borderRadius:
-                    run.result !== undefined ? `${T.radiusSm}px ${T.radiusSm}px 0 0` : T.radiusSm,
+                    run.result !== undefined
+                      ? `${T.radiusSm}px ${T.radiusSm}px 0 0`
+                      : T.radiusSm,
                   fontSize: 12.5,
                   fontFamily: T.mono,
                   overflowX: "auto",
@@ -135,16 +162,89 @@ function CodePart({ part }: { part: Extract<ContentPart, { kind: "code" }> }) {
   );
 }
 
-export const MessageBubble = memo(function MessageBubble({ message }: { message: Message }) {
+function OutputLink({
+  label,
+  onOpenResourcePath,
+}: {
+  label: string;
+  onOpenResourcePath?: (path: string) => void;
+}) {
+  const path = label.startsWith("/workspace/output/")
+    ? label
+    : `/workspace/output/${label}`;
+  return (
+    <button
+      type="button"
+      onClick={() => onOpenResourcePath?.(path)}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 7,
+        margin: "4px 0",
+        padding: "5px 8px",
+        borderRadius: T.radiusSm,
+        border: `1px solid ${T.border}`,
+        background: T.bgElev,
+        color: T.accent,
+        fontSize: 13,
+        cursor: onOpenResourcePath ? "pointer" : "default",
+      }}
+    >
+      <Icon name="file" size={13} />
+      {label.replace(/^\/?workspace\/output\//, "")}
+    </button>
+  );
+}
+
+export const MessageBubble = memo(function MessageBubble({
+  message,
+  onOpenResourcePath,
+}: {
+  message: Message;
+  onOpenResourcePath?: (path: string) => void;
+}) {
   const isUser = message.role === "user";
   const streaming = message.status === "streaming";
   // Grouping is a RENDER concern: transcripts persist raw parts, so history always
   // benefits from the current grouping logic.
-  const parts = useMemo(() => (isUser ? message.parts : groupParts(message.parts)), [isUser, message.parts]);
+  const parts = useMemo(() => {
+    const grouped = isUser ? message.parts : groupParts(message.parts);
+    if (isUser || streaming) return grouped;
+    const normalized = grouped.map((part) => {
+      if (
+        part.kind !== "tool" ||
+        part.id !== "recover-note" ||
+        part.activity.status !== "running"
+      )
+        return part;
+      const stopped = message.status === "stopped";
+      const failed = message.status === "error";
+      return {
+        ...part,
+        activity: {
+          ...part.activity,
+          label: failed
+            ? "Recovery failed"
+            : stopped
+              ? "Recovery stopped"
+              : "Recovered this turn from the server after a reload",
+          status: failed ? ("error" as const) : ("done" as const),
+        },
+      };
+    });
+    return settleParts(normalized, message.status === "error");
+  }, [isUser, message.parts, message.status, streaming]);
 
   if (isUser) {
     return (
-      <div style={{ display: "flex", justifyContent: "flex-end", margin: "14px 0", animation: "aichat-in 0.2s ease" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          margin: "14px 0",
+          animation: "aichat-in 0.2s ease",
+        }}
+      >
         <div
           style={{
             maxWidth: "78%",
@@ -156,13 +256,25 @@ export const MessageBubble = memo(function MessageBubble({ message }: { message:
         >
           {message.parts.map((part) =>
             part.kind === "text" ? (
-              <div key={part.id} style={{ fontSize: 14.5, lineHeight: 1.55, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+              <div
+                key={part.id}
+                style={{
+                  fontSize: 14.5,
+                  lineHeight: 1.55,
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                }}
+              >
                 {part.text}
               </div>
             ) : part.kind === "image" ? (
               <ImagePart key={part.id} mediaId={part.mediaId} compact />
             ) : part.kind === "audio" ? (
-              <AudioPart key={part.id} mediaId={part.mediaId} label={part.label} />
+              <AudioPart
+                key={part.id}
+                mediaId={part.mediaId}
+                label={part.label}
+              />
             ) : null,
           )}
         </div>
@@ -173,7 +285,15 @@ export const MessageBubble = memo(function MessageBubble({ message }: { message:
   return (
     <div style={{ margin: "14px 0", animation: "aichat-in 0.2s ease" }}>
       {parts.length === 0 && streaming && (
-        <div style={{ display: "flex", alignItems: "center", gap: 9, color: T.textDim, fontSize: 13.5 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 9,
+            color: T.textDim,
+            fontSize: 13.5,
+          }}
+        >
           <span
             style={{
               width: 8,
@@ -190,21 +310,66 @@ export const MessageBubble = memo(function MessageBubble({ message }: { message:
         const isLast = i === parts.length - 1;
         switch (part.kind) {
           case "text":
-            return <Markdown key={part.id} text={part.text + (streaming && isLast ? " ▍" : "")} />;
+            return (
+              <Markdown
+                key={part.id}
+                text={part.text + (streaming && isLast ? " ▍" : "")}
+                onOpenResourcePath={onOpenResourcePath}
+              />
+            );
           case "thought":
-            return <ThoughtPart key={part.id} text={part.text} streaming={streaming && isLast} />;
+            return (
+              <ThoughtPart
+                key={part.id}
+                text={part.text}
+                streaming={streaming && isLast}
+              />
+            );
           case "code":
             return <CodePart key={part.id} part={part} />;
           case "tool":
             return <ToolActivityChip key={part.id} activity={part.activity} />;
           case "image":
-            return <ImagePart key={part.id} mediaId={part.mediaId} prompt={part.prompt} />;
+            if (part.origin === "agent") {
+              return (
+                <OutputLink
+                  key={part.id}
+                  label={part.prompt ?? "image"}
+                  onOpenResourcePath={onOpenResourcePath}
+                />
+              );
+            }
+            return (
+              <ImagePart
+                key={part.id}
+                mediaId={part.mediaId}
+                prompt={part.prompt}
+              />
+            );
           case "audio":
-            return <AudioPart key={part.id} mediaId={part.mediaId} label={part.label} />;
+            return (
+              <OutputLink
+                key={part.id}
+                label={part.label}
+                onOpenResourcePath={onOpenResourcePath}
+              />
+            );
           case "video":
-            return <VideoPart key={part.id} mediaId={part.mediaId} label={part.label} />;
+            return (
+              <OutputLink
+                key={part.id}
+                label={part.label}
+                onOpenResourcePath={onOpenResourcePath}
+              />
+            );
           case "file":
-            return <FilePart key={part.id} mediaId={part.mediaId} label={part.label} />;
+            return (
+              <OutputLink
+                key={part.id}
+                label={part.label}
+                onOpenResourcePath={onOpenResourcePath}
+              />
+            );
           default:
             return null;
         }
@@ -225,7 +390,9 @@ export const MessageBubble = memo(function MessageBubble({ message }: { message:
         </div>
       )}
       {message.status === "stopped" && (
-        <div style={{ marginTop: 6, color: T.textFaint, fontSize: 12.5 }}>Stopped.</div>
+        <div style={{ marginTop: 6, color: T.textFaint, fontSize: 12.5 }}>
+          Stopped.
+        </div>
       )}
     </div>
   );

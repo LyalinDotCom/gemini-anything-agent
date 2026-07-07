@@ -38,7 +38,7 @@ Edit `.env` and set your key (the other defaults work as-is):
 
 ```bash
 GEMINI_API_KEY=your_key_here
-GEMINI_ANYTHING_AGENT_ID=gemini-anything-agent
+GEMINI_ANYTHING_AGENT_ID=gemini-anything-v1
 GEMINI_ANYTHING_NPM_PACKAGE=@lyalindotcom/gai
 GEMINI_ANYTHING_NPM_VERSION=latest
 GEMINI_ANYTHING_MUSIC_MODEL=lyria-3-clip-preview

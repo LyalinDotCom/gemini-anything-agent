@@ -106,7 +106,7 @@ Here is a minimal standalone TypeScript version of the same shape. Replace the s
 ```ts
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const API_REVISION = "2026-05-20";
-const AGENT_ID = process.env.GEMINI_ANYTHING_AGENT_ID ?? "gemini-anything-agent";
+const AGENT_ID = process.env.GEMINI_ANYTHING_AGENT_ID ?? "gemini-anything-v1";
 const GAI_PACKAGE = process.env.GEMINI_ANYTHING_NPM_PACKAGE ?? "@lyalindotcom/gai";
 const GAI_VERSION = process.env.GEMINI_ANYTHING_NPM_VERSION ?? "latest";
 
@@ -211,7 +211,7 @@ After the agent exists, the app sends each chat turn to the same managed agent. 
 
 ```ts
 const request = {
-  agent: "gemini-anything-agent",
+  agent: "gemini-anything-v1",
   input: "Create a square image of a tiny robot assistant brewing coffee.",
   previous_interaction_id: previousInteractionId,
   environment: previousEnvironmentId ?? { type: "remote" },

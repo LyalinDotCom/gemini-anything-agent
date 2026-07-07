@@ -7,7 +7,13 @@ import { MessageBubble } from "./MessageBubble";
 
 const EMPTY: Message[] = [];
 
-export function ChatView({ sessionId }: { sessionId: string }) {
+export function ChatView({
+  sessionId,
+  onOpenResourcePath,
+}: {
+  sessionId: string;
+  onOpenResourcePath?: (path: string) => void;
+}) {
   const messages = useStore((s) => s.messages[sessionId] ?? EMPTY);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
@@ -48,7 +54,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
             </p>
           </div>
         ) : (
-          messages.map((m) => <MessageBubble key={m.id} message={m} />)
+          messages.map((m) => <MessageBubble key={m.id} message={m} onOpenResourcePath={onOpenResourcePath} />)
         )}
       </div>
     </div>

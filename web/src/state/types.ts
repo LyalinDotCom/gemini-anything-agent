@@ -2,6 +2,17 @@ import type { Usage } from "../gemini/streamAdapter";
 
 export type SessionMode = "chat" | "deep-research";
 
+export interface OutputFileRecord {
+  fingerprint: string;
+  path: string;
+  label: string;
+  kind: "image" | "audio" | "video" | "file";
+  mediaId: string;
+  mimeType: string;
+  size: number;
+  syncedAt: number;
+}
+
 /** Small session index entry — persisted in localStorage (bodies live in IndexedDB). */
 export interface Session {
   id: string;
@@ -21,6 +32,8 @@ export interface Session {
   research?: { interactionId: string; startedAt: number; lastEventId?: string } | null;
   /** Fingerprints (path@size) of container /output/ files already synced to this device. */
   envSeen?: string[];
+  /** Visible files from /workspace/output that are available locally for preview/download. */
+  envFiles?: OutputFileRecord[];
   /** The agent this conversation is pinned to (set on first turn, never changes). */
   agentUsed?: string | null;
   /**

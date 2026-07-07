@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { abortTurn, sendTurn, type TurnInput } from "../chat/controller";
+import { cancelServerTurn, sendTurn, type TurnInput } from "../chat/controller";
 import { sendResearchTurn } from "../gemini/deepResearch";
 import { useStore } from "../state/store";
 import { mediaId as makeMediaId, putMedia, base64ToBlob } from "../storage/messages";
@@ -318,8 +318,8 @@ export function Composer({ sessionId }: { sessionId: string }) {
           {busyHere ? (
             <button
               type="button"
-              onClick={() => abortTurn(sessionId)}
-              title="Stop"
+              onClick={() => void cancelServerTurn(sessionId)}
+              title="Cancel server turn"
               style={{
                 display: "inline-flex",
                 alignItems: "center",

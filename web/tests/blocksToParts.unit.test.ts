@@ -137,6 +137,20 @@ describe("groupParts", () => {
     expect(code.runs.map((r) => r.code)).toEqual(["x=1", "y=2", "z=3"]);
   });
 
+  test("code runs do not merge across file/tool chips, preserving visible step order", () => {
+    const grouped = groupParts([
+      codePart("a", "bash gai --help"),
+      toolPart("write", "other", "Writing files…"),
+      { kind: "text", id: "n", text: "Creating the script." },
+      codePart("b", "bash gai tts --script-file /workspace/output/script.txt"),
+    ]);
+    expect(grouped.map((p) => p.kind)).toEqual(["code", "tool", "text", "code"]);
+    expect((grouped[0] as Extract<ContentPart, { kind: "code" }>).runs.map((r) => r.code)).toEqual(["bash gai --help"]);
+    expect((grouped[3] as Extract<ContentPart, { kind: "code" }>).runs.map((r) => r.code)).toEqual([
+      "bash gai tts --script-file /workspace/output/script.txt",
+    ]);
+  });
+
   test("trailing brief text after the last work part is NOT swallowed into the block", () => {
     const grouped = groupParts([
       codePart("a", "x=1"),

@@ -7,7 +7,7 @@
 import { ensureChatAgent } from "../gemini/agents";
 import { ai, resolveApiKey } from "../gemini/client";
 import { buildEnvSources } from "../gemini/envSources";
-import { syncOutputMedia, syncedFilesToParts } from "../gemini/envFiles";
+import { syncOutputMedia } from "../gemini/envFiles";
 import { FriendlyError, toFriendly } from "../gemini/errors";
 import type { InteractionInput } from "../gemini/interactionParams";
 import { buildInteractionParams, functionResultPart } from "../gemini/interactionParams";
@@ -27,6 +27,124 @@ const aborters = new Map<string, AbortController>();
 
 export function abortTurn(sessionId: string): void {
   aborters.get(sessionId)?.abort();
+}
+
+function latestAssistantMessageId(sessionId: string): string | undefined {
+  return [...(useStore.getState().messages[sessionId] ?? [])].reverse().find((m) => m.role === "assistant")?.id;
+}
+
+export async function cancelServerTurn(sessionId: string): Promise<void> {
+  const store = useStore.getState();
+  const session = store.sessions[sessionId];
+  const interactionId = session?.pending?.interactionId ?? session?.lastInteractionId;
+  const messageId = session?.pending?.messageId ?? latestAssistantMessageId(sessionId);
+  abortTurn(sessionId);
+
+  if (!session) return;
+  if (!interactionId) {
+    if (messageId) {
+      const msg = (useStore.getState().messages[sessionId] ?? []).find((m) => m.id === messageId);
+      if (msg) {
+        useStore.getState().patchMessage(sessionId, messageId, {
+          parts: settleParts(msg.parts),
+          status: "stopped",
+        });
+      }
+    }
+    useStore.getState().patchSession(sessionId, { pending: null });
+    useStore.getState().setStreaming(sessionId, false);
+    return;
+  }
+
+  const cancelChip = (status: ToolActivity["status"], label: string, detail?: string): ContentPart => ({
+    kind: "tool",
+    id: `cancel-${Date.now()}`,
+    activity: {
+      tool: "setup",
+      label,
+      status,
+      detail:
+        detail ??
+        [
+          `chat: ${sessionId}`,
+          `interaction: ${interactionId}`,
+          `environment: ${session.environmentId ?? "unknown"}`,
+        ].join("\n"),
+    },
+  });
+
+  if (messageId) {
+    const msg = (useStore.getState().messages[sessionId] ?? []).find((m) => m.id === messageId);
+    if (msg) {
+      useStore.getState().patchMessage(sessionId, messageId, {
+        parts: [...msg.parts.filter((p) => p.id !== "recover-note"), cancelChip("running", "Cancelling server turn…")],
+      });
+    }
+  }
+
+  try {
+    const interaction = (await ai().interactions.cancel(interactionId)) as Record<string, unknown>;
+    const outcome = blocksFromInteraction(interaction);
+    const status = outcome.status || "cancelled";
+    if (messageId) {
+      const msg = (useStore.getState().messages[sessionId] ?? []).find((m) => m.id === messageId);
+      if (msg) {
+        useStore.getState().patchMessage(sessionId, messageId, {
+          parts: [
+            ...msg.parts.filter((p) => !(p.kind === "tool" && p.activity.label === "Cancelling server turn…")),
+            cancelChip(
+              "done",
+              `Server turn ${status}`,
+              [
+                `chat: ${sessionId}`,
+                `interaction: ${outcome.interactionId || interactionId}`,
+                `environment: ${outcome.environmentId || session.environmentId || "unknown"}`,
+                `status: ${status}`,
+              ].join("\n"),
+            ),
+          ],
+          status: "stopped",
+          interactionId: outcome.interactionId || interactionId,
+        });
+      }
+    }
+    useStore.getState().patchSession(sessionId, {
+      lastInteractionId: outcome.interactionId || interactionId,
+      environmentId: outcome.environmentId || session.environmentId,
+      pending: null,
+    });
+  } catch (e) {
+    const f = toFriendly(e);
+    if (messageId) {
+      const msg = (useStore.getState().messages[sessionId] ?? []).find((m) => m.id === messageId);
+      if (msg) {
+        useStore.getState().patchMessage(sessionId, messageId, {
+          parts: [
+            ...settleParts(
+              msg.parts.filter((p) => !(p.kind === "tool" && p.activity.label === "Cancelling server turn…")),
+            ),
+            cancelChip(
+              "error",
+              "Stopped locally; server cancel was not confirmed",
+              [
+                `chat: ${sessionId}`,
+                `interaction: ${interactionId}`,
+                `environment: ${session.environmentId ?? "unknown"}`,
+                `cancel error: ${f.message}`,
+              ].join("\n"),
+            ),
+          ],
+          status: "stopped",
+          interactionId,
+        });
+      }
+    }
+    useStore.getState().patchSession(sessionId, { pending: null });
+  } finally {
+    aborters.delete(sessionId);
+    useStore.getState().setStreaming(sessionId, false);
+    useStore.getState().persistTranscript(sessionId);
+  }
 }
 
 export function isTurnRunning(sessionId: string): boolean {
@@ -74,31 +192,11 @@ function titleFromText(text: string): string | null {
   return cut.charAt(0).toUpperCase() + cut.slice(1);
 }
 
-/** Pull /workspace/output files produced by a turn down into the message (shared by
- *  the normal settle path and post-reload recovery). Best-effort. */
-function syncMediaIntoMessage(sessionId: string, messageId: string, environmentId: string): void {
-  void syncOutputMedia(sessionId, environmentId)
-    .then((files) => {
-      if (files.length === 0) return;
-      const s = useStore.getState();
-      const msg = (s.messages[sessionId] ?? []).find((m) => m.id === messageId);
-      if (!msg) return;
-      const chip: ContentPart = {
-        kind: "tool",
-        id: uid(),
-        activity: {
-          tool: "other",
-          label: `Synced ${files.length} file${files.length > 1 ? "s" : ""} from the container`,
-          status: "done",
-          detail: files.map((f) => `${f.path} (${Math.round(f.size / 1024)}KB)`).join("\n"),
-        },
-      };
-      s.patchMessage(sessionId, messageId, { parts: [...msg.parts, chip, ...syncedFilesToParts(files)] });
-      s.persistTranscript(sessionId);
-    })
-    .catch(() => {
-      // sync is best-effort; the Files panel offers a manual retry
-    });
+/** Pull /workspace/output files produced by a turn down into this chat's file index. Best-effort. */
+function syncOutputMediaBestEffort(sessionId: string, environmentId: string): void {
+  void syncOutputMedia(sessionId, environmentId).catch(() => {
+    // sync is best-effort; the Files panel offers a manual retry
+  });
 }
 
 /** Text-only recap used to reseed a fresh chain after server-side expiry. */
@@ -460,27 +558,39 @@ export async function sendTurn(sessionId: string, turn: TurnInput): Promise<void
 
   // Pull whatever the agent saved under /workspace/output down to this device (the
   // media handoff contract): snapshot → tar → IndexedDB → parts on this message.
-  if (!aborted && environmentId) syncMediaIntoMessage(sessionId, assistantId, environmentId);
+  if (!aborted && environmentId) syncOutputMediaBestEffort(sessionId, environmentId);
 }
 
 // ---- reload / connection recovery ------------------------------------------
 
 const RECOVER_POLL_MS = 4000;
 const RECOVER_MAX_MS = 10 * 60_000;
-const RECOVER_TERMINAL = new Set(["completed", "failed", "cancelled", "incomplete", "budget_exceeded", "requires_action"]);
+const NON_TERMINAL_INTERACTION_STATUS = new Set(["queued", "pending", "running", "in_progress", "cancelling"]);
+const SUCCESS_INTERACTION_STATUS = new Set(["completed", "succeeded"]);
+
+function interactionStatusIsTerminal(status: string | undefined): boolean {
+  return Boolean(status && !NON_TERMINAL_INTERACTION_STATUS.has(status.toLowerCase()));
+}
 
 /** Poll a server-side interaction until it reaches a terminal state (network-tolerant). */
-async function awaitInteractionOutcome(interactionId: string, signal?: AbortSignal): Promise<StreamOutcome> {
+async function awaitInteractionOutcome(
+  interactionId: string,
+  signal?: AbortSignal,
+  onPoll?: (outcome: StreamOutcome) => void,
+): Promise<StreamOutcome> {
   const started = Date.now();
   for (;;) {
     if (signal?.aborted) throw new FriendlyError("aborted", "Stopped.");
     try {
       const interaction = (await ai().interactions.get(interactionId)) as Record<string, unknown>;
       const outcome = blocksFromInteraction(interaction);
-      if (RECOVER_TERMINAL.has(outcome.status)) return outcome;
+      onPoll?.(outcome);
+      if (interactionStatusIsTerminal(outcome.status)) return outcome;
     } catch (e) {
       const f = toFriendly(e);
-      if (f.kind === "not-found" || f.kind === "bad-key" || f.kind === "no-key" || f.kind === "aborted") throw f;
+      if (f.kind !== "network" && f.kind !== "server" && f.kind !== "rate-limit") {
+        throw f;
+      }
       // network/server trouble: keep polling — that's the whole point
     }
     if (Date.now() - started > RECOVER_MAX_MS) {
@@ -533,9 +643,47 @@ export async function recoverPendingTurn(sessionId: string): Promise<void> {
   useStore.getState().setStreaming(sessionId, true);
   const controller = new AbortController();
   aborters.set(sessionId, controller);
+  const terminalRecoveryChip = (status: ToolActivity["status"], label: string, detail: string): ContentPart => ({
+    ...chip,
+    activity: {
+      ...chip.activity,
+      status,
+      label,
+      detail,
+    },
+  });
 
   try {
-    const outcome = await awaitInteractionOutcome(pending.interactionId, controller.signal);
+    const recoveryStarted = Date.now();
+    const recoveryChip = (outcome?: StreamOutcome): ContentPart => {
+      const seconds = Math.max(0, Math.round((Date.now() - recoveryStarted) / 1000));
+      const status = outcome?.status || "in_progress";
+      return {
+        ...chip,
+        activity: {
+          ...chip.activity,
+          label:
+            status === "in_progress" || status === "running"
+              ? `Still running on the server (${seconds}s)…`
+              : `Server turn status: ${status}`,
+          detail: [
+            `chat: ${sessionId}`,
+            `interaction: ${outcome?.interactionId || pending.interactionId}`,
+            `environment: ${outcome?.environmentId || session.environmentId || "unknown"}`,
+            `status: ${status}`,
+            `waiting: ${seconds}s`,
+          ].join("\n"),
+        },
+      };
+    };
+    const outcome = await awaitInteractionOutcome(pending.interactionId, controller.signal, (current) => {
+      useStore.getState().patchMessage(sessionId, pending.messageId, {
+        status: "streaming",
+        parts: [recoveryChip(current), ...blocksToParts(current.blocks as MediaStampedBlock[], "rec")],
+        interactionId: current.interactionId || pending.interactionId,
+        usage: current.usage,
+      });
+    });
 
     for (const block of outcome.blocks as MediaStampedBlock[]) {
       if (block.type === "image" && block.data && !block.mediaRef) {
@@ -547,14 +695,19 @@ export async function recoverPendingTurn(sessionId: string): Promise<void> {
       }
     }
 
-    const ok = outcome.status === "completed" || outcome.status === "requires_action";
+    const ok = SUCCESS_INTERACTION_STATUS.has(outcome.status.toLowerCase());
     const doneChip: ContentPart = {
       ...chip,
       activity: {
         ...chip.activity,
-        status: "done",
-        label: "Recovered this turn from the server after a reload",
-        detail: `interaction: ${outcome.interactionId || pending.interactionId}\nstatus: ${outcome.status}`,
+        status: ok ? "done" : "error",
+        label: ok ? "Recovered this turn from the server after a reload" : `Recovered turn ended: ${outcome.status}`,
+        detail: [
+          `chat: ${sessionId}`,
+          `interaction: ${outcome.interactionId || pending.interactionId}`,
+          `environment: ${outcome.environmentId || session.environmentId || "unknown"}`,
+          `status: ${outcome.status}`,
+        ].join("\n"),
       },
     };
     useStore.getState().patchMessage(sessionId, pending.messageId, {
@@ -562,7 +715,12 @@ export async function recoverPendingTurn(sessionId: string): Promise<void> {
       status: ok ? "complete" : "error",
       interactionId: outcome.interactionId || pending.interactionId,
       usage: outcome.usage,
-      errorMessage: ok ? undefined : `The turn ended server-side with status: ${outcome.status}.`,
+      errorMessage:
+        ok
+          ? undefined
+          : outcome.status === "requires_action"
+            ? "The recovered turn paused for a browser-side action after reload. Send your message again and I’ll continue from the server context."
+            : `The turn ended server-side with status: ${outcome.status}.`,
     });
     useStore.getState().patchSession(sessionId, {
       lastInteractionId: outcome.interactionId || pending.interactionId,
@@ -579,12 +737,29 @@ export async function recoverPendingTurn(sessionId: string): Promise<void> {
     }
 
     const envId = outcome.environmentId || session.environmentId;
-    if (envId) syncMediaIntoMessage(sessionId, pending.messageId, envId);
+    if (envId) syncOutputMediaBestEffort(sessionId, envId);
   } catch (e) {
     const f = toFriendly(e);
     const aborted = f.kind === "aborted" || controller.signal.aborted;
+    const message = (useStore.getState().messages[sessionId] ?? []).find((m) => m.id === pending.messageId);
+    const detail = [
+      `chat: ${sessionId}`,
+      `interaction: ${pending.interactionId}`,
+      `environment: ${session.environmentId || "unknown"}`,
+      aborted ? "status: stopped" : `error: ${f.message}`,
+    ].join("\n");
+    const recoveryEndedChip = terminalRecoveryChip(
+      aborted ? "done" : "error",
+      aborted ? "Recovery stopped" : "Recovery failed",
+      detail,
+    );
+    const nextParts = settleParts(
+      (message?.parts ?? [chip]).map((part) => (part.id === "recover-note" ? recoveryEndedChip : part)),
+      !aborted,
+    );
     useStore.getState().patchMessage(sessionId, pending.messageId, {
       status: aborted ? "stopped" : "error",
+      parts: nextParts,
       errorMessage: aborted
         ? undefined
         : f.kind === "not-found"

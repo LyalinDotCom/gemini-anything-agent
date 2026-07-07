@@ -12,6 +12,6 @@ export const MODELS = {
 } as const;
 
 /** The app-managed agent id created under the user's key on first chat. */
-export const CHAT_AGENT_ID = "chat-companion-v1";
+export const CHAT_AGENT_ID = "gemini-anything-v1";
 
 export const APP_NAME = "Gemini Anything";

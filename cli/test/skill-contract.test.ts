@@ -23,6 +23,15 @@ describe("agent skill contract", () => {
     expect(agents).toContain("inspect `/workspace/output`");
   });
 
+  it("routes utility capabilities to gai while keeping text native", () => {
+    expect(agents).toContain('use `bash "$GAI" embed ...`');
+    expect(agents).toContain("Ordinary text generation stays on native managed-agent tools");
+    expect(skill).toContain('bash "$GAI" embed --help');
+    expect(skill).toContain('bash "$GAI" tokens --help');
+    expect(skill).toContain('bash "$GAI" files --help');
+    expect(skill).toContain('not `bash "$GAI" generate`');
+  });
+
   it("routes agent orchestration to gai agent with help discovery", () => {
     expect(agents).toContain("Delegate work to another managed agent");
     expect(agents).toContain("Agent orchestration:");

@@ -16,19 +16,30 @@ import {
   runAgentStatus
 } from "./subcommands/agent.js";
 import { runDoctor } from "./subcommands/doctor.js";
+import { runEmbed } from "./subcommands/embed.js";
+import {
+  runFilesDelete,
+  runFilesDownload,
+  runFilesGet,
+  runFilesList,
+  runFilesUpload
+} from "./subcommands/files.js";
+import { runGenerate } from "./subcommands/generate.js";
 import { runImage } from "./subcommands/image.js";
 import { listModels } from "./subcommands/models.js";
+import { runTokens } from "./subcommands/tokens.js";
 import { runMusic } from "./subcommands/music.js";
 import { runTranscribe } from "./subcommands/transcribe.js";
 import { runTts } from "./subcommands/tts.js";
 import { runVideo } from "./subcommands/video.js";
+import { exitCodeForError } from "./errors.js";
 import type { CommandFailure } from "./types.js";
 
 loadEnvironment();
 
 const program = new Command();
 
-const packageVersion = "0.2.0";
+const packageVersion = "0.3.0";
 
 const failureFromError = (error: unknown, capability?: string, model?: string): CommandFailure => ({
   ok: false,
@@ -44,22 +55,28 @@ const failureFromError = (error: unknown, capability?: string, model?: string): 
   }
 });
 
+type OutputOptions = {
+  json?: boolean;
+  transform?: string;
+  raw?: boolean;
+};
+
 const runAction = async (
-  json: boolean | undefined,
+  options: OutputOptions,
   action: () => Promise<unknown> | unknown,
   capability?: string
 ): Promise<void> => {
   try {
     const result = await action();
-    printResult(result, Boolean(json));
+    printResult(result, Boolean(options.json), options);
   } catch (error) {
     const failure = failureFromError(error, capability);
-    if (json) {
-      printResult(failure, true);
+    if (options.json || options.transform) {
+      printResult(failure, true, options);
     } else {
       process.stderr.write(`${failure.error.name}: ${failure.error.message}\n`);
     }
-    process.exitCode = 1;
+    process.exitCode = exitCodeForError(error);
   }
 };
 
@@ -72,30 +89,39 @@ program
     `
 
 Run a command help page before using a capability:
+  gai generate --help
   gai image --help
   gai video --help
   gai tts --help
   gai music --help
   gai transcribe --help
+  gai embed --help
+  gai tokens --help
+  gai files --help
   gai agent --help
 
-Use --json for machine-readable output. Generated files are written to --out when provided.`
+Use --json for machine-readable output. Generated files are written to --out when provided.
+Every command accepts --transform <dot.path> (extract one field from the result) and --raw
+(print extracted strings without JSON quoting), e.g.:
+  gai image "an icon" --json --transform outputs.0.path --raw
+
+Exit codes: 0 success, 1 API/runtime failure, 2 invalid usage, 3 missing/invalid API key.`
   );
 
 program
   .command("models")
   .description("Print the wrapped model registry")
   .option("--json", "print machine-readable JSON")
-  .action((options: { json?: boolean }) => {
+  .action((options: OutputOptions) => {
     const result = listModels();
-    printResult(result, Boolean(options.json));
+    printResult(result, Boolean(options.json), options);
   });
 
 program
   .command("doctor")
   .description("Validate local environment for media generation")
   .option("--json", "print machine-readable JSON")
-  .action((options: { json?: boolean }) => runAction(options.json, runDoctor, "doctor"));
+  .action((options: { json?: boolean }) => runAction(options, runDoctor, "doctor"));
 
 program
   .command("image")
@@ -117,7 +143,7 @@ Examples:
   gai image "a crisp app icon" --out /workspace/output/icon.jpg --json
   gai image "turn this into a watercolor" --file input.jpg --out /workspace/output/edit.jpg --json`
   )
-  .action((prompt: string, options) => runAction(options.json, () => runImage(prompt, options), "image"));
+  .action((prompt: string, options) => runAction(options, () => runImage(prompt, options), "image"));
 
 program
   .command("tts")
@@ -140,7 +166,7 @@ Examples:
   gai tts "Say cheerfully: hello" --voice Puck --out /workspace/output/hello.wav --json
   gai tts --script-file /workspace/output/script.txt --voice Puck --out /workspace/output/podcast.wav --json`
   )
-  .action((prompt: string | undefined, options) => runAction(options.json, () => runTts(prompt, options), "tts"));
+  .action((prompt: string | undefined, options) => runAction(options, () => runTts(prompt, options), "tts"));
 
 program
   .command("music")
@@ -163,7 +189,7 @@ Examples:
   gai music "uplifting synthwave theme for a product demo" --out /workspace/output/theme.mp3 --json
   gai music "cozy acoustic loop for a kid-friendly solar system app" --style "warm, playful, instrumental" --instrumental --out /workspace/output/solar-theme.mp3 --json`
   )
-  .action((prompt: string, options) => runAction(options.json, () => runMusic(prompt, options), "music"));
+  .action((prompt: string, options) => runAction(options, () => runMusic(prompt, options), "music"));
 
 program
   .command("transcribe")
@@ -188,8 +214,116 @@ Examples:
   gai transcribe meeting.mp3 --format srt --out captions.srt --json`
   )
   .action((file: string, options) =>
-    runAction(options.json, () => runTranscribe(file, options), "transcribe")
+    runAction(options, () => runTranscribe(file, options), "transcribe")
   );
+
+program
+  .command("generate")
+  .description("Generate text: system prompts, multimodal input, structured output, grounding tools")
+  .argument("<prompt>", "text prompt")
+  .option("--out <path>", "also write the output text to a file")
+  .option("--model <model>", "override model")
+  .option("--system <text>", "system instruction")
+  .option("--system-file <path>", "read the system instruction from a file")
+  .option("--file <path...>", "input file(s): image, audio, video, or text context")
+  .option("--schema <json-or-path>", "force JSON output matching a JSON Schema (inline JSON or a file path)")
+  .option("--search", "enable Google Search grounding")
+  .option("--url-context", "enable the URL context tool")
+  .option("--code-execution", "enable the code execution tool")
+  .option("--temperature <number>", "sampling temperature")
+  .option("--max-tokens <number>", "maximum output tokens")
+  .option("--dry-run", "show the request without calling the API")
+  .option("--json", "print machine-readable JSON")
+  .addHelpText(
+    "after",
+    `
+
+Plain mode prints only the generated text to stdout (pipeline-friendly). Examples:
+  gai generate "Summarize this file in three bullets" --file notes.md
+  gai generate "Extract the invoice fields" --file invoice.png --schema ./invoice.schema.json --json
+  gai generate "What changed in Node 24?" --search --json --transform stdout --raw`
+  )
+  .action((prompt: string, options) => runAction(options, () => runGenerate(prompt, options), "generate"));
+
+program
+  .command("embed")
+  .description("Create a text embedding vector")
+  .argument("[text]", "text to embed. Optional when --file is provided")
+  .option("--file <path>", "read the text from a file")
+  .option("--model <model>", "override model")
+  .option("--dim <n>", "output dimensionality")
+  .option("--out <path>", "write the vector to a JSON file")
+  .option("--dry-run", "show the request without calling the API")
+  .option("--json", "print machine-readable JSON")
+  .addHelpText(
+    "after",
+    `
+
+Examples:
+  gai embed "hello world" --json --transform details.dimensions
+  gai embed --file chunk.txt --dim 768 --out chunk.embedding.json --json`
+  )
+  .action((text: string | undefined, options) => runAction(options, () => runEmbed(text, options), "embed"));
+
+program
+  .command("tokens")
+  .description("Count tokens for a prompt (prints the count to stdout)")
+  .argument("[text]", "text to count. Optional when --file is provided")
+  .option("--file <path>", "read the text from a file")
+  .option("--model <model>", "override model")
+  .option("--json", "print machine-readable JSON")
+  .action((text: string | undefined, options) => runAction(options, () => runTokens(text, options), "tokens"));
+
+const files = program
+  .command("files")
+  .description("Manage uploaded files (Gemini Files API)")
+  .addHelpText(
+    "after",
+    `
+
+Examples:
+  gai files upload recording.mp3 --json --transform details.file.name --raw
+  gai files list --json
+  gai files download files/abc123 --out ./local.bin --json`
+  );
+
+files
+  .command("upload")
+  .description("Upload a file for use in later requests")
+  .argument("<path>", "local file path")
+  .option("--mime <mime>", "MIME type override")
+  .option("--dry-run", "show the upload plan without calling the API")
+  .option("--json", "print machine-readable JSON")
+  .action((path: string, options) => runAction(options, () => runFilesUpload(path, options), "files"));
+
+files
+  .command("list")
+  .description("List uploaded files")
+  .option("--json", "print machine-readable JSON")
+  .action((options: OutputOptions) => runAction(options, runFilesList, "files"));
+
+files
+  .command("get")
+  .description("Show one uploaded file's metadata")
+  .argument("<name>", "file name, e.g. files/abc123")
+  .option("--json", "print machine-readable JSON")
+  .action((name: string, options) => runAction(options, () => runFilesGet(name), "files"));
+
+files
+  .command("delete")
+  .description("Delete an uploaded file")
+  .argument("<name>", "file name, e.g. files/abc123")
+  .option("--json", "print machine-readable JSON")
+  .action((name: string, options) => runAction(options, () => runFilesDelete(name), "files"));
+
+files
+  .command("download")
+  .description("Download a file's contents")
+  .argument("<name>", "file name, e.g. files/abc123")
+  .option("--out <path>", "output file path")
+  .option("--dry-run", "show the download plan without calling the API")
+  .option("--json", "print machine-readable JSON")
+  .action((name: string, options) => runAction(options, () => runFilesDownload(name, options), "files"));
 
 const agent = program
   .command("agent")
@@ -218,27 +352,27 @@ agent
   .option("--tool <tool...>", "enable tool(s): code_execution, google_search, url_context")
   .option("--dry-run", "show the agent definition without calling the API")
   .option("--json", "print machine-readable JSON")
-  .action((id: string, options) => runAction(options.json, () => runAgentCreate(id, options), "agent"));
+  .action((id: string, options) => runAction(options, () => runAgentCreate(id, options), "agent"));
 
 agent
   .command("list")
   .description("List managed agents")
   .option("--json", "print machine-readable JSON")
-  .action((options: { json?: boolean }) => runAction(options.json, runAgentList, "agent"));
+  .action((options: { json?: boolean }) => runAction(options, runAgentList, "agent"));
 
 agent
   .command("get")
   .description("Show one managed agent")
   .argument("<id>", "agent id")
   .option("--json", "print machine-readable JSON")
-  .action((id: string, options) => runAction(options.json, () => runAgentGet(id), "agent"));
+  .action((id: string, options) => runAction(options, () => runAgentGet(id), "agent"));
 
 agent
   .command("delete")
   .description("Delete a managed agent")
   .argument("<id>", "agent id")
   .option("--json", "print machine-readable JSON")
-  .action((id: string, options) => runAction(options.json, () => runAgentDelete(id), "agent"));
+  .action((id: string, options) => runAction(options, () => runAgentDelete(id), "agent"));
 
 agent
   .command("run")
@@ -257,7 +391,7 @@ agent
   .option("--dry-run", "show the interaction request without calling the API")
   .option("--json", "print machine-readable JSON")
   .action((agentId: string, input: string | undefined, options) =>
-    runAction(options.json, () => runAgentRun(agentId, input, options), "agent")
+    runAction(options, () => runAgentRun(agentId, input, options), "agent")
   );
 
 agent
@@ -270,7 +404,7 @@ agent
   .option("--timeout <seconds>", "max seconds to wait for completion", "1800")
   .option("--json", "print machine-readable JSON")
   .action((interactionId: string, options) =>
-    runAction(options.json, () => runAgentStatus(interactionId, options), "agent")
+    runAction(options, () => runAgentStatus(interactionId, options), "agent")
   );
 
 agent
@@ -279,7 +413,7 @@ agent
   .argument("<interaction-id>", "interaction id")
   .option("--json", "print machine-readable JSON")
   .action((interactionId: string, options) =>
-    runAction(options.json, () => runAgentCancel(interactionId), "agent")
+    runAction(options, () => runAgentCancel(interactionId), "agent")
   );
 
 agent
@@ -288,7 +422,7 @@ agent
   .argument("<interaction-id>", "interaction id")
   .option("--json", "print machine-readable JSON")
   .action((interactionId: string, options) =>
-    runAction(options.json, () => runAgentDeleteInteraction(interactionId), "agent")
+    runAction(options, () => runAgentDeleteInteraction(interactionId), "agent")
   );
 
 agent
@@ -298,7 +432,7 @@ agent
   .option("--interaction <interaction-id>", "resolve the environment from an interaction")
   .option("--json", "print machine-readable JSON")
   .action((environmentId: string | undefined, options) =>
-    runAction(options.json, () => runAgentLs(environmentId, options), "agent")
+    runAction(options, () => runAgentLs(environmentId, options), "agent")
   );
 
 agent
@@ -311,7 +445,7 @@ agent
   .option("--dry-run", "show the download plan without calling the API")
   .option("--json", "print machine-readable JSON")
   .action((environmentId: string | undefined, options) =>
-    runAction(options.json, () => runAgentPull(environmentId, options), "agent")
+    runAction(options, () => runAgentPull(environmentId, options), "agent")
   );
 
 program
@@ -335,6 +469,19 @@ Examples:
   gai video "a cute cat playing with string in a cozy home" --quality lite --out /workspace/output/cat.mp4 --json
   gai video "slow camera move over a product" --aspect 9:16 --duration 8 --out /workspace/output/clip.mp4 --json`
   )
-  .action((prompt: string, options) => runAction(options.json, () => runVideo(prompt, options), "video"));
+  .action((prompt: string, options) => runAction(options, () => runVideo(prompt, options), "video"));
+
+// Every command that supports --json also gets --transform/--raw result shaping.
+const addOutputShapingOptions = (command: Command): void => {
+  for (const sub of command.commands) {
+    addOutputShapingOptions(sub);
+    if (sub.options.some((option) => option.long === "--json")) {
+      sub
+        .option("--transform <path>", "extract a dot-path from the result, e.g. outputs.0.path")
+        .option("--raw", "with --transform, print bare strings instead of JSON");
+    }
+  }
+};
+addOutputShapingOptions(program);
 
 await program.parseAsync(process.argv);

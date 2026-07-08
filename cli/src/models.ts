@@ -1,6 +1,6 @@
-export type Capability = "agy" | "image" | "video" | "tts" | "music" | "transcribe";
+export type Capability = "agy" | "image" | "video" | "tts" | "music" | "transcribe" | "text" | "embed";
 
-export type ApiSurface = "interactions" | "generateVideos" | "managed-agent";
+export type ApiSurface = "interactions" | "generateVideos" | "managed-agent" | "embedContent";
 
 export type ModelRegistryEntry = {
   id: string;
@@ -90,6 +90,32 @@ export const MODEL_REGISTRY = [
     notes: "Lyria 3 Pro preview for longer-form song generation."
   },
   {
+    id: "gemini-3.5-pro",
+    capability: "text",
+    label: "Text default",
+    status: "stable",
+    apiSurface: "interactions",
+    isDefault: true,
+    notes: "Default Gemini 3.5 Pro route for `gai generate` text, structured output, and grounding tools."
+  },
+  {
+    id: "gemini-3.5-flash",
+    capability: "text",
+    label: "Text fast",
+    status: "stable",
+    apiSurface: "interactions",
+    notes: "Faster, cheaper Gemini 3.5 Flash route for high-volume text generation."
+  },
+  {
+    id: "gemini-embedding-001",
+    capability: "embed",
+    label: "Embedding default",
+    status: "stable",
+    apiSurface: "embedContent",
+    isDefault: true,
+    notes: "Default text embedding model for `gai embed`."
+  },
+  {
     id: "gemini-3.5-flash",
     capability: "transcribe",
     label: "Transcription default",
@@ -123,6 +149,12 @@ export const defaultTtsModel = (): string =>
 
 export const defaultMusicModel = (): string =>
   process.env.GEMINI_ANYTHING_MUSIC_MODEL || "lyria-3-clip-preview";
+
+export const defaultTextModel = (): string =>
+  process.env.GEMINI_ANYTHING_TEXT_MODEL || "gemini-3.5-pro";
+
+export const defaultEmbedModel = (): string =>
+  process.env.GEMINI_ANYTHING_EMBED_MODEL || "gemini-embedding-001";
 
 export const defaultTranscribeModel = (): string =>
   process.env.GEMINI_ANYTHING_TRANSCRIBE_MODEL || "gemini-3.5-flash";

@@ -67,9 +67,69 @@ export const extForMime = (mimeType: string, fallback: string): string => {
   return extname(fallback) || fallback;
 };
 
-export const printResult = (result: unknown, json: boolean): void => {
+export type PrintOptions = {
+  transform?: string;
+  raw?: boolean;
+};
+
+// Dot-path extraction over the result object, e.g. "details.file.name" or "outputs.0.path".
+export const extractPath = (value: unknown, path: string): unknown => {
+  let current: unknown = value;
+  for (const segment of path.split(".").filter((part) => part.length > 0)) {
+    if (current === null || current === undefined) {
+      return undefined;
+    }
+    if (Array.isArray(current) && /^\d+$/.test(segment)) {
+      current = current[Number.parseInt(segment, 10)];
+      continue;
+    }
+    if (typeof current === "object") {
+      current = (current as Record<string, unknown>)[segment];
+      continue;
+    }
+    return undefined;
+  }
+  return current;
+};
+
+const writeRaw = (value: unknown): void => {
+  if (value === undefined) {
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      writeRaw(item);
+    }
+    return;
+  }
+  if (typeof value === "string") {
+    process.stdout.write(`${value}\n`);
+    return;
+  }
+  if (typeof value === "object" && value !== null) {
+    process.stdout.write(`${JSON.stringify(value)}\n`);
+    return;
+  }
+  process.stdout.write(`${String(value)}\n`);
+};
+
+export const printResult = (result: unknown, json: boolean, options: PrintOptions = {}): void => {
+  if (options.transform) {
+    const extracted = extractPath(result, options.transform);
+    if (options.raw) {
+      writeRaw(extracted);
+    } else {
+      process.stdout.write(`${JSON.stringify(extracted ?? null, null, 2)}\n`);
+    }
+    return;
+  }
   if (json) {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+  if (typeof result === "object" && result && "stdout" in result && typeof (result as { stdout?: unknown }).stdout === "string") {
+    const text = (result as { stdout: string }).stdout;
+    process.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
     return;
   }
   if (typeof result === "object" && result && "outputs" in result) {

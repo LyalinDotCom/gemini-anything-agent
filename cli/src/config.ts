@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { dirname, join, parse, resolve } from "node:path";
 import { config as loadDotenv } from "dotenv";
+import { AuthError } from "./errors.js";
 
 let loaded = false;
 let loadedEnvFiles: string[] = [];
@@ -68,7 +69,7 @@ export const getApiKey = (): string | undefined => {
 export const requireApiKey = (): string => {
   const key = getApiKey();
   if (!key) {
-    throw new Error("GEMINI_API_KEY or GOOGLE_API_KEY is required. Put it in .env or export it in the environment.");
+    throw new AuthError("GEMINI_API_KEY or GOOGLE_API_KEY is required. Put it in .env or export it in the environment.");
   }
   return key;
 };

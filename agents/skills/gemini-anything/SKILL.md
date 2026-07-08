@@ -53,6 +53,10 @@ For audio transcription requests, resolve the source first:
 
 After resolving the local audio file, inspect `bash "$GAI" transcribe --help`, then run `bash "$GAI" transcribe ...` with `--format markdown`, `--out /workspace/output/<descriptive-transcript-name>.md`, and `--json` unless the user asks for another format. Parse the JSON for the output path, verify the transcript file exists, and do not paste the transcript contents into chat. Final response should only say whether transcription succeeded and list the transcript path for download or preview.
 
+## Other CLI Capabilities
+
+The CLI also provides text embeddings (`bash "$GAI" embed --help`), token counting (`bash "$GAI" tokens --help`), and Gemini file management (`bash "$GAI" files --help`). Use them when the user asks for those capabilities; they are not media generation and do not follow this skill's media routing. Ordinary text answers stay on native managed-agent tools, not `bash "$GAI" generate`.
+
 ## Guardrails
 
 Never run bare `gai ...`.

@@ -8,6 +8,8 @@ describe("model registry", () => {
       "gemini-3.1-flash-image",
       "gemini-3.1-flash-tts-preview",
       "gemini-3.5-flash",
+      "gemini-3.5-pro",
+      "gemini-embedding-001",
       "lyria-3-clip-preview",
       "veo-3.1-lite-generate-preview"
     ]);
@@ -20,9 +22,9 @@ describe("model registry", () => {
     }
   });
 
-  it("only documents the supported MVP capabilities", () => {
+  it("only documents the supported capabilities", () => {
     expect(new Set(MODEL_REGISTRY.map((entry) => entry.capability))).toEqual(
-      new Set(["agy", "image", "video", "tts", "music", "transcribe"])
+      new Set(["agy", "image", "video", "tts", "music", "transcribe", "text", "embed"])
     );
   });
 });

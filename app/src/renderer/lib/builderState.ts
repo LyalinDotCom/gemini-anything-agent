@@ -46,6 +46,7 @@ export type ComposeState = {
   input: string;
   parts: InputPartDraft[];
   agentMode: AgentMode;
+  specializedToolsEnabled: boolean;
   store: boolean;
   autoContinue: boolean;
   reuseEnvironment: boolean;
@@ -90,6 +91,7 @@ export const initialCompose: ComposeState = {
   input: "",
   parts: [],
   agentMode: "anything",
+  specializedToolsEnabled: true,
   store: true,
   autoContinue: true,
   reuseEnvironment: true,

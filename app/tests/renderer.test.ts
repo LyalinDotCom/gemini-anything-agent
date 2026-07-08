@@ -21,7 +21,7 @@ import {
 } from "../src/renderer/lib/continuity";
 import { outputFileLabel, outputFileMatchesPath, outputFilesCoverPaths } from "../src/renderer/lib/outputFiles";
 import { buildChatInteraction, composeFromRequest } from "../src/renderer/lib/interactionInput";
-import { DEEP_RESEARCH_AGENT, DEEP_RESEARCH_MAX_AGENT } from "../src/sdk";
+import { ANTIGRAVITY_BASE_AGENT, DEEP_RESEARCH_AGENT, DEEP_RESEARCH_MAX_AGENT } from "../src/sdk";
 
 describe("chat interaction builder", () => {
   it("builds a multimodal request with attached images", () => {
@@ -37,6 +37,18 @@ describe("chat interaction builder", () => {
       { type: "text", text: "Describe this" },
       { type: "image", data: "AAAA", mime_type: "image/png" }
     ]);
+  });
+
+  it("routes plain Antigravity chats directly to the base agent", () => {
+    const request = buildChatInteraction("gemini-anything-v1", {
+      ...initialCompose,
+      specializedToolsEnabled: false,
+      input: "Try this without the Gemini Anything payload."
+    });
+
+    expect(request.agent).toBe(ANTIGRAVITY_BASE_AGENT);
+    expect(request.environment).toBe("remote");
+    expect(request.tools).toEqual([{ type: "code_execution" }, { type: "google_search" }, { type: "url_context" }]);
   });
 
   it("builds a Deep Research request invoked by base-agent id", () => {
@@ -93,9 +105,17 @@ describe("chat interaction builder", () => {
       input: "Do something.",
       environment: "remote"
     });
+    const plain = composeFromRequest({
+      agent: ANTIGRAVITY_BASE_AGENT,
+      input: "Do something plainly.",
+      environment: "remote"
+    });
 
     expect(research.agentMode).toBe("deep-research");
     expect(anything.agentMode).toBe("anything");
+    expect(anything.specializedToolsEnabled).toBe(true);
+    expect(plain.agentMode).toBe("anything");
+    expect(plain.specializedToolsEnabled).toBe(false);
   });
 });
 

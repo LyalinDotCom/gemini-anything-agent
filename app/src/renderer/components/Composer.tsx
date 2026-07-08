@@ -7,6 +7,7 @@ import {
   Loader2,
   Play,
   Sliders,
+  Sparkles,
   X,
   XCircle
 } from "lucide-react";
@@ -130,6 +131,12 @@ export const Composer = ({
   const contextOverrideCount = explicitPreviousInteractionId ? 1 : compose.store && !compose.autoContinue ? 1 : 0;
   const environmentOverrideCount = compose.overrideEnvironment ? 1 : !compose.reuseEnvironment ? 1 : 0;
   const deepResearch = compose.agentMode !== "anything";
+  const specializedToolsLocked = locked || agentLocked;
+  const specializedToolsTitle = agentLocked
+    ? "This conversation's Antigravity mode is fixed after its first run. Start a new chat to switch modes."
+    : compose.specializedToolsEnabled
+      ? "Use the Gemini Anything agent payload for this chat."
+      : "Use the raw Antigravity base agent for this chat.";
   const imageParts = compose.parts.filter((part): part is ImagePartDraft => part.kind === "image");
   const attachedImageCount = sentImageParts.length + imageParts.length;
   const optionCount =
@@ -393,51 +400,78 @@ export const Composer = ({
             }}
           />
         </label>
-        <div className={`composer-agent ${deepResearch ? "active" : ""}`} ref={agentMenuRef}>
-          <span
-            className="composer-agent-label"
-            title={
-              agentLocked
-                ? "This conversation's agent is fixed after its first run. Start a new chat to use a different agent."
-                : deepResearch
-                  ? "Deep Research runs in the background and can take up to 60 minutes."
-                  : "The managed agent handling this prompt"
-            }
-          >
-            {AGENT_MODE_LABELS[compose.agentMode]}
-          </span>
-          {!agentLocked && (
-            <button
-              type="button"
-              className="composer-agent-switch"
-              title="Change agent"
-              aria-label="Change agent"
-              aria-expanded={agentMenuOpen}
-              disabled={locked}
-              onClick={() => setAgentMenuOpen((value) => !value)}
+        <div className="composer-agent-cluster">
+          {!deepResearch && (
+            <label
+              className={`toggle composer-specialized-toggle ${compose.specializedToolsEnabled ? "on" : ""} ${
+                specializedToolsLocked ? "disabled" : ""
+              }`}
+              title={specializedToolsTitle}
             >
-              <ChevronsUpDown size={12} />
-            </button>
+              <input
+                type="checkbox"
+                checked={compose.specializedToolsEnabled}
+                disabled={specializedToolsLocked}
+                onChange={(event) =>
+                  setCompose((current) => ({
+                    ...current,
+                    specializedToolsEnabled: event.target.checked
+                  }))
+                }
+              />
+              <span className="toggle-track" aria-hidden>
+                <span className="toggle-thumb" />
+              </span>
+              <Sparkles size={13} />
+              <span>{compose.specializedToolsEnabled ? "Anything" : "Plain AGY"}</span>
+            </label>
           )}
-          {!agentLocked && agentMenuOpen && (
-            <div className="composer-agent-menu" role="menu">
-              {(Object.keys(AGENT_MODE_LABELS) as AgentMode[]).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={compose.agentMode === mode}
-                  className={compose.agentMode === mode ? "selected" : ""}
-                  onClick={() => {
-                    setCompose((current) => ({ ...current, agentMode: mode }));
-                    setAgentMenuOpen(false);
-                  }}
-                >
-                  {AGENT_MODE_LABELS[mode]}
-                </button>
-              ))}
-            </div>
-          )}
+          <div className={`composer-agent ${deepResearch ? "active" : ""}`} ref={agentMenuRef}>
+            <span
+              className="composer-agent-label"
+              title={
+                agentLocked
+                  ? "This conversation's agent is fixed after its first run. Start a new chat to use a different agent."
+                  : deepResearch
+                    ? "Deep Research runs in the background and can take up to 60 minutes."
+                    : "The managed agent handling this prompt"
+              }
+            >
+              {AGENT_MODE_LABELS[compose.agentMode]}
+            </span>
+            {!agentLocked && (
+              <button
+                type="button"
+                className="composer-agent-switch"
+                title="Change agent"
+                aria-label="Change agent"
+                aria-expanded={agentMenuOpen}
+                disabled={locked}
+                onClick={() => setAgentMenuOpen((value) => !value)}
+              >
+                <ChevronsUpDown size={12} />
+              </button>
+            )}
+            {!agentLocked && agentMenuOpen && (
+              <div className="composer-agent-menu" role="menu">
+                {(Object.keys(AGENT_MODE_LABELS) as AgentMode[]).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={compose.agentMode === mode}
+                    className={compose.agentMode === mode ? "selected" : ""}
+                    onClick={() => {
+                      setCompose((current) => ({ ...current, agentMode: mode }));
+                      setAgentMenuOpen(false);
+                    }}
+                  >
+                    {AGENT_MODE_LABELS[mode]}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
         <button
           type="button"

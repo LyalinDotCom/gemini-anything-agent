@@ -185,7 +185,13 @@ export const sessionCanReconnect = (session: Session): boolean =>
   (Boolean(session.error) || !interactionIsTerminal(session.seed!));
 
 export const fallbackAgent = (agentId: string): ManagedAgent =>
-  isDeepResearchAgentId(agentId)
+  agentId.trim() === ANTIGRAVITY_BASE_AGENT
+    ? {
+        id: agentId,
+        base_agent: ANTIGRAVITY_BASE_AGENT,
+        description: "Google Antigravity base agent."
+      }
+    : isDeepResearchAgentId(agentId)
     ? {
         id: agentId,
         base_agent: agentId.trim() as BaseAgentId,

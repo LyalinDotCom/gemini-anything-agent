@@ -1,4 +1,5 @@
 import {
+  ANTIGRAVITY_BASE_AGENT,
   DEEP_RESEARCH_AGENT,
   DEEP_RESEARCH_MAX_AGENT,
   type InteractionCreateRequest,
@@ -128,6 +129,9 @@ export const agentModeForAgentId = (agentId: string): AgentMode => {
   return "anything";
 };
 
+export const specializedToolsEnabledForAgentId = (agentId: string): boolean =>
+  agentId.trim() !== ANTIGRAVITY_BASE_AGENT;
+
 export const buildChatInteraction = (
   agentId: string,
   compose: ComposeState
@@ -157,7 +161,7 @@ export const buildChatInteraction = (
   }
 
   const request: InteractionCreateRequest = {
-    agent: agentId,
+    agent: compose.specializedToolsEnabled ? agentId : ANTIGRAVITY_BASE_AGENT,
     input: composeToInput(compose),
     environment: "remote",
     store: compose.store
@@ -181,7 +185,7 @@ export const buildChatInteraction = (
   if (compose.overrideSystemInstruction && compose.systemInstruction.trim()) {
     request.system_instruction = compose.systemInstruction.trim();
   }
-  if (compose.overrideTools) {
+  if (!compose.specializedToolsEnabled || compose.overrideTools) {
     request.tools = ALL_AGENT_TOOLS.map((type) => ({ type }));
   }
   if (compose.overrideEnvironment && compose.environmentId.trim()) {
@@ -233,6 +237,7 @@ export const composeFromRequest = (request: InteractionCreateRequest): ComposeSt
     input,
     parts,
     agentMode: agentModeForAgentId(request.agent),
+    specializedToolsEnabled: specializedToolsEnabledForAgentId(request.agent),
     store: request.store ?? initialCompose.store,
     autoContinue: !request.previous_interaction_id,
     reuseEnvironment: request.environment === "remote",

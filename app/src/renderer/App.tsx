@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Bot } from "lucide-react";
 import {
+  ANTIGRAVITY_BASE_AGENT,
   extractInteractionOutputText,
   isDeepResearchAgentId,
   validateInteractionCreate,
@@ -40,6 +41,7 @@ import {
   mergeImageParts,
   promptForInput,
   restoreComposeInput,
+  specializedToolsEnabledForAgentId,
   type PendingComposeInput
 } from "./lib/interactionInput";
 import {
@@ -159,7 +161,13 @@ export const App = () => {
   const keyMissing = hasBridge && runtimeLoaded && !hasKey;
   const appReady = hasBridge && hasKey && sessionsLoaded;
   const agentSessions = useMemo(
-    () => sessions.filter((session) => session.agentId === agentId || isDeepResearchAgentId(session.agentId)),
+    () =>
+      sessions.filter(
+        (session) =>
+          session.agentId === agentId ||
+          session.agentId === ANTIGRAVITY_BASE_AGENT ||
+          isDeepResearchAgentId(session.agentId)
+      ),
     [agentId, sessions]
   );
   const conversations = useMemo(
@@ -346,7 +354,12 @@ export const App = () => {
       return;
     }
     const mode = agentModeForAgentId(conversationAgentId);
-    setCompose((current) => (current.agentMode === mode ? current : { ...current, agentMode: mode }));
+    const specializedToolsEnabled = specializedToolsEnabledForAgentId(conversationAgentId);
+    setCompose((current) =>
+      current.agentMode === mode && current.specializedToolsEnabled === specializedToolsEnabled
+        ? current
+        : { ...current, agentMode: mode, specializedToolsEnabled }
+    );
   }, [conversationAgentId]);
 
   useEffect(() => {
@@ -758,7 +771,8 @@ export const App = () => {
     // Deep Research agents are invoked directly by base-agent id; there is no
     // custom managed agent to deploy or snapshot for them.
     const isDeepResearchRun = isDeepResearchAgentId(request.agent);
-    if (!isDeepResearchRun) {
+    const isPlainAntigravityRun = request.agent === ANTIGRAVITY_BASE_AGENT;
+    if (!isDeepResearchRun && !isPlainAntigravityRun) {
       const ensuredAgent = await ensureAgentBeforeRun(bridge, agentId);
       if (!ensuredAgent) {
         restorePendingRunInput(localId, sourceConversationId);
@@ -773,7 +787,7 @@ export const App = () => {
       }
     }
 
-    const agentSnapshot = isDeepResearchRun
+    const agentSnapshot = isDeepResearchRun || isPlainAntigravityRun
       ? fallbackAgent(request.agent)
       : await snapshotAgentForRun(request.agent, fallbackAgent(request.agent));
     const base: Session = {
@@ -1437,39 +1451,6 @@ export const App = () => {
     await saveApiKey("");
   }
 
-  async function setSpecializedToolsEnabled(enabled: boolean) {
-    if (!window.managedAgents?.setSpecializedToolsEnabled) {
-      pushStatus({
-        level: "error",
-        title: bridgeUnavailable.name,
-        detail: bridgeUnavailable.message
-      });
-      return;
-    }
-    setBusy("save-tools");
-    try {
-      const result = await window.managedAgents.setSpecializedToolsEnabled(enabled);
-      if (!result.ok) {
-        pushStatus({
-          level: "error",
-          title: result.error.name,
-          detail: result.error.message
-        });
-        return;
-      }
-      await loadRuntime();
-      pushStatus({
-        level: "success",
-        title: enabled ? "Specialized tools enabled" : "Plain agent mode enabled",
-        detail: enabled
-          ? "Next run will deploy the media skill, gai CLI, and sandbox env."
-          : "Next run will deploy without the media skill, gai CLI, or sandbox env."
-      });
-    } finally {
-      setBusy(null);
-    }
-  }
-
   async function copyText(text: string, label: string) {
     try {
       await navigator.clipboard.writeText(text);
@@ -2110,11 +2091,9 @@ export const App = () => {
           runtime={runtime}
           hasBridge={hasBridge}
           saving={busy === "save-key"}
-          savingSpecializedTools={busy === "save-tools"}
           onClose={() => setSettingsOpen(false)}
           onSave={saveApiKey}
           onClear={clearApiKey}
-          onSetSpecializedToolsEnabled={(enabled) => void setSpecializedToolsEnabled(enabled)}
         />
       )}
 

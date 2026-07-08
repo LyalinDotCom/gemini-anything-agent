@@ -1877,13 +1877,41 @@ svg {
   opacity: 0.55;
 }
 
+.composer-agent-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  /* Right-aligned cluster: agent label · Options · Run. */
+  margin-left: auto;
+}
+
 .composer-agent {
   position: relative;
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  /* Right-aligned cluster: agent label · Options · Run. */
-  margin-left: auto;
+}
+
+.composer-specialized-toggle {
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.composer-specialized-toggle.on {
+  color: var(--teal-dark);
+}
+
+.composer-specialized-toggle svg {
+  flex: 0 0 auto;
+}
+
+.composer-specialized-toggle span:last-child {
+  min-width: 0;
 }
 
 .composer-agent-label {
@@ -3218,30 +3246,6 @@ button:disabled {
   font-size: 13px;
 }
 
-.settings-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-}
-
-.settings-row-text {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-
-.settings-row-text strong {
-  font-size: 13px;
-}
-
-.settings-row-text span {
-  color: var(--muted);
-  font-size: 12.5px;
-  line-height: 1.35;
-}
-
 .key-status {
   display: flex;
   align-items: center;
@@ -3410,6 +3414,9 @@ button:disabled {
   }
   .composer-row {
     flex-wrap: wrap;
+  }
+  .composer-agent-cluster {
+    margin-left: 0;
   }
   .run-options {
     margin-left: 0;
@@ -5300,6 +5307,10 @@ button:disabled {
   gap: 8px;
 }
 
+.chat-app .composer-agent-cluster {
+  gap: 7px;
+}
+
 .chat-app .icon-toggle {
   min-width: 30px;
   width: 30px;
@@ -5323,6 +5334,21 @@ button:disabled {
   color: var(--b-ink);
   font-size: 13px;
   font-weight: 500;
+}
+
+.chat-app .composer-specialized-toggle {
+  min-width: 102px;
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 9px;
+  background: var(--b-soft);
+  color: var(--b-ink);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.chat-app .composer-specialized-toggle.on {
+  color: var(--b-blue);
 }
 
 .chat-app .composer-agent-label {

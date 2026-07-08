@@ -45,7 +45,6 @@ import {
   type SaveResolvedMediaResult,
   type SaveTextResult,
   type SetApiKeyResult,
-  type SetSpecializedToolsResult,
   type SnapshotDownloadResult
 } from "../shared/electron-api";
 import {
@@ -77,10 +76,6 @@ protocol.registerSchemesAsPrivileged([
 const DEFAULT_AGENT_ID = "gemini-anything-v1";
 const DEFAULT_NPM_PACKAGE = "@lyalindotcom/gai";
 const DEFAULT_NPM_VERSION = "latest";
-const SPECIALIZED_TOOLS_ENV_KEY = "GEMINI_ANYTHING_SPECIALIZED_TOOLS_ENABLED";
-type LocalAppSettings = {
-  specializedToolsEnabled?: boolean;
-};
 
 const snapshotTarPath = (cacheRoot: string): string => join(cacheRoot, `snapshot-${randomUUID()}.tar`);
 const tarEntriesPath = (cacheRoot: string): string => join(cacheRoot, `snapshot-entries-${randomUUID()}.txt`);
@@ -102,7 +97,6 @@ const APP_ICON_PATH = process.platform === "darwin" ? join(APP_ROOT, "assets", "
 const LOCAL_OUTPUT_ROOT = join(REPO_ROOT, "outputs", "managed-agent");
 const LOCAL_CHAT_ROOT = chatStoreRootPath(REPO_ROOT);
 const mediaCacheRoot = (): string => join(app.getPath("userData"), "environment-media");
-const localSettingsPath = (): string => join(app.getPath("userData"), "settings.json");
 
 const loadEnvIfPresent = (path: string, override = false): void => {
   if (existsSync(path)) {
@@ -141,43 +135,6 @@ const envValue = (value: string | undefined): string =>
 
 const envValueOrDefault = (value: string | undefined, fallback: string): string => envValue(value) || fallback;
 
-const envFlagEnabled = (value: string | undefined, fallback: boolean): boolean => {
-  const normalized = envValue(value).toLowerCase();
-  if (!normalized) {
-    return fallback;
-  }
-  if (["0", "false", "off", "no", "disabled"].includes(normalized)) {
-    return false;
-  }
-  if (["1", "true", "on", "yes", "enabled"].includes(normalized)) {
-    return true;
-  }
-  return fallback;
-};
-
-const specializedToolsEnabled = (): boolean =>
-  readLocalAppSettings().specializedToolsEnabled ?? envFlagEnabled(process.env[SPECIALIZED_TOOLS_ENV_KEY], true);
-
-const readLocalAppSettings = (): LocalAppSettings => {
-  const path = localSettingsPath();
-  if (!existsSync(path)) {
-    return {};
-  }
-  try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as LocalAppSettings;
-    return typeof parsed === "object" && parsed ? parsed : {};
-  } catch {
-    return {};
-  }
-};
-
-const writeLocalAppSettings = (settings: LocalAppSettings): string => {
-  const path = localSettingsPath();
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
-  return path;
-};
-
 const sandboxEnvContent = (): string =>
   [
     `GEMINI_API_KEY=${envValue(process.env.GEMINI_API_KEY)}`,
@@ -203,7 +160,7 @@ const anythingAgentId = (): string => process.env.GEMINI_ANYTHING_AGENT_ID?.trim
 const isAnythingAgentRequest = (request: InteractionCreateRequest): boolean =>
   request.agent.trim() === anythingAgentId();
 
-const currentInvocationContext = (includeSpecializedTools = specializedToolsEnabled()): string => {
+const currentInvocationContext = (): string => {
   const now = new Date();
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "unknown";
   return [
@@ -214,12 +171,8 @@ const currentInvocationContext = (includeSpecializedTools = specializedToolsEnab
     "- You are running as a remote Gemini Managed Agent in a Google-hosted Linux sandbox.",
     "- Workspace root in the sandbox: `/workspace`.",
     "- Durable artifact folder in the sandbox: `/workspace/output`.",
-    includeSpecializedTools
-      ? "- Mounted agent instruction files: `/.agents/AGENTS.md` and `/.agents/skills/gemini-anything/SKILL.md`."
-      : "- Specialized media skill files are not mounted in this mode.",
-    includeSpecializedTools
-      ? "- Mounted media CLI wrapper: `/.agents/bin/gai`."
-      : "- The `gai` media CLI wrapper and sandbox `.env` are not mounted in this mode.",
+    "- Mounted agent instruction files: `/.agents/AGENTS.md` and `/.agents/skills/gemini-anything/SKILL.md`.",
+    "- Mounted media CLI wrapper: `/.agents/bin/gai`.",
     "- Follow-up turns may include two independent continuity pointers: `previous_interaction_id` for conversation context and `environment` for sandbox/filesystem state.",
     "- If a request depends on existing artifacts, inspect `/workspace/output` before choosing tools.",
     "- If exact current date/time or live facts matter, verify with `date`, `date -u`, and web/search as appropriate.",
@@ -312,35 +265,29 @@ const agentConfigHash = (agent: AgentDefinition): string =>
     .digest("hex")
     .slice(0, 12);
 
-const buildAnythingAgentDefinition = (
-  agentId: string,
-  options: { specializedToolsEnabled?: boolean } = {}
-): AgentDefinition => {
-  const includeSpecializedTools = options.specializedToolsEnabled ?? specializedToolsEnabled();
-  const sources = includeSpecializedTools
-    ? [
-        {
-          type: "inline" as const,
-          target: ".agents/bin/gai",
-          content: readAgentAsset("bin/gai")
-        },
-        {
-          type: "inline" as const,
-          target: ".agents/AGENTS.md",
-          content: readAgentAsset("AGENTS.md")
-        },
-        {
-          type: "inline" as const,
-          target: ".agents/skills/gemini-anything/SKILL.md",
-          content: readAgentAsset("skills/gemini-anything/SKILL.md")
-        },
-        {
-          type: "inline" as const,
-          target: ".env",
-          content: sandboxEnvContent()
-        }
-      ]
-    : undefined;
+const buildAnythingAgentDefinition = (agentId: string): AgentDefinition => {
+  const sources = [
+    {
+      type: "inline" as const,
+      target: ".agents/bin/gai",
+      content: readAgentAsset("bin/gai")
+    },
+    {
+      type: "inline" as const,
+      target: ".agents/AGENTS.md",
+      content: readAgentAsset("AGENTS.md")
+    },
+    {
+      type: "inline" as const,
+      target: ".agents/skills/gemini-anything/SKILL.md",
+      content: readAgentAsset("skills/gemini-anything/SKILL.md")
+    },
+    {
+      type: "inline" as const,
+      target: ".env",
+      content: sandboxEnvContent()
+    }
+  ];
   // No agent-level system_instruction: the app sends a request-level one on
   // every interaction, which would silently replace it anyway. AGENTS.md is
   // the durable instruction layer.
@@ -348,16 +295,12 @@ const buildAnythingAgentDefinition = (
     id: agentId,
     base_agent: ANTIGRAVITY_BASE_AGENT,
     tools: [{ type: "code_execution" }, { type: "google_search" }, { type: "url_context" }],
-    base_environment: sources ? { type: "remote", sources } : { type: "remote" }
+    base_environment: { type: "remote", sources }
   };
 
   return {
     ...definition,
-    description: `${
-      includeSpecializedTools
-        ? "Gemini Anything managed agent with media generation routed through gai."
-        : "Gemini Anything managed agent in plain native mode without gai, media skill, or sandbox env."
-    } config:${agentConfigHash(definition)}`
+    description: `Gemini Anything managed agent with media generation routed through gai. config:${agentConfigHash(definition)}`
   };
 };
 
@@ -1292,8 +1235,7 @@ handle(ipcChannels.runtimeConfig, () => ({
   docsLastChecked: "2026-06-22",
   agentId: envValueOrDefault(process.env.GEMINI_ANYTHING_AGENT_ID, DEFAULT_AGENT_ID),
   npmPackage: envValueOrDefault(process.env.GEMINI_ANYTHING_NPM_PACKAGE, DEFAULT_NPM_PACKAGE),
-  npmVersion: envValueOrDefault(process.env.GEMINI_ANYTHING_NPM_VERSION, DEFAULT_NPM_VERSION),
-  specializedToolsEnabled: specializedToolsEnabled()
+  npmVersion: envValueOrDefault(process.env.GEMINI_ANYTHING_NPM_VERSION, DEFAULT_NPM_VERSION)
 }));
 
 handle<[string], SetApiKeyResult>(ipcChannels.setApiKey, async (key) => {
@@ -1312,17 +1254,6 @@ handle<[string], SetApiKeyResult>(ipcChannels.setApiKey, async (key) => {
     hasApiKey: Boolean(process.env.GEMINI_API_KEY),
     apiKeyMasked: maskKey(process.env.GEMINI_API_KEY),
     envPath: ENV_PATH
-  };
-});
-
-handle<[boolean], SetSpecializedToolsResult>(ipcChannels.setSpecializedToolsEnabled, async (enabled) => {
-  const settingsPath = writeLocalAppSettings({
-    ...readLocalAppSettings(),
-    specializedToolsEnabled: enabled
-  });
-  return {
-    specializedToolsEnabled: enabled,
-    settingsPath
   };
 });
 

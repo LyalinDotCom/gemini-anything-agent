@@ -69,7 +69,7 @@ import { bridgeUnavailable, FALLBACK_RUNTIME } from "./lib/runtimeConfig";
 import { outputMediaItem, textFileNameForLabel } from "./lib/outputFiles";
 import { Composer } from "./components/Composer";
 import { Transcript } from "./components/Transcript";
-import { SettingsModal } from "./components/Overlays";
+import { AboutModal, SettingsModal } from "./components/Overlays";
 import { MediaLightbox } from "./components/GeneratedMedia";
 import { OutputFilesPanel } from "./components/OutputFilesPanel";
 import { HtmlPreview } from "./components/HtmlPreview";
@@ -123,6 +123,7 @@ export const App = () => {
   const [status, setStatus] = useState<StatusEvent | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const [latestRunId, setLatestRunId] = useState<string | null>(null);
   const [activeConversationId, setActiveConversationId] = useState<string>(NEW_CONVERSATION_ID);
   const [newConversationDraftVisible, setNewConversationDraftVisible] = useState(true);
@@ -1810,6 +1811,22 @@ export const App = () => {
     }
   }
 
+  async function openExternalLink(url: string) {
+    if (!window.managedAgents?.openExternal) {
+      window.open(url, "_blank", "noopener,noreferrer");
+      return;
+    }
+    const result = await window.managedAgents.openExternal(url);
+    if (!result.ok) {
+      window.open(url, "_blank", "noopener,noreferrer");
+      pushStatus({
+        level: "error",
+        title: result.error.name,
+        detail: result.error.message
+      });
+    }
+  }
+
   function resetConversation() {
     if (!selectedConversation) {
       return;
@@ -1930,6 +1947,7 @@ export const App = () => {
           onSelectConversation={selectConversation}
           onDeleteConversation={deleteConversation}
           onReorderConversation={reorderConversation}
+          onOpenAbout={() => setAboutOpen(true)}
           onOpenSettings={() => setSettingsOpen(true)}
         />
 
@@ -2096,6 +2114,8 @@ export const App = () => {
           onClear={clearApiKey}
         />
       )}
+
+      {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} onOpenExternal={openExternalLink} />}
 
       <MediaLightbox item={activeMedia} onClose={() => setActiveMedia(null)} />
 

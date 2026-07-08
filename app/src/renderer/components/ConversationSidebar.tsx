@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import {
+  Info,
   Loader2,
   MessageSquare,
   PanelLeftClose,
@@ -24,6 +25,7 @@ type ConversationSidebarProps = {
   onDeleteConversation: (conversation: ConversationSummary) => void;
   /** dropSlot is the gap index among non-draft conversations (0..count). */
   onReorderConversation: (dragId: string, dropSlot: number) => void;
+  onOpenAbout: () => void;
   onOpenSettings: () => void;
 };
 
@@ -37,6 +39,7 @@ export const ConversationSidebar = ({
   onSelectConversation,
   onDeleteConversation,
   onReorderConversation,
+  onOpenAbout,
   onOpenSettings
 }: ConversationSidebarProps) => {
   const [dragId, setDragId] = useState<string | null>(null);
@@ -207,7 +210,17 @@ export const ConversationSidebar = ({
       <div className="conversation-footer">
         <button
           type="button"
-          className="sidebar-settings"
+          className="sidebar-footer-button"
+          title="About"
+          aria-label="About"
+          onClick={onOpenAbout}
+        >
+          <Info size={15} />
+          <span>About</span>
+        </button>
+        <button
+          type="button"
+          className="sidebar-footer-button"
           title="Settings"
           aria-label="Settings"
           onClick={onOpenSettings}

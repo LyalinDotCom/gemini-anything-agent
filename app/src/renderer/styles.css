@@ -3202,6 +3202,11 @@ button:disabled {
   max-height: calc(100vh - 32px);
 }
 
+.about-modal {
+  width: min(980px, calc(100vw - 34px));
+  max-height: calc(100vh - 34px);
+}
+
 .modal-head {
   display: flex;
   align-items: center;
@@ -3244,6 +3249,254 @@ button:disabled {
 
 .settings-card h3 {
   font-size: 13px;
+}
+
+.about-head {
+  background: linear-gradient(180deg, #ffffff, #f7f8fb);
+}
+
+.about-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  background:
+    linear-gradient(180deg, rgba(0, 122, 255, 0.04), transparent 220px),
+    var(--surface);
+}
+
+.about-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+  padding: 4px 2px 0;
+}
+
+.about-kicker {
+  display: inline-flex;
+  margin-bottom: 7px;
+  color: var(--teal-dark);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.about-hero h3,
+.about-flow h3 {
+  color: var(--ink);
+  font-size: 21px;
+  line-height: 1.15;
+}
+
+.about-hero p {
+  max-width: 720px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.about-inline-map {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 750;
+}
+
+.about-inline-map span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.about-inline-map svg {
+  color: var(--teal);
+}
+
+.about-repo-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 8px 11px;
+  color: #fff;
+  background: var(--ink);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.about-repo-link:hover {
+  background: var(--ink-2);
+}
+
+.about-part-icon {
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  flex: 0 0 auto;
+  border-radius: 7px;
+  color: var(--b-blue);
+  background: rgba(0, 122, 255, 0.12);
+}
+
+.about-part-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.about-part {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 16px;
+  border-right: 1px solid var(--line);
+}
+
+.about-part:last-child {
+  border-right: none;
+}
+
+.about-part header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.about-part header div {
+  min-width: 0;
+}
+
+.about-part header span {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.about-part h4 {
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.about-part p {
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.42;
+}
+
+.about-part ul {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.about-part li {
+  display: grid;
+  grid-template-columns: 15px minmax(0, 1fr);
+  gap: 7px;
+  align-items: start;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.about-part li svg {
+  margin-top: 2px;
+  color: var(--teal);
+}
+
+.about-flow {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.7fr) minmax(0, 1fr);
+  gap: 18px;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+
+.about-flow h3 {
+  font-size: 17px;
+  line-height: 1.25;
+}
+
+.about-flow ol {
+  display: grid;
+  gap: 7px;
+}
+
+.about-flow li {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.about-flow li > span {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  color: #fff;
+  background: var(--teal-dark);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.about-flow p {
+  color: var(--ink-2);
+  font-size: 12.8px;
+  line-height: 1.45;
+}
+
+@media (max-width: 900px) {
+  .about-hero,
+  .about-flow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .about-repo-link {
+    width: fit-content;
+  }
+
+  .about-part-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .about-part {
+    padding: 13px 0;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .about-part:first-child {
+    padding-top: 0;
+  }
+
+  .about-part:last-child {
+    padding-bottom: 0;
+    border-bottom: none;
+  }
 }
 
 .key-status {
@@ -3520,17 +3773,19 @@ button:disabled {
 
 .conversation-footer {
   display: flex;
+  gap: 6px;
   flex: 0 0 auto;
   padding: 8px 10px 12px;
   border-top: 1px solid var(--line);
 }
 
-.sidebar-settings {
+.sidebar-footer-button {
   display: flex;
   align-items: center;
   justify-content: flex-start;
   gap: 8px;
-  width: 100%;
+  flex: 1 1 0;
+  min-width: 0;
   min-height: 34px;
   padding: 8px 9px;
   color: var(--muted);
@@ -3541,7 +3796,7 @@ button:disabled {
   text-align: left;
 }
 
-.sidebar-settings:hover {
+.sidebar-footer-button:hover {
   color: var(--ink);
   background: var(--surface-2);
 }
@@ -3682,18 +3937,19 @@ button:disabled {
 }
 
 .conversation-sidebar.collapsed .conversation-footer {
+  flex-direction: column;
   width: 100%;
   margin-top: auto;
   padding: 8px 8px 12px;
 }
 
-.conversation-sidebar.collapsed .sidebar-settings {
+.conversation-sidebar.collapsed .sidebar-footer-button {
   justify-content: center;
   width: 100%;
   padding: 8px 0;
 }
 
-.conversation-sidebar.collapsed .sidebar-settings span {
+.conversation-sidebar.collapsed .sidebar-footer-button span {
   display: none;
 }
 
@@ -4149,11 +4405,12 @@ button:disabled {
 }
 
 .chat-app .conversation-footer {
+  gap: 6px;
   padding: 8px;
   border-top: 0.5px solid rgba(60, 60, 67, 0.12);
 }
 
-.chat-app .sidebar-settings {
+.chat-app .sidebar-footer-button {
   min-height: 31px;
   padding: 7px 8px;
   color: var(--b-muted);
@@ -4161,7 +4418,7 @@ button:disabled {
   font-size: 12.5px;
 }
 
-.chat-app .sidebar-settings:hover {
+.chat-app .sidebar-footer-button:hover {
   color: var(--b-ink);
   background: rgba(0, 0, 0, 0.08);
 }

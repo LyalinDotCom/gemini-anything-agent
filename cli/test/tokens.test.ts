@@ -28,7 +28,7 @@ describe("tokens command", () => {
     expect(result.stdout).toBe("42");
     expect(result.details).toMatchObject({ totalTokens: 42 });
     expect(genai.countTokens).toHaveBeenCalledWith(
-      expect.objectContaining({ model: "gemini-3.5-pro", contents: "some prompt" })
+      expect.objectContaining({ model: "gemini-3.5-flash", contents: "some prompt" })
     );
   });
 

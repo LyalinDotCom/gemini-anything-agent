@@ -1,6 +1,14 @@
-import { existsSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, parse, resolve } from "node:path";
-import { config as loadDotenv } from "dotenv";
+import { config as loadDotenv, parse as parseDotenv } from "dotenv";
 import { AuthError } from "./errors.js";
 
 let loaded = false;
@@ -10,10 +18,58 @@ const PLACEHOLDER_VALUES = new Set(["PLACEHOLDER", "YOUR_API_KEY", "YOUR_API_KEY
 
 const normalizeApiKey = (value: string | undefined): string | undefined => {
   const trimmed = value?.trim();
-  if (!trimmed || PLACEHOLDER_VALUES.has(trimmed.toUpperCase())) {
+  if (!trimmed || /[\r\n\0]/.test(trimmed) || PLACEHOLDER_VALUES.has(trimmed.toUpperCase())) {
     return undefined;
   }
   return trimmed;
+};
+
+export const userConfigDir = (): string => {
+  const override = process.env.GEMINI_ANYTHING_CONFIG_DIR?.trim();
+  if (override) {
+    return resolve(override);
+  }
+  const xdg = process.env.XDG_CONFIG_HOME?.trim();
+  if (xdg) {
+    return resolve(xdg, "gai");
+  }
+  const appData = process.platform === "win32" ? process.env.APPDATA?.trim() : undefined;
+  return appData ? resolve(appData, "gai") : join(homedir(), ".config", "gai");
+};
+
+export const userEnvPath = (): string => join(userConfigDir(), ".env");
+
+export const readUserApiKey = (): string | undefined => {
+  const path = userEnvPath();
+  if (!existsSync(path)) {
+    return undefined;
+  }
+  try {
+    const parsed = parseDotenv(readFileSync(path, "utf8"));
+    return normalizeApiKey(parsed.GOOGLE_API_KEY) || normalizeApiKey(parsed.GEMINI_API_KEY);
+  } catch {
+    return undefined;
+  }
+};
+
+export const persistUserApiKey = (value: string): string => {
+  const key = normalizeApiKey(value);
+  if (!key) {
+    throw new AuthError("Cannot persist an empty, placeholder, or malformed API key.");
+  }
+  const directory = userConfigDir();
+  const path = userEnvPath();
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  chmodSync(directory, 0o700);
+  writeFileSync(path, `GEMINI_API_KEY=${key}\n`, { encoding: "utf8", mode: 0o600 });
+  chmodSync(path, 0o600);
+  return path;
+};
+
+export const clearUserApiKey = (): string => {
+  const path = userEnvPath();
+  rmSync(path, { force: true });
+  return path;
 };
 
 const clearPlaceholderApiKeys = (): void => {
@@ -50,10 +106,11 @@ export const loadEnvironment = (startDir = process.cwd()): string[] => {
   loadedEnvFiles = [];
   clearPlaceholderApiKeys();
 
-  for (const file of envCandidates(startDir)) {
+  for (const file of [...new Set([...envCandidates(startDir), userEnvPath()])]) {
     if (existsSync(file)) {
       loadDotenv({ path: file, override: false, quiet: true });
       loadedEnvFiles.push(file);
+      clearPlaceholderApiKeys();
     }
   }
   clearPlaceholderApiKeys();
@@ -69,7 +126,9 @@ export const getApiKey = (): string | undefined => {
 export const requireApiKey = (): string => {
   const key = getApiKey();
   if (!key) {
-    throw new AuthError("GEMINI_API_KEY or GOOGLE_API_KEY is required. Put it in .env or export it in the environment.");
+    throw new AuthError(
+      "GEMINI_API_KEY or GOOGLE_API_KEY is required. Export it, put it in a project .env, or persist it with 'gai config set-key'."
+    );
   }
   return key;
 };

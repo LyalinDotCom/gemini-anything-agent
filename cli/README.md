@@ -18,6 +18,7 @@ npx -y @lyalindotcom/gai@latest transcribe --help
 npx -y @lyalindotcom/gai@latest embed --help
 npx -y @lyalindotcom/gai@latest tokens --help
 npx -y @lyalindotcom/gai@latest files --help
+npx -y @lyalindotcom/gai@latest config --help
 npx -y @lyalindotcom/gai@latest agent --help
 ```
 
@@ -106,10 +107,23 @@ npm run gai -- models
 
 ## Configuration
 
+Persist the currently resolved project/environment key once for use from any
+directory:
+
+```bash
+npx -y @lyalindotcom/gai@latest config set-key
+```
+
+The key is stored with user-only permissions under `~/.config/gai/.env` (or the
+platform/XDG equivalent). Environment variables and project `.env` files take
+precedence. Use `config status` to inspect availability without printing the key,
+or `config clear-key` to remove the persistent copy.
+
 - `GEMINI_API_KEY` or `GOOGLE_API_KEY` — required for live calls; loaded from the
-  environment or any `.env`/`.env.local` walking up from the working directory.
+  environment, any `.env`/`.env.local` walking up from the working directory, or
+  the persistent user config.
 - `GEMINI_ANYTHING_OUTPUT_DIR` — default output directory for generated files.
-- `GEMINI_ANYTHING_{TEXT,EMBED,IMAGE,TTS,MUSIC,TRANSCRIBE,VIDEO}_MODEL` and
+- `GEMINI_ANYTHING_{TEXT,TOKENS,EMBED,IMAGE,TTS,MUSIC,TRANSCRIBE,VIDEO}_MODEL` and
   `GEMINI_ANYTHING_BASE_AGENT` — per-capability model overrides.
 
 ## Key Warning

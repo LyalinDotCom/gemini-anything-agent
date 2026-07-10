@@ -153,6 +153,9 @@ export const defaultMusicModel = (): string =>
 export const defaultTextModel = (): string =>
   process.env.GEMINI_ANYTHING_TEXT_MODEL || "gemini-3.5-pro";
 
+export const defaultTokensModel = (): string =>
+  process.env.GEMINI_ANYTHING_TOKENS_MODEL || "gemini-3.5-flash";
+
 export const defaultEmbedModel = (): string =>
   process.env.GEMINI_ANYTHING_EMBED_MODEL || "gemini-embedding-001";
 

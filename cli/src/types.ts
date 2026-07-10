@@ -15,6 +15,7 @@ export type CommandResult = {
     | "embed"
     | "tokens"
     | "files"
+    | "config"
     | "agent"
     | "models"
     | "doctor";

@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { UsageError } from "../errors.js";
 import { createGenAIClient } from "../genaiClient.js";
-import { defaultTextModel } from "../models.js";
+import { defaultTokensModel } from "../models.js";
 import type { CommandResult } from "../types.js";
 
 type TokensOptions = {
@@ -20,7 +20,7 @@ export const runTokens = async (text: string | undefined, options: TokensOptions
     throw new UsageError("Provide text to count as an argument or via --file.");
   }
 
-  const model = options.model || defaultTextModel();
+  const model = options.model || defaultTokensModel();
   const ai = createGenAIClient();
   const response = (await ai.models.countTokens({
     model,

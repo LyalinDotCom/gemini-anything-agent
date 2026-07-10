@@ -16,6 +16,7 @@ import {
   runAgentStatus
 } from "./subcommands/agent.js";
 import { runDoctor } from "./subcommands/doctor.js";
+import { runConfigClearKey, runConfigSetKey, runConfigStatus } from "./subcommands/config.js";
 import { runEmbed } from "./subcommands/embed.js";
 import {
   runFilesDelete,
@@ -98,6 +99,7 @@ Run a command help page before using a capability:
   gai embed --help
   gai tokens --help
   gai files --help
+  gai config --help
   gai agent --help
 
 Use --json for machine-readable output. Generated files are written to --out when provided.
@@ -122,6 +124,42 @@ program
   .description("Validate local environment for media generation")
   .option("--json", "print machine-readable JSON")
   .action((options: { json?: boolean }) => runAction(options, runDoctor, "doctor"));
+
+const config = program
+  .command("config")
+  .description("Manage persistent user-level configuration")
+  .addHelpText(
+    "after",
+    `
+
+The global key is stored at ~/.config/gai/.env (or the platform/XDG equivalent).
+Environment variables and project .env files take precedence. Examples:
+  gai config set-key
+  printenv GEMINI_API_KEY | gai config set-key --stdin
+  gai config status --json
+  gai config clear-key`
+  );
+
+config
+  .command("set-key")
+  .description("Persist the currently resolved API key for use from any directory")
+  .option("--stdin", "read the API key from stdin instead of the current environment")
+  .option("--json", "print machine-readable JSON")
+  .action((options: { stdin?: boolean; json?: boolean }) =>
+    runAction(options, () => runConfigSetKey(options), "config")
+  );
+
+config
+  .command("status")
+  .description("Show whether a persistent and effective API key is available")
+  .option("--json", "print machine-readable JSON")
+  .action((options: { json?: boolean }) => runAction(options, runConfigStatus, "config"));
+
+config
+  .command("clear-key")
+  .description("Remove the persistent user-level API key")
+  .option("--json", "print machine-readable JSON")
+  .action((options: { json?: boolean }) => runAction(options, runConfigClearKey, "config"));
 
 program
   .command("image")

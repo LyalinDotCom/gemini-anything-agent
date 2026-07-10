@@ -56,4 +56,14 @@ describe("embed command", () => {
     await expect(runEmbed(undefined, {})).rejects.toThrow(/Provide text to embed/);
     expect(genai.embedContent).not.toHaveBeenCalled();
   });
+
+  it.each(["768px", "768.5", "1e3", "0", "-1", "9007199254740992"])(
+    "rejects malformed dimensionality %s",
+    async (dim) => {
+      await expect(runEmbed("hello", { dim, dryRun: true })).rejects.toThrow(
+        /--dim must be a positive integer/
+      );
+      expect(genai.embedContent).not.toHaveBeenCalled();
+    }
+  );
 });

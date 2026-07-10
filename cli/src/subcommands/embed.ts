@@ -28,13 +28,22 @@ const readInputText = async (text: string | undefined, options: EmbedOptions): P
   return text.trim();
 };
 
+const parseOutputDimensionality = (value: string | undefined): number | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+  const raw = value.trim();
+  const parsed = Number(raw);
+  if (!raw || !/^\d+$/.test(raw) || !Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new UsageError(`--dim must be a positive integer, got "${value}".`);
+  }
+  return parsed;
+};
+
 export const runEmbed = async (text: string | undefined, options: EmbedOptions): Promise<CommandResult> => {
   const model = options.model || defaultEmbedModel();
   const input = await readInputText(text, options);
-  const outputDimensionality = options.dim ? Number.parseInt(options.dim, 10) : undefined;
-  if (options.dim && (!Number.isFinite(outputDimensionality) || (outputDimensionality as number) <= 0)) {
-    throw new UsageError(`--dim must be a positive integer, got "${options.dim}".`);
-  }
+  const outputDimensionality = parseOutputDimensionality(options.dim);
 
   if (options.dryRun) {
     return {

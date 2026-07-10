@@ -99,10 +99,10 @@ export const runGenerate = async (prompt: string, options: GenerateOptions): Pro
   const temperature = parseNumber(options.temperature, "--temperature");
   const maxOutputTokens = parseNumber(options.maxTokens, "--max-tokens");
 
-  const tools = [
-    ...(options.search ? ["google_search"] : []),
-    ...(options.urlContext ? ["url_context"] : []),
-    ...(options.codeExecution ? ["code_execution"] : [])
+  const tools: Array<{ type: "google_search" | "url_context" | "code_execution" }> = [
+    ...(options.search ? [{ type: "google_search" as const }] : []),
+    ...(options.urlContext ? [{ type: "url_context" as const }] : []),
+    ...(options.codeExecution ? [{ type: "code_execution" as const }] : [])
   ];
 
   const generationConfig: Record<string, number> = {
@@ -113,7 +113,9 @@ export const runGenerate = async (prompt: string, options: GenerateOptions): Pro
   const request: Record<string, unknown> = {
     model,
     ...(systemInstruction ? { system_instruction: systemInstruction } : {}),
-    ...(schema ? { response_format: { type: "json", schema } } : {}),
+    ...(schema
+      ? { response_format: { type: "text", mime_type: "application/json", schema } }
+      : {}),
     ...(tools.length > 0 ? { tools } : {}),
     ...(Object.keys(generationConfig).length > 0 ? { generation_config: generationConfig } : {})
   };

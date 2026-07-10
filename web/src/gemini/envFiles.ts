@@ -4,6 +4,7 @@
 import { useStore } from "../state/store";
 import type { OutputFileRecord } from "../state/types";
 import { mediaId as makeMediaId, putMedia } from "../storage/messages";
+import { contentFingerprint } from "../utils/contentFingerprint";
 import { parseTar, type TarEntry } from "../utils/tar";
 import { resolveApiKey } from "./client";
 import { FriendlyError, toFriendly } from "./errors";
@@ -118,7 +119,7 @@ export async function syncOutputMedia(sessionId: string, envId: string): Promise
   for (const entry of entries) {
     const normalized = normalizeOutputPath(entry.name);
     if (!normalized) continue;
-    const fingerprint = `${normalized}@${entry.size}`;
+    const fingerprint = await contentFingerprint(normalized, entry.data);
     const existing = existingByFingerprint.get(fingerprint);
     const { kind, mime } = classify(normalized);
     const mediaId = existing?.mediaId ?? makeMediaId(sessionId, `env-${normalized.replace(/[^a-z0-9.-]/gi, "_")}-${entry.size}`);

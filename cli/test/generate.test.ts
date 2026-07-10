@@ -34,7 +34,7 @@ describe("generate command", () => {
     expect(result.details).toMatchObject({
       apiSurface: "interactions",
       request: expect.objectContaining({
-        tools: ["google_search"],
+        tools: [{ type: "google_search" }],
         generation_config: { temperature: 0.2 }
       })
     });
@@ -77,7 +77,31 @@ describe("generate command", () => {
 
     expect(genai.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        response_format: { type: "json", schema: { type: "object" } }
+        response_format: {
+          type: "text",
+          mime_type: "application/json",
+          schema: { type: "object" }
+        }
+      })
+    );
+  });
+
+  it("builds Interactions API tool declarations for every tool flag", async () => {
+    genai.create.mockResolvedValueOnce({ output_text: "done" });
+
+    await runGenerate("use tools", {
+      search: true,
+      urlContext: true,
+      codeExecution: true
+    });
+
+    expect(genai.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tools: [
+          { type: "google_search" },
+          { type: "url_context" },
+          { type: "code_execution" }
+        ]
       })
     );
   });

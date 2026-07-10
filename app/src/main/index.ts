@@ -24,7 +24,6 @@ import {
   GEMINI_API_REVISION,
   GeminiApiError,
   GeminiManagedAgentsClient,
-  normalizeAgentDefinition,
   type AgentDefinition,
   type AgentListResponse,
   type Interaction,
@@ -53,6 +52,7 @@ import {
   queueConversationDiagnostics,
   saveChatSessionsToDisk
 } from "./chatStore";
+import { agentConfigHash, comparableAgentDefinition } from "./agentConfig";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
@@ -210,16 +210,6 @@ const augmentInteractionRequest = (request: InteractionCreateRequest): Interacti
       }
     : request;
 
-const comparableAgentDefinition = (agent: ManagedAgent | AgentDefinition): AgentDefinition =>
-  normalizeAgentDefinition({
-    id: agent.id,
-    description: agent.description,
-    base_agent: agent.base_agent,
-    system_instruction: agent.system_instruction,
-    tools: agent.tools,
-    base_environment: agent.base_environment
-  });
-
 const isEnvTarget = (target: string): boolean => basename(target.replace(/\\/g, "/")) === ".env";
 
 const redactEnvContent = (content: string): string =>
@@ -246,24 +236,12 @@ const redactEnvironmentSecrets = <T extends AgentDefinition | ManagedAgent>(agen
   };
 };
 
-const redactDefinitionSecrets = (agent: AgentDefinition): AgentDefinition => {
-  const comparable = redactEnvironmentSecrets(comparableAgentDefinition(agent));
-  delete comparable.description;
-  return comparable;
-};
-
 const redactAgentForRenderer = (agent: ManagedAgent): ManagedAgent => redactEnvironmentSecrets(agent);
 
 const redactAgentListForRenderer = (response: AgentListResponse): AgentListResponse => ({
   ...response,
   agents: response.agents?.map(redactAgentForRenderer)
 });
-
-const agentConfigHash = (agent: AgentDefinition): string =>
-  createHash("sha256")
-    .update(JSON.stringify(redactDefinitionSecrets(agent)))
-    .digest("hex")
-    .slice(0, 12);
 
 const buildAnythingAgentDefinition = (agentId: string): AgentDefinition => {
   const sources = [

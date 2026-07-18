@@ -41,7 +41,6 @@ import {
   mergeImageParts,
   promptForInput,
   restoreComposeInput,
-  specializedToolsEnabledForAgentId,
   type PendingComposeInput
 } from "./lib/interactionInput";
 import {
@@ -94,7 +93,8 @@ const snapshotAgentForRun = async (agentId: string, fallback: ManagedAgent): Pro
 // Backoff for reattaching a dropped background stream before surfacing the
 // error and the manual Reconnect button.
 const STREAM_RECONNECT_DELAYS_MS = [2000, 5000, 12000];
-const LEGACY_ANYTHING_AGENT_IDS = ["gemini-anything-agent", "chat-companion-v1"];
+const LEGACY_ANYTHING_AGENT_IDS = ["gemini-anything-v1", "gemini-anything-agent", "chat-companion-v1"];
+const LEGACY_BROWSER_AGENT_IDS = ["gemini-browser-v1"];
 const OUTPUT_REFRESH_RETRY_DELAYS_MS = [1200, 2500, 5000, 10000];
 const OUTPUT_ENVIRONMENT_RETRY_DELAYS_MS = [1000, 2500, 5000, 10000];
 const OUTPUT_REFERENCE_PATTERN = /(?:^|[\s([`'"])(?:\/workspace\/output|workspace\/output|output\/)/i;
@@ -149,13 +149,14 @@ export const App = () => {
   const outputFilesPending = useRef<Record<string, number>>({});
   const outputFilesByEnvironmentRef = useRef<Record<string, EnvironmentOutputState>>({});
   const autoOpenedOutputEnvironments = useRef<Set<string>>(new Set());
-  const ensureAgentPromise = useRef<Promise<EnsureAnythingAgentResult | undefined> | null>(null);
+  const ensureAgentPromises = useRef<Map<string, Promise<EnsureAnythingAgentResult | undefined>>>(new Map());
   const activeConversationIdRef = useRef(activeConversationId);
   const chatStick = useRef(createStickToBottom(true)).current;
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
   const config = runtime ?? FALLBACK_RUNTIME;
   const agentId = config.agentId.trim() || FALLBACK_RUNTIME.agentId;
+  const browserAgentId = config.browserAgentId.trim() || FALLBACK_RUNTIME.browserAgentId;
   const hasBridge = Boolean(window.managedAgents);
   const hasKey = Boolean(runtime?.hasApiKey);
   const runtimeLoaded = runtime !== null;
@@ -166,10 +167,11 @@ export const App = () => {
       sessions.filter(
         (session) =>
           session.agentId === agentId ||
+          session.agentId === browserAgentId ||
           session.agentId === ANTIGRAVITY_BASE_AGENT ||
           isDeepResearchAgentId(session.agentId)
       ),
-    [agentId, sessions]
+    [agentId, browserAgentId, sessions]
   );
   const conversations = useMemo(
     () => applyManualConversationOrder(buildConversations(agentSessions), conversationOrder),
@@ -232,7 +234,10 @@ export const App = () => {
       ]),
     [activeConversationId, chatSessions, optimisticSentImages]
   );
-  const baseInteraction = useMemo(() => buildChatInteraction(agentId, compose), [agentId, compose]);
+  const baseInteraction = useMemo(
+    () => buildChatInteraction(agentId, browserAgentId, compose),
+    [agentId, browserAgentId, compose]
+  );
   const autoContinuation = useMemo(
     () =>
       compose.store && compose.autoContinue && !baseInteraction.previous_interaction_id
@@ -310,10 +315,17 @@ export const App = () => {
       if (canceled) {
         return;
       }
-      const sessions = LEGACY_ANYTHING_AGENT_IDS.reduce(
+      const anythingMigrated = LEGACY_ANYTHING_AGENT_IDS.reduce(
         (current, legacyAgentId) =>
           legacyAgentId === agentId ? current : renameSessionsForAgent(current, legacyAgentId, agentId),
         stored.sessions
+      );
+      const sessions = LEGACY_BROWSER_AGENT_IDS.reduce(
+        (current, legacyAgentId) =>
+          legacyAgentId === browserAgentId
+            ? current
+            : renameSessionsForAgent(current, legacyAgentId, browserAgentId),
+        anythingMigrated
       );
       setSessions(sessions);
       if (stored.ok) {
@@ -327,7 +339,7 @@ export const App = () => {
     return () => {
       canceled = true;
     };
-  }, [agentId, runtimeLoaded]);
+  }, [agentId, browserAgentId, runtimeLoaded]);
 
   useEffect(() => {
     activeConversationIdRef.current = activeConversationId;
@@ -354,14 +366,11 @@ export const App = () => {
     if (!conversationAgentId) {
       return;
     }
-    const mode = agentModeForAgentId(conversationAgentId);
-    const specializedToolsEnabled = specializedToolsEnabledForAgentId(conversationAgentId);
+    const mode = agentModeForAgentId(conversationAgentId, browserAgentId);
     setCompose((current) =>
-      current.agentMode === mode && current.specializedToolsEnabled === specializedToolsEnabled
-        ? current
-        : { ...current, agentMode: mode, specializedToolsEnabled }
+      current.agentMode === mode ? current : { ...current, agentMode: mode }
     );
-  }, [conversationAgentId]);
+  }, [browserAgentId, conversationAgentId]);
 
   useEffect(() => {
     scrollChatToBottom();
@@ -662,11 +671,12 @@ export const App = () => {
     bridge: NonNullable<typeof window.managedAgents>,
     targetAgentId: string
   ): Promise<EnsureAnythingAgentResult | undefined> {
-    if (ensureAgentPromise.current) {
-      return ensureAgentPromise.current;
+    const existing = ensureAgentPromises.current.get(targetAgentId);
+    if (existing) {
+      return existing;
     }
     setBusy("deploy");
-    ensureAgentPromise.current = (async () => {
+    const pending = (async () => {
       const result = await bridge.ensureAnythingAgent(targetAgentId);
       if (!result.ok) {
         pushStatus({
@@ -683,12 +693,15 @@ export const App = () => {
       });
       return result.value;
     })();
+    ensureAgentPromises.current.set(targetAgentId, pending);
 
     try {
-      return await ensureAgentPromise.current;
+      return await pending;
     } finally {
-      ensureAgentPromise.current = null;
-      setBusy((current) => (current === "deploy" ? null : current));
+      ensureAgentPromises.current.delete(targetAgentId);
+      if (ensureAgentPromises.current.size === 0) {
+        setBusy((current) => (current === "deploy" ? null : current));
+      }
     }
   }
 
@@ -774,7 +787,7 @@ export const App = () => {
     const isDeepResearchRun = isDeepResearchAgentId(request.agent);
     const isPlainAntigravityRun = request.agent === ANTIGRAVITY_BASE_AGENT;
     if (!isDeepResearchRun && !isPlainAntigravityRun) {
-      const ensuredAgent = await ensureAgentBeforeRun(bridge, agentId);
+      const ensuredAgent = await ensureAgentBeforeRun(bridge, request.agent);
       if (!ensuredAgent) {
         restorePendingRunInput(localId, sourceConversationId);
         runtimeOutputHydrationSessionIds.current.delete(localId);
@@ -782,7 +795,10 @@ export const App = () => {
         return;
       }
 
-      if (ensuredAgent.created || ensuredAgent.recreated) {
+      if (ensuredAgent.created || ensuredAgent.recreated || parent?.migratedFromAgentId) {
+        // A fresh or recreated agent has no server-side history, and a parent
+        // interaction created under a pre-migration agent id belongs to a
+        // different agent's chain — either way, start a fresh chain.
         request.environment = "remote";
         delete request.previous_interaction_id;
       }
@@ -1277,7 +1293,7 @@ export const App = () => {
   }
 
   function restoreSessionPromptForRetry(sessionToRetry: Session) {
-    setCompose(composeFromRequest(sessionToRetry.request));
+    setCompose(composeFromRequest(sessionToRetry.request, browserAgentId));
     setLatestRunId(null);
     pushStatus({
       level: "info",
@@ -1902,15 +1918,19 @@ export const App = () => {
     });
   }
 
-  function loadSamplePrompt(prompt: string) {
+  function loadSamplePrompt(sample: { prompt: string; agentMode: ComposeState["agentMode"] }) {
     setCompose((current) => ({
       ...current,
       inputMode: "string",
-      input: prompt,
+      input: sample.prompt,
+      agentMode: sample.agentMode,
       parts: []
     }));
     requestAnimationFrame(() => {
-      document.querySelector<HTMLTextAreaElement>(".chat-compose textarea")?.focus();
+      const textarea = document.querySelector<HTMLTextAreaElement>(".chat-compose textarea");
+      textarea?.focus();
+      textarea?.setSelectionRange(0, 0);
+      if (textarea) textarea.scrollTop = 0;
     });
   }
 
@@ -1989,7 +2009,9 @@ export const App = () => {
               >
                 {chatSessions.length === 0 ? (
                   activeConversationId === NEW_CONVERSATION_ID ? (
-                    compose.agentMode === "anything" ? (
+                    compose.agentMode === "antigravity" ||
+                    compose.agentMode === "anything" ||
+                    compose.agentMode === "browser" ? (
                       <div className="chat-empty has-samples">
                         <SamplePromptGallery
                           disabled={!appReady || selectedConversationRunning}

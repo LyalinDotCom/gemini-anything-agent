@@ -1,13 +1,18 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cancelServerTurn, sendTurn, type TurnInput } from "../chat/controller";
 import { sendResearchTurn } from "../gemini/deepResearch";
 import { useStore } from "../state/store";
-import { mediaId as makeMediaId, putMedia, base64ToBlob } from "../storage/messages";
+import { mediaId as makeMediaId, putMedia, base64ToBlob, getMediaBase64, getMediaUrl } from "../storage/messages";
 import { T } from "../tokens";
 import { uid } from "../utils/id";
 import { blobToDataUrl, dataUrlMime, dataUrlToBase64, fileToCompressedDataUrl } from "../utils/media";
 import { VoiceRecorder } from "../utils/recorder";
 import { Icon, IconButton, Spinner } from "./atoms";
+import { AgentPicker } from "./AgentPicker";
+import { RunOptionsPanel } from "./RunOptionsPanel";
+import { profileForSession } from "../agentProfiles";
+import { effectiveRunOptions, runOptionCount } from "../state/runOptions";
+import { resizeComposerTextarea, type ComposerScrollAlignment } from "../utils/composerTextarea";
 
 interface Draft {
   id: string;
@@ -24,23 +29,30 @@ interface AudioDraft {
 type MicState = "idle" | "recording";
 
 export function Composer({ sessionId }: { sessionId: string }) {
-    const [drafts, setDrafts] = useState<Draft[]>([]);
+  const [drafts, setDrafts] = useState<Draft[]>([]);
   const [audioDraft, setAudioDraft] = useState<AudioDraft | null>(null);
   const [compressing, setCompressing] = useState(false);
   const [micState, setMicState] = useState<MicState>("idle");
   const [micError, setMicError] = useState<string | null>(null);
+  const [showOptions, setShowOptions] = useState(false);
   const recorderRef = useRef<VoiceRecorder | null>(null);
+  const retryMessage = useStore((s) => s.retryMessages[sessionId]);
+  const queueRetry = useStore((s) => s.queueRetry);
   const areaRef = useRef<HTMLTextAreaElement>(null);
+  const lastInputEventRef = useRef<{ sessionId: string; value: string; alignment: ComposerScrollAlignment } | null>(null);
+  const pasteTextPendingRef = useRef(false);
+  const inputResizeTimerRef = useRef<number | undefined>(undefined);
   const fileRef = useRef<HTMLInputElement>(null);
   const text = useStore((s) => s.draftText[sessionId] ?? "");
   const setDraftText = useStore((s) => s.setDraftText);
   const setText = (v: string) => setDraftText(sessionId, v);
   const busyHere = useStore((s) => !!s.streaming[sessionId]);
   const sendOnEnter = useStore((s) => s.settings.sendOnEnter);
-  const mode = useStore((s) => s.sessions[sessionId]?.mode ?? "chat");
+  const session = useStore((s) => s.sessions[sessionId]);
   const isEmptySession = useStore((s) => (s.messages[sessionId]?.length ?? 0) === 0);
-  const patchSession = useStore((s) => s.patchSession);
-  const research = mode === "deep-research";
+  const research = profileForSession(session ?? {}).research;
+  const options = effectiveRunOptions(session ?? {});
+  const optionCount = runOptionCount(options);
 
   // Voice goes INTO the agent chain as an audio part — the container hears it;
   // nothing is transcribed on the client.
@@ -72,17 +84,51 @@ export function Composer({ sessionId }: { sessionId: string }) {
     }
   };
 
-  useEffect(() => {
-    autosize(); // restore height for a store-backed draft on mount (keyed per session)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useLayoutEffect(() => {
+    const lastInput = lastInputEventRef.current;
+    const alignment = lastInput?.sessionId === sessionId ? lastInput.alignment : "start";
+    const textarea = areaRef.current;
+    if (textarea) resizeComposerTextarea(textarea, alignment);
+    if (!textarea) return;
+    const frame = window.requestAnimationFrame(() => {
+      textarea.scrollTop = alignment === "start" ? 0 : textarea.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [sessionId, text]);
 
-  const autosize = () => {
-    const el = areaRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
-  };
+  useEffect(() => {
+    if (!retryMessage) return;
+    let alive = true;
+    void (async () => {
+      const nextDrafts: Draft[] = [];
+      let nextAudio: AudioDraft | null = null;
+      let nextText = "";
+      for (const part of retryMessage.parts) {
+        if (part.kind === "text") nextText += `${nextText ? "\n" : ""}${part.text}`;
+        if (part.kind === "image") {
+          const stored = await getMediaBase64(part.mediaId);
+          const dataUrl = await getMediaUrl(part.mediaId);
+          if (stored && dataUrl) nextDrafts.push({ id: uid(), dataUrl, base64: stored.base64, mimeType: stored.mimeType });
+        }
+        if (part.kind === "audio") {
+          const stored = await getMediaBase64(part.mediaId);
+          if (stored) nextAudio = { base64: stored.base64, mimeType: stored.mimeType };
+        }
+      }
+      if (!alive) return;
+      setText(nextText);
+      setDrafts(nextDrafts);
+      setAudioDraft(nextAudio);
+      queueRetry(sessionId, undefined);
+      requestAnimationFrame(() => {
+        if (areaRef.current) resizeComposerTextarea(areaRef.current, "start");
+        areaRef.current?.focus();
+      });
+    })();
+    return () => { alive = false; };
+    // retryMessage is an explicit one-shot signal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [retryMessage]);
 
   const addFiles = async (files: FileList | null) => {
     if (!files?.length) return;
@@ -107,7 +153,6 @@ export function Composer({ sessionId }: { sessionId: string }) {
     if (research) {
       if (!value) return;
       setText("");
-      requestAnimationFrame(autosize);
       void sendResearchTurn(sessionId, value);
       return;
     }
@@ -126,7 +171,6 @@ export function Composer({ sessionId }: { sessionId: string }) {
     setText("");
     setDrafts([]);
     setAudioDraft(null);
-    requestAnimationFrame(autosize);
     void sendTurn(sessionId, { text: value, attachments });
   };
 
@@ -224,27 +268,6 @@ export function Composer({ sessionId }: { sessionId: string }) {
               e.target.value = "";
             }}
           />
-          {isEmptySession && (
-            <button
-              type="button"
-              title={research ? "Deep Research mode — click for normal chat" : "Switch to Deep Research mode"}
-              onClick={() => patchSession(sessionId, { mode: research ? "chat" : "deep-research" })}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 32,
-                height: 32,
-                borderRadius: T.radiusSm,
-                border: "none",
-                background: research ? T.accentSoft : "transparent",
-                color: research ? T.accent : T.textDim,
-                cursor: "pointer",
-              }}
-            >
-              <Icon name="brain" size={17} />
-            </button>
-          )}
           {!research && (
             <IconButton
               name="image"
@@ -282,8 +305,20 @@ export function Composer({ sessionId }: { sessionId: string }) {
             value={text}
             placeholder={busyHere ? "Working…" : "Message… (code, research, images — just ask)"}
             onChange={(e) => {
+              const alignment: ComposerScrollAlignment = pasteTextPendingRef.current ? "start" : "end";
+              lastInputEventRef.current = {
+                sessionId,
+                value: e.target.value,
+                alignment,
+              };
+              pasteTextPendingRef.current = false;
               setText(e.target.value);
-              autosize();
+              if (areaRef.current) resizeComposerTextarea(areaRef.current, alignment);
+              if (inputResizeTimerRef.current !== undefined) window.clearTimeout(inputResizeTimerRef.current);
+              inputResizeTimerRef.current = window.setTimeout(() => {
+                if (areaRef.current) resizeComposerTextarea(areaRef.current, alignment);
+                inputResizeTimerRef.current = undefined;
+              }, 32);
             }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && sendOnEnter) {
@@ -292,6 +327,7 @@ export function Composer({ sessionId }: { sessionId: string }) {
               }
             }}
             onPaste={(e) => {
+              pasteTextPendingRef.current = Boolean(e.clipboardData?.getData("text/plain"));
               const items = [...(e.clipboardData?.items ?? [])].filter((i) => i.type.startsWith("image/"));
               if (items.length) {
                 const dt = new DataTransfer();
@@ -311,7 +347,8 @@ export function Composer({ sessionId }: { sessionId: string }) {
               color: T.text,
               fontSize: 14.5,
               lineHeight: 1.5,
-              maxHeight: 200,
+              boxSizing: "border-box",
+              overflowY: "hidden",
               padding: "4px 0",
             }}
           />
@@ -358,6 +395,18 @@ export function Composer({ sessionId }: { sessionId: string }) {
             </button>
           )}
         </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 7 }}>
+          <AgentPicker sessionId={sessionId} disabled={busyHere} />
+          <button
+            type="button"
+            disabled={busyHere}
+            onClick={() => setShowOptions((value) => !value)}
+            style={{ height: 32, display: "inline-flex", alignItems: "center", gap: 6, padding: "0 9px", borderRadius: T.radiusSm, border: `1px solid ${optionCount ? "rgba(124,156,255,0.38)" : T.borderSoft}`, background: optionCount ? T.accentSoft : "transparent", color: optionCount ? T.accent : T.textDim, cursor: busyHere ? "default" : "pointer", fontSize: 12.5, fontWeight: 700 }}
+          >
+            <Icon name="gear" size={14} /> Options{optionCount ? ` · ${optionCount}` : ""}
+          </button>
+        </div>
+        {showOptions && <RunOptionsPanel sessionId={sessionId} />}
         {(micError || isEmptySession) && (
           <p style={{ margin: "8px 0 0", color: micError ? T.danger : T.textFaint, fontSize: 11.5, textAlign: "center" }}>
             {micError ??

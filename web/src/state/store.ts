@@ -5,8 +5,10 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import type { AgentInfo } from "../gemini/agents";
+import { DEFAULT_AGENT_MODE, type AgentMode } from "../agentProfiles";
 import { deleteSessionData, loadTranscript, saveTranscript } from "../storage/messages";
 import { uid } from "../utils/id";
+import { CHAT_AGENT_ID, BROWSER_AGENT_ID } from "../models";
 import type { Message, Session, SessionMode } from "./types";
 
 const safePersistStorage = createJSONStorage(() => {
@@ -48,10 +50,13 @@ interface AppState {
   streaming: Record<string, boolean>;
   /** Per-session composer drafts, so switching chats never bleeds or loses text. */
   draftText: Record<string, string>;
+  retryMessages: Record<string, Message | undefined>;
 
-  createSession(mode?: SessionMode): string;
+  createSession(mode?: SessionMode, agentMode?: AgentMode): string;
   deleteSession(id: string): void;
   renameSession(id: string, title: string): void;
+  /** Move a session before `beforeId`, or to the end of the list when null. */
+  reorderSession(id: string, beforeId: string | null): void;
   setActiveSession(id: string | null): void;
   patchSession(id: string, patch: Partial<Session>): void;
 
@@ -64,6 +69,7 @@ interface AppState {
   setAgent(agent: AgentInfo | null): void;
   setStreaming(sessionId: string, on: boolean): void;
   setDraftText(sessionId: string, text: string): void;
+  queueRetry(sessionId: string, message: Message | undefined): void;
   updateSettings(patch: Partial<Settings>): void;
 }
 
@@ -79,8 +85,9 @@ export const useStore = create<AppState>()(
       hydrated: {},
       streaming: {},
       draftText: {},
+      retryMessages: {},
 
-      createSession(mode: SessionMode = "chat") {
+      createSession(mode: SessionMode = "chat", agentMode: AgentMode = DEFAULT_AGENT_MODE) {
         // Reuse an untouched "New chat" instead of stacking empties.
         const existing = get().sessionOrder.find((sid) => isUntouchedSession(get().sessions[sid]));
         if (existing) {
@@ -90,12 +97,15 @@ export const useStore = create<AppState>()(
         }
         const id = uid();
         const now = Date.now();
+        // No runOptions seed: readers default via effectiveRunOptions, so default
+        // changes reach existing sessions instead of freezing at creation time.
         const session: Session = {
           id,
           title: "New chat",
           createdAt: now,
           updatedAt: now,
           mode,
+          agentMode,
           lastInteractionId: null,
           environmentId: null,
           messageCount: 0,
@@ -129,6 +139,16 @@ export const useStore = create<AppState>()(
 
       renameSession(id, title) {
         get().patchSession(id, { title });
+      },
+
+      reorderSession(id, beforeId) {
+        if (id === beforeId) return;
+        set((s) => {
+          const next = s.sessionOrder.filter((item) => item !== id);
+          const index = beforeId === null ? -1 : next.indexOf(beforeId);
+          next.splice(index < 0 ? next.length : index, 0, id);
+          return { sessionOrder: next };
+        });
       },
 
       setActiveSession(id) {
@@ -208,6 +228,10 @@ export const useStore = create<AppState>()(
         set((s) => ({ draftText: { ...s.draftText, [sessionId]: text } }));
       },
 
+      queueRetry(sessionId, message) {
+        set((s) => ({ retryMessages: { ...s.retryMessages, [sessionId]: message } }));
+      },
+
       updateSettings(patch) {
         set((s) => ({ settings: { ...s.settings, ...patch } }));
       },
@@ -229,11 +253,49 @@ export const useStore = create<AppState>()(
   ),
 );
 
+// Sessions saved by builds before the agent rename (agentUsed "gemini-anything-v1")
+// predate agentMode and pin an agent id that can no longer be recreated (reserved
+// prefix). Remap them to the current managed profile and mark the chain broken —
+// the old interactions belong to a different agent id, so the next turn rebuilds
+// context through the existing recap machinery. Idempotent; runs after every
+// rehydrate. The persisted agent record gets the same treatment: a stale id must
+// never reach Settings' verify/recreate/delete actions.
+const LEGACY_CHAT_AGENT_IDS = new Set(["gemini-anything-v1"]);
+export function normalizeLegacySessions(): void {
+  const state = useStore.getState();
+  const remapped: Record<string, Session> = {};
+  for (const [id, session] of Object.entries(state.sessions)) {
+    if (!session.agentUsed || !LEGACY_CHAT_AGENT_IDS.has(session.agentUsed)) continue;
+    remapped[id] = {
+      ...session,
+      agentUsed: CHAT_AGENT_ID,
+      agentMode: session.agentMode ?? "anything",
+      chainBroken: Boolean(session.lastInteractionId || session.environmentId) || session.chainBroken,
+      lastInteractionId: null,
+      environmentId: null,
+      pending: null,
+    };
+  }
+  const agent = state.agent;
+  const staleAgentRecord = Boolean(
+    agent && agent.agentId && agent.agentId !== CHAT_AGENT_ID && agent.agentId !== BROWSER_AGENT_ID,
+  );
+  if (Object.keys(remapped).length > 0 || staleAgentRecord) {
+    useStore.setState((s) => ({
+      sessions: { ...s.sessions, ...remapped },
+      agent: staleAgentRecord ? null : s.agent,
+    }));
+  }
+}
+normalizeLegacySessions();
+
 // Cross-tab convergence: when another tab writes the persisted slice, rehydrate it
 // here instead of later clobbering it with this tab's stale copy (last-writer-wins
 // on the whole blob was silently discarding sessions created elsewhere).
 if (typeof window !== "undefined") {
   window.addEventListener("storage", (e) => {
-    if (e.key === "aichat-store") void useStore.persist.rehydrate();
+    if (e.key === "aichat-store") {
+      void Promise.resolve(useStore.persist.rehydrate()).then(normalizeLegacySessions);
+    }
   });
 }

@@ -22,17 +22,21 @@ import {
 import { outputFileLabel, outputFileMatchesPath, outputFilesCoverPaths } from "../src/renderer/lib/outputFiles";
 import { buildChatInteraction, composeFromRequest } from "../src/renderer/lib/interactionInput";
 import { ANTIGRAVITY_BASE_AGENT, DEEP_RESEARCH_AGENT, DEEP_RESEARCH_MAX_AGENT } from "../src/sdk";
+import { SAMPLE_PROMPTS } from "../src/renderer/lib/samplePrompts";
+
+const BROWSER_AGENT_ID = "gai-browser-v1";
 
 describe("chat interaction builder", () => {
   it("builds a multimodal request with attached images", () => {
-    const request = buildChatInteraction("gemini-anything-v1", {
+    const request = buildChatInteraction("gai-anything-v1", BROWSER_AGENT_ID, {
       ...initialCompose,
+      agentMode: "anything",
       input: "Describe this",
       parts: [
         { id: "i", kind: "image", data: "AAAA", mimeType: "image/png", name: "x.png", bytes: 3 }
       ]
     });
-    expect(request.agent).toBe("gemini-anything-v1");
+    expect(request.agent).toBe("gai-anything-v1");
     expect(request.input).toEqual([
       { type: "text", text: "Describe this" },
       { type: "image", data: "AAAA", mime_type: "image/png" }
@@ -40,9 +44,9 @@ describe("chat interaction builder", () => {
   });
 
   it("routes plain Antigravity chats directly to the base agent", () => {
-    const request = buildChatInteraction("gemini-anything-v1", {
+    const request = buildChatInteraction("gai-anything-v1", BROWSER_AGENT_ID, {
       ...initialCompose,
-      specializedToolsEnabled: false,
+      agentMode: "antigravity",
       input: "Try this without the Gemini Anything payload."
     });
 
@@ -52,7 +56,7 @@ describe("chat interaction builder", () => {
   });
 
   it("builds a Deep Research request invoked by base-agent id", () => {
-    const request = buildChatInteraction("gemini-anything-v1", {
+    const request = buildChatInteraction("gai-anything-v1", BROWSER_AGENT_ID, {
       ...initialCompose,
       agentMode: "deep-research",
       input: "Research the history of Google TPUs.",
@@ -76,7 +80,7 @@ describe("chat interaction builder", () => {
   });
 
   it("keeps Deep Research follow-ups chained to the previous interaction", () => {
-    const request = buildChatInteraction("gemini-anything-v1", {
+    const request = buildChatInteraction("gai-anything-v1", BROWSER_AGENT_ID, {
       ...initialCompose,
       agentMode: "deep-research-max",
       input: "Expand the report with a competitor table.",
@@ -99,23 +103,51 @@ describe("chat interaction builder", () => {
       environment: "remote",
       store: true,
       background: true
-    });
+    }, BROWSER_AGENT_ID);
     const anything = composeFromRequest({
-      agent: "gemini-anything-v1",
+      agent: "gai-anything-v1",
       input: "Do something.",
       environment: "remote"
-    });
+    }, BROWSER_AGENT_ID);
     const plain = composeFromRequest({
       agent: ANTIGRAVITY_BASE_AGENT,
       input: "Do something plainly.",
       environment: "remote"
-    });
+    }, BROWSER_AGENT_ID);
+    const browser = composeFromRequest({
+      agent: BROWSER_AGENT_ID,
+      input: "Test a website.",
+      environment: "remote"
+    }, BROWSER_AGENT_ID);
 
     expect(research.agentMode).toBe("deep-research");
     expect(anything.agentMode).toBe("anything");
-    expect(anything.specializedToolsEnabled).toBe(true);
-    expect(plain.agentMode).toBe("anything");
-    expect(plain.specializedToolsEnabled).toBe(false);
+    expect(plain.agentMode).toBe("antigravity");
+    expect(browser.agentMode).toBe("browser");
+  });
+
+  it("routes Browser mode to the dedicated managed agent id", () => {
+    const request = buildChatInteraction("gai-anything-v1", BROWSER_AGENT_ID, {
+      ...initialCompose,
+      agentMode: "browser",
+      input: "Test the checkout flow."
+    });
+
+    expect(request.agent).toBe(BROWSER_AGENT_ID);
+    expect(request.environment).toBe("remote");
+    expect(request.background).toBe(true);
+  });
+});
+
+describe("sample prompt agent routing", () => {
+  it("pins every original sample to Anything and provides two Browser samples", () => {
+    const browserSamples = SAMPLE_PROMPTS.filter((sample) => sample.agentMode === "browser");
+    const existingSamples = SAMPLE_PROMPTS.filter((sample) => sample.agentMode === "anything");
+
+    expect(existingSamples).toHaveLength(8);
+    expect(browserSamples).toHaveLength(2);
+    expect(browserSamples.map((sample) => sample.title)).toEqual(["Flow Test", "Viewport QA"]);
+    expect(browserSamples.every((sample) => sample.prompt.includes("headless browser"))).toBe(true);
   });
 });
 

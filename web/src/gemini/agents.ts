@@ -5,11 +5,12 @@
 // an app update, a key rotation — the next message transparently deletes and
 // recreates the agent. Nothing is ever manually versioned. Wire shapes verified
 // live (conflict=409, not_found=404).
-import { CHAT_AGENT_ID, MODELS } from "../models";
+import { MODELS } from "../models";
 import { ai, resolveApiKey } from "./client";
 import { buildEnvSources, payloadFingerprint } from "./envSources";
 import { FriendlyError, toFriendly } from "./errors";
 import type { InlineSource } from "./interactionParams";
+import { tools } from "./interactionParams";
 
 export interface AgentInfo {
   /** Empty string in degraded mode (interactions then target the base agent directly). */
@@ -30,11 +31,19 @@ function currentPayload(): { sources: InlineSource[]; fingerprint: string } {
   const key = resolveApiKey();
   if (!key) throw new FriendlyError("no-key", "No Gemini API key set.");
   const sources = buildEnvSources(key);
-  return { sources, fingerprint: payloadFingerprint(sources) };
+  // Fingerprint the deployed definition as well as mounted files. Otherwise an
+  // existing agent created before tools were declared would look current forever.
+  const definitionSignature: InlineSource = {
+    type: "inline",
+    target: "@managed-agent-definition",
+    content: `${MODELS.chatAgentBase}\ncode_execution\ngoogle_search\nurl_context`,
+  };
+  return { sources, fingerprint: payloadFingerprint([...sources, definitionSignature]) };
 }
 
-function descriptionFor(fingerprint: string): string {
-  return `gemini-anything web managed chat agent (payload-${fingerprint})`;
+function descriptionFor(agentId: string, fingerprint: string): string {
+  const role = agentId.includes("browser") ? "browser testing" : "anything";
+  return `gemini-anything web ${role} managed agent (payload-${fingerprint})`;
 }
 
 function fingerprintFromDescription(description: unknown): string | null {
@@ -80,7 +89,8 @@ async function createAgent(agentId: string, sources: InlineSource[], fingerprint
   await ai().agents.create({
     id: agentId,
     base_agent: MODELS.chatAgentBase,
-    description: descriptionFor(fingerprint),
+    description: descriptionFor(agentId, fingerprint),
+    tools: [tools.codeExecution, tools.googleSearch, tools.urlContext],
     base_environment: { type: "remote", sources },
   } as never);
 }
@@ -90,8 +100,17 @@ async function createAgent(agentId: string, sources: InlineSource[], fingerprint
  * Never throws for availability problems — returns a degraded AgentInfo instead.
  * DOES throw FriendlyError("bad-key"/"no-key") so the UI can send the user to Settings.
  */
+// Google-reserved id prefixes (mirrors the Electron sdk's validation list). The
+// API rejects creating these with a generic 400, so an ensure would delete an
+// existing agent it can never replace — e.g. the pre-rename "gemini-anything-v1".
+const RESERVED_AGENT_ID =
+  /^(antigravity|veo|omni|lyria|imagen|gemma|gemini|google|youtube|android|chrome|pixel|waze|fitbit|nest|kaggle)-/i;
+
 export async function ensureAgent(agentId: string, current: AgentInfo | null, force = false): Promise<AgentInfo> {
   const { sources, fingerprint } = currentPayload();
+
+  // Never delete or deploy over an id we cannot recreate.
+  if (RESERVED_AGENT_ID.test(agentId.trim())) return degraded(fingerprint);
 
   if (
     !force &&
@@ -142,16 +161,17 @@ export async function ensureAgent(agentId: string, current: AgentInfo | null, fo
   }
 }
 
-let inflight: Promise<AgentInfo> | null = null;
+const inflight = new Map<string, Promise<AgentInfo>>();
 
-/** App-facing ensure for the one chat agent; in-flight memoized (rapid sends, multi-mount). */
-export function ensureChatAgent(current: AgentInfo | null, force = false): Promise<AgentInfo> {
-  if (!inflight) {
-    inflight = ensureAgent(CHAT_AGENT_ID, current, force).finally(() => {
-      inflight = null;
-    });
-  }
-  return inflight;
+/** Ensure either app-owned custom profile without mixing concurrent profile requests. */
+export function ensureManagedAgent(agentId: string, current: AgentInfo | null, force = false): Promise<AgentInfo> {
+  const existing = inflight.get(agentId);
+  if (existing) return existing;
+  const pending = ensureAgent(agentId, current?.agentId === agentId ? current : null, force).finally(() => {
+    inflight.delete(agentId);
+  });
+  inflight.set(agentId, pending);
+  return pending;
 }
 
 // Deliberately NO listAgents here: this sample manages exactly ONE agent by name.
@@ -163,10 +183,4 @@ export async function deleteAgent(agentId: string): Promise<void> {
   } catch (e) {
     if (toFriendly(e).kind !== "not-found") throw toFriendly(e);
   }
-}
-
-/** Settings "Recreate agent": delete then force-ensure. */
-export async function recreateChatAgent(current: AgentInfo | null): Promise<AgentInfo> {
-  await deleteAgent(CHAT_AGENT_ID);
-  return ensureChatAgent(current, true);
 }

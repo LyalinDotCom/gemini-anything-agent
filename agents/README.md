@@ -4,11 +4,15 @@ Everything the app loads into the deployed managed agent lives in this folder
 as plain files. Edit them directly to tune the agent; there are no copies of
 this content anywhere in the code.
 
+The Electron app can deploy this same payload under general Antigravity and dedicated Browser profile IDs. The profile changes fresh per-request guidance, not these mounted files, so the payload remains byte-identical.
+
 | File | Where it goes |
 | --- | --- |
 | `AGENTS.md` | Mounted at `/.agents/AGENTS.md` — the durable instruction layer: extended abilities, routing rules, artifact conventions, response style. |
 | `skills/gemini-anything/SKILL.md` | Mounted at `/.agents/skills/gemini-anything/SKILL.md` — detailed gai usage and guardrails. |
 | `bin/gai` | Mounted at `/.agents/bin/gai` — the media CLI wrapper the skill invokes. |
+| `skills/browser-testing/SKILL.md` | Mounted at `/.agents/skills/browser-testing/SKILL.md` — browser-testing workflow, artifact contract, and safety rules. |
+| `bin/browser` | Mounted at `/.agents/bin/browser` — the headless Playwright agent CLI launcher. |
 
 ## Why there is no system prompt file
 
@@ -22,7 +26,7 @@ small per-request "invocation context" block (current date/time, sandbox
 paths, continuity notes), which is the one thing that must be fresh per call.
 
 The sandbox `/.env` is **not** a file here: it is generated at deploy time from
-the host `.env` (`GEMINI_API_KEY`, npm package/version, model overrides). API
+the host `.env` (`GEMINI_API_KEY`, media/browser npm package versions, model overrides). API
 keys are redacted from config hashes and from anything shown in the UI.
 
 ## How changes take effect

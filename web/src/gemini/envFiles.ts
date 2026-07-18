@@ -5,13 +5,15 @@ import { useStore } from "../state/store";
 import type { OutputFileRecord } from "../state/types";
 import { mediaId as makeMediaId, putMedia } from "../storage/messages";
 import { contentFingerprint } from "../utils/contentFingerprint";
-import { parseTar, type TarEntry } from "../utils/tar";
+import { isVisibleOutputPath, normalizeOutputPath, outputLabel } from "../utils/outputPaths";
+import { parseTar, parseTarStream, TarSizeLimitError, type TarEntry } from "../utils/tar";
 import { resolveApiKey } from "./client";
 import { FriendlyError, toFriendly } from "./errors";
+import { syncEntriesToProject } from "../storage/localProjects";
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
-const MAX_SNAPSHOT_BYTES = 100 * 1024 * 1024;
 const SEEN_CAP = 400;
+const MAX_SNAPSHOT_BYTES = 100 * 1024 * 1024;
 
 const MEDIA_KINDS: Record<string, { kind: "image" | "audio" | "video"; mime: string }> = {
   png: { kind: "image", mime: "image/png" },
@@ -29,8 +31,17 @@ const MEDIA_KINDS: Record<string, { kind: "image" | "audio" | "video"; mime: str
   mov: { kind: "video", mime: "video/quicktime" },
 };
 
-function classify(name: string): { kind: "image" | "audio" | "video" | "file"; mime: string } {
+function classify(name: string): { kind: "image" | "audio" | "video" | "html" | "text" | "file"; mime: string } {
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  if (ext === "html" || ext === "htm") return { kind: "html", mime: "text/html" };
+  const textMimes: Record<string, string> = {
+    md: "text/markdown", markdown: "text/markdown", txt: "text/plain", log: "text/plain",
+    json: "application/json", jsonl: "application/x-ndjson", csv: "text/csv", tsv: "text/tab-separated-values",
+    css: "text/css", js: "text/javascript", mjs: "text/javascript", ts: "text/plain", tsx: "text/plain",
+    jsx: "text/plain", py: "text/x-python", sh: "text/x-shellscript", yaml: "application/yaml", yml: "application/yaml",
+    xml: "application/xml", srt: "application/x-subrip", vtt: "text/vtt",
+  };
+  if (textMimes[ext]) return { kind: "text", mime: textMimes[ext] };
   return MEDIA_KINDS[ext] ?? { kind: "file", mime: "application/octet-stream" };
 }
 
@@ -38,62 +49,67 @@ function classify(name: string): { kind: "image" | "audio" | "video" | "file"; m
 // share a single in-flight snapshot fetch per environment.
 const inflightDownloads = new Map<string, Promise<TarEntry[]>>();
 
+async function fetchSnapshotResponse(envId: string): Promise<Response> {
+  const key = resolveApiKey();
+  if (!key) throw new FriendlyError("no-key", "No Gemini API key set.");
+  const resp = await fetch(`${API_BASE}/files/environment-${envId}:download?alt=media`, {
+    headers: { "x-goog-api-key": key },
+  });
+  if (!resp.ok) throw toFriendly(new Error(`API error (${resp.status}) downloading environment snapshot`));
+  return resp;
+}
+
+function snapshotTooLarge(): FriendlyError {
+  return new FriendlyError("bad-request", "Environment snapshot is too large to sync (>100MB).");
+}
+
+function bufferedSnapshot(buffer: ArrayBuffer, include: (name: string) => boolean): TarEntry[] {
+  if (buffer.byteLength > MAX_SNAPSHOT_BYTES) throw snapshotTooLarge();
+  return parseTar(buffer).filter((entry) => include(entry.name));
+}
+
 export function downloadSnapshot(envId: string): Promise<TarEntry[]> {
   const existing = inflightDownloads.get(envId);
   if (existing) return existing;
   const promise = (async () => {
-    const key = resolveApiKey();
-    if (!key) throw new FriendlyError("no-key", "No Gemini API key set.");
-    const resp = await fetch(`${API_BASE}/files/environment-${envId}:download?alt=media`, {
-      headers: { "x-goog-api-key": key },
-    });
-    if (!resp.ok) {
-      throw toFriendly(new Error(`API error (${resp.status}) downloading environment snapshot`));
+    const include = (name: string) => normalizeOutputPath(name) !== null;
+    const response = await fetchSnapshotResponse(envId);
+    if (!response.body) return bufferedSnapshot(await response.arrayBuffer(), include);
+    try {
+      const streamed = await parseTarStream(response.body, include, MAX_SNAPSHOT_BYTES);
+      if (streamed.unresolvedLinks.length === 0) return streamed.entries;
+      // Rare: an output file is stored as a hard link to a body outside
+      // /workspace/output. Only a full parse can resolve it — refetch buffered
+      // (bounded by the same size cap the pre-streaming code enforced).
+      return bufferedSnapshot(await (await fetchSnapshotResponse(envId)).arrayBuffer(), include);
+    } catch (e) {
+      if (e instanceof TarSizeLimitError) throw snapshotTooLarge();
+      throw e;
     }
-    const buf = await resp.arrayBuffer();
-    if (buf.byteLength > MAX_SNAPSHOT_BYTES) {
-      throw new FriendlyError("bad-request", "Environment snapshot is too large to sync (>100MB).");
-    }
-    return parseTar(buf);
   })().finally(() => inflightDownloads.delete(envId));
   inflightDownloads.set(envId, promise);
   return promise;
+}
+
+export async function downloadSnapshotArchive(envId: string): Promise<Blob> {
+  return (await fetchSnapshotResponse(envId)).blob();
 }
 
 export interface SyncedFile {
   fingerprint: string;
   path: string;
   label: string;
-  kind: "image" | "audio" | "video" | "file";
+  kind: "image" | "audio" | "video" | "html" | "text" | "file";
   mediaId: string;
   mimeType: string;
   size: number;
   syncedAt: number;
 }
 
-export function outputLabel(path: string): string {
-  return path.replace(/^workspace\/output\//, "");
-}
-
-export function normalizeOutputPath(path: string): string | null {
-  const clean = path.trim().replace(/^resource:/, "").replace(/^\/+/, "");
-  if (clean.startsWith("workspace/output/")) return clean;
-  if (clean.startsWith("output/")) return `workspace/${clean}`;
-  return null;
-}
-
 export function outputFileMatchesPath(file: OutputFileRecord, requestedPath: string): boolean {
   const normalized = normalizeOutputPath(requestedPath);
   if (!normalized) return false;
   return file.path === normalized || outputLabel(file.path) === outputLabel(normalized);
-}
-
-function isVisibleOutputPath(path: string): boolean {
-  const normalized = normalizeOutputPath(path);
-  if (!normalized) return false;
-  const rel = outputLabel(normalized);
-  if (!rel || rel.endsWith("/")) return false;
-  return rel.split("/").every((segment) => segment && !segment.startsWith("."));
 }
 
 function outputEntries(entries: TarEntry[]): TarEntry[] {
@@ -124,8 +140,7 @@ export async function syncOutputMedia(sessionId: string, envId: string): Promise
     const { kind, mime } = classify(normalized);
     const mediaId = existing?.mediaId ?? makeMediaId(sessionId, `env-${normalized.replace(/[^a-z0-9.-]/gi, "_")}-${entry.size}`);
     if (!existing || !seen.has(fingerprint)) {
-      const bytes = new Uint8Array(entry.data);
-      await putMedia(mediaId, sessionId, new Blob([bytes.buffer as ArrayBuffer], { type: mime }), mime);
+      await putMedia(mediaId, sessionId, new Blob([entry.data], { type: mime }), mime);
     }
     const record: OutputFileRecord = {
       fingerprint,
@@ -150,5 +165,8 @@ export async function syncOutputMedia(sessionId: string, envId: string): Promise
       envFiles: nextFiles.slice(-SEEN_CAP),
     });
   }
+  // A previously linked folder can receive updates without another prompt while
+  // permission remains granted. Denied/prompt states are left for the explicit UI action.
+  void syncEntriesToProject(sessionId, entries, false).catch(() => undefined);
   return fresh;
 }

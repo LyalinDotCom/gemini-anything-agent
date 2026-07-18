@@ -1,8 +1,10 @@
 import { useState } from "react";
-import { syncOutputMedia } from "../gemini/envFiles";
+import { downloadSnapshot, downloadSnapshotArchive, syncOutputMedia } from "../gemini/envFiles";
 import { toFriendly } from "../gemini/errors";
 import type { OutputFileRecord } from "../state/types";
 import { getMediaUrl } from "../storage/messages";
+import { linkProjectFolder, supportsLocalProjects, syncEntriesToProject, unlinkProjectFolder } from "../storage/localProjects";
+import { useStore } from "../state/store";
 import { T } from "../tokens";
 import { Icon, IconButton, Spinner } from "./atoms";
 
@@ -20,6 +22,8 @@ function iconFor(file: OutputFileRecord): string {
   if (file.kind === "audio") return "audio";
   if (file.kind === "video") return "video";
   if (file.kind === "image") return "image";
+  if (file.kind === "html") return "globe";
+  if (file.kind === "text") return "code";
   return "file";
 }
 
@@ -49,6 +53,9 @@ export function WorkspacePanel({
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [projectStatus, setProjectStatus] = useState<string | null>(null);
+  const localProjectName = useStore((s) => s.sessions[sessionId]?.localProjectName ?? null);
+  const patchSession = useStore((s) => s.patchSession);
   const sorted = [...files].sort(
     (a, b) => b.syncedAt - a.syncedAt || a.label.localeCompare(b.label),
   );
@@ -75,6 +82,72 @@ export function WorkspacePanel({
     }
   };
 
+  const downloadArchive = async () => {
+    if (!envId) {
+      await downloadAll();
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const blob = await downloadSnapshotArchive(envId);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `gemini-anything-${envId}.tar`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    } catch (e) {
+      setError(toFriendly(e).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const linkOrSyncProject = async () => {
+    if (!supportsLocalProjects()) {
+      await downloadArchive();
+      setProjectStatus("This browser cannot link folders; downloaded the project snapshot instead.");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    setProjectStatus(null);
+    try {
+      let name = localProjectName;
+      if (!name) {
+        const handle = await linkProjectFolder(sessionId);
+        name = handle.name;
+        patchSession(sessionId, { localProjectName: name });
+      }
+      if (!envId) {
+        await syncEntriesToProject(sessionId, [], true);
+        setProjectStatus(`Linked ${name}. Conversation metadata is saved now; files will sync after the first agent run.`);
+        return;
+      }
+      const entries = await downloadSnapshot(envId);
+      const result = await syncEntriesToProject(sessionId, entries, true);
+      if (!result || result.permission !== "granted") {
+        setError("Folder permission was not granted.");
+      } else {
+        setProjectStatus(`Synced ${result.written} file${result.written === 1 ? "" : "s"} to ${result.name}.`);
+      }
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
+      setError(e instanceof Error ? e.message : "Could not link the local folder.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const unlinkProject = async () => {
+    await unlinkProjectFolder(sessionId);
+    patchSession(sessionId, { localProjectName: null });
+    setProjectStatus("Local folder unlinked. Existing files were left untouched.");
+  };
+
   return (
     <div
       style={{
@@ -96,8 +169,8 @@ export function WorkspacePanel({
       >
         <button
           type="button"
-          onClick={() => void downloadAll()}
-          disabled={sorted.length === 0}
+          onClick={() => void downloadArchive()}
+          disabled={!envId && sorted.length === 0}
           style={{
             flex: 1,
             minWidth: 0,
@@ -108,15 +181,15 @@ export function WorkspacePanel({
             padding: "9px 12px",
             borderRadius: T.radiusSm,
             border: "none",
-            background: sorted.length > 0 ? T.accent : T.bgHover,
-            color: sorted.length > 0 ? "#0B0B0D" : T.textFaint,
+            background: envId || sorted.length > 0 ? T.accent : T.bgHover,
+            color: envId || sorted.length > 0 ? "#0B0B0D" : T.textFaint,
             fontSize: 13.5,
             fontWeight: 800,
-            cursor: sorted.length > 0 ? "pointer" : "default",
+            cursor: envId || sorted.length > 0 ? "pointer" : "default",
           }}
         >
           <Icon name="download" size={15} />
-          Download all
+          Download snapshot
         </button>
         <IconButton
           name="refresh"
@@ -125,6 +198,26 @@ export function WorkspacePanel({
           onClick={() => void refresh()}
           style={{ border: `1px solid ${T.border}`, background: T.bgInput }}
         />
+      </div>
+
+      <div style={{ padding: "10px 12px", borderBottom: `1px solid ${T.borderSoft}`, background: T.bg }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button
+            type="button"
+            onClick={() => void linkOrSyncProject()}
+            disabled={loading}
+            style={{ flex: 1, minWidth: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7, padding: "8px 10px", borderRadius: T.radiusSm, border: `1px solid ${localProjectName ? "rgba(110,231,160,0.36)" : T.border}`, background: localProjectName ? "rgba(110,231,160,0.09)" : "transparent", color: localProjectName ? T.ok : T.textDim, cursor: loading ? "default" : "pointer", fontSize: 12.5, fontWeight: 700 }}
+          >
+            <Icon name="folder" size={14} />
+            {localProjectName ? `Sync ${localProjectName}` : supportsLocalProjects() ? "Link local folder" : "Download project"}
+          </button>
+          {localProjectName && (
+            <button type="button" onClick={() => void unlinkProject()} style={{ padding: "8px 9px", borderRadius: T.radiusSm, border: `1px solid ${T.border}`, background: "transparent", color: T.textFaint, cursor: "pointer", fontSize: 12 }}>Unlink</button>
+          )}
+        </div>
+        <p style={{ margin: "6px 0 0", color: T.textFaint, fontSize: 10.75, lineHeight: 1.35 }}>
+          {projectStatus ?? (supportsLocalProjects() ? "With permission, output files sync directly into this folder. Existing local files are never deleted." : "Folder linking needs desktop Chrome or Edge over HTTPS. Other browsers use downloads.")}
+        </p>
       </div>
 
       <div

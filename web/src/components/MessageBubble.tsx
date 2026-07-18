@@ -199,12 +199,22 @@ function OutputLink({
 export const MessageBubble = memo(function MessageBubble({
   message,
   onOpenResourcePath,
+  onRetry,
 }: {
   message: Message;
   onOpenResourcePath?: (path: string) => void;
+  onRetry?: () => void;
 }) {
   const isUser = message.role === "user";
   const streaming = message.status === "streaming";
+  // Only the post-stream Copy/Save footer reads this — don't rebuild it on every
+  // streaming flush.
+  const responseText = useMemo(() => message.parts.flatMap((part) => {
+    if (part.kind === "text" || part.kind === "thought") return [part.text];
+    if (part.kind === "code") return part.runs.flatMap((run) => [`\`\`\`\n${run.code}\n\`\`\``, run.result ?? ""]);
+    return [];
+  }).filter(Boolean).join("\n\n"), [message.parts]);
+  const durationSeconds = message.completedAt ? Math.max(0, Math.round((message.completedAt - message.createdAt) / 1000)) : null;
   // Grouping is a RENDER concern: transcripts persist raw parts, so history always
   // benefits from the current grouping logic.
   const parts = useMemo(() => {
@@ -392,6 +402,27 @@ export const MessageBubble = memo(function MessageBubble({
       {message.status === "stopped" && (
         <div style={{ marginTop: 6, color: T.textFaint, fontSize: 12.5 }}>
           Stopped.
+        </div>
+      )}
+      {onRetry && (
+        <button type="button" onClick={onRetry} style={{ marginTop: 8, display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 9px", borderRadius: T.radiusSm, border: `1px solid ${T.border}`, background: T.bgElev, color: T.textDim, cursor: "pointer", fontSize: 12.5 }}>
+          <Icon name="refresh" size={13} /> Retry prompt
+        </button>
+      )}
+      {!streaming && responseText && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, color: T.textFaint, fontSize: 11.5 }}>
+          <button type="button" aria-label="Copy response" onClick={() => void navigator.clipboard?.writeText(responseText)} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 7px", borderRadius: 6, border: `1px solid ${T.borderSoft}`, background: "transparent", color: T.textFaint, cursor: "pointer", fontSize: 11.5 }}><Icon name="copy" size={12} /> Copy</button>
+          <button type="button" aria-label="Download response" onClick={() => {
+            const url = URL.createObjectURL(new Blob([responseText], { type: "text/markdown" }));
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = "gemini-anything-response.md";
+            link.click();
+            setTimeout(() => URL.revokeObjectURL(url), 30_000);
+          }} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 7px", borderRadius: 6, border: `1px solid ${T.borderSoft}`, background: "transparent", color: T.textFaint, cursor: "pointer", fontSize: 11.5 }}><Icon name="download" size={12} /> Save</button>
+          {durationSeconds !== null && <span>{durationSeconds}s</span>}
+          {message.usage?.inputTokens !== undefined && <span>{message.usage.inputTokens} in</span>}
+          {message.usage?.outputTokens !== undefined && <span>{message.usage.outputTokens} out</span>}
         </div>
       )}
     </div>

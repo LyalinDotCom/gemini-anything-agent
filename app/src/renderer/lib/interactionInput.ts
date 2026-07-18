@@ -118,8 +118,14 @@ export const deepResearchAgentIdForMode = (mode: AgentMode): string | undefined 
       ? DEEP_RESEARCH_MAX_AGENT
       : undefined;
 
-export const agentModeForAgentId = (agentId: string): AgentMode => {
+export const agentModeForAgentId = (agentId: string, browserAgentId: string): AgentMode => {
   const id = agentId.trim();
+  if (id === ANTIGRAVITY_BASE_AGENT) {
+    return "antigravity";
+  }
+  if (id === browserAgentId.trim()) {
+    return "browser";
+  }
   if (id === DEEP_RESEARCH_AGENT) {
     return "deep-research";
   }
@@ -129,11 +135,9 @@ export const agentModeForAgentId = (agentId: string): AgentMode => {
   return "anything";
 };
 
-export const specializedToolsEnabledForAgentId = (agentId: string): boolean =>
-  agentId.trim() !== ANTIGRAVITY_BASE_AGENT;
-
 export const buildChatInteraction = (
   agentId: string,
+  browserAgentId: string,
   compose: ComposeState
 ): InteractionCreateRequest => {
   const deepResearchAgent = deepResearchAgentIdForMode(compose.agentMode);
@@ -161,7 +165,12 @@ export const buildChatInteraction = (
   }
 
   const request: InteractionCreateRequest = {
-    agent: compose.specializedToolsEnabled ? agentId : ANTIGRAVITY_BASE_AGENT,
+    agent:
+      compose.agentMode === "browser"
+        ? browserAgentId
+        : compose.agentMode === "anything"
+          ? agentId
+          : ANTIGRAVITY_BASE_AGENT,
     input: composeToInput(compose),
     environment: "remote",
     store: compose.store
@@ -185,7 +194,7 @@ export const buildChatInteraction = (
   if (compose.overrideSystemInstruction && compose.systemInstruction.trim()) {
     request.system_instruction = compose.systemInstruction.trim();
   }
-  if (!compose.specializedToolsEnabled || compose.overrideTools) {
+  if (compose.agentMode === "antigravity" || compose.overrideTools) {
     request.tools = ALL_AGENT_TOOLS.map((type) => ({ type }));
   }
   if (compose.overrideEnvironment && compose.environmentId.trim()) {
@@ -205,7 +214,10 @@ export const promptForInput = (input: InteractionCreateRequest["input"]): string
     .trim();
 };
 
-export const composeFromRequest = (request: InteractionCreateRequest): ComposeState => {
+export const composeFromRequest = (
+  request: InteractionCreateRequest,
+  browserAgentId: string
+): ComposeState => {
   const input = typeof request.input === "string"
     ? request.input
     : request.input
@@ -236,8 +248,7 @@ export const composeFromRequest = (request: InteractionCreateRequest): ComposeSt
     inputMode: parts.length ? "parts" : "string",
     input,
     parts,
-    agentMode: agentModeForAgentId(request.agent),
-    specializedToolsEnabled: specializedToolsEnabledForAgentId(request.agent),
+    agentMode: agentModeForAgentId(request.agent, browserAgentId),
     store: request.store ?? initialCompose.store,
     autoContinue: !request.previous_interaction_id,
     reuseEnvironment: request.environment === "remote",

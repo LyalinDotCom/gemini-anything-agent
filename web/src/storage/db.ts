@@ -3,14 +3,19 @@
 // (Spark's 5MB lesson). Falls back to in-memory maps when IDB is unavailable
 // (private mode) — the app keeps working for the current page lifetime.
 const DB_NAME = "aichat";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise: Promise<IDBDatabase | null> | null = null;
 
 const memory = {
   messages: new Map<string, unknown>(),
   media: new Map<string, unknown>(),
+  projectHandles: new Map<string, unknown>(),
 };
+
+/** Observable storage state: `blocked` while an older tab holds the previous schema
+ *  version, `memoryFallback` once operations run against the volatile maps. */
+export const storageHealth = { blocked: false, memoryFallback: false };
 
 function openOnce(): Promise<IDBDatabase | null> {
   return new Promise((resolve) => {
@@ -26,10 +31,31 @@ function openOnce(): Promise<IDBDatabase | null> {
           const media = db.createObjectStore("media", { keyPath: "id" });
           media.createIndex("by-session", "sessionId");
         }
+        if (!db.objectStoreNames.contains("projectHandles")) {
+          db.createObjectStore("projectHandles", { keyPath: "id" });
+        }
       };
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => {
+        storageHealth.blocked = false;
+        const db = req.result;
+        // When another tab needs to upgrade the schema, close so it can proceed;
+        // the next operation here reopens at the new version.
+        db.onversionchange = () => {
+          db.close();
+          dbPromise = null;
+        };
+        resolve(db);
+      };
       req.onerror = () => resolve(null);
-      req.onblocked = () => resolve(null);
+      req.onblocked = () => {
+        // An older tab still holds the previous schema version. The request stays
+        // pending and completes once that tab closes — waiting keeps writes
+        // durable, where a memory fallback would silently lose them on reload.
+        storageHealth.blocked = true;
+        console.warn(
+          "Storage upgrade is blocked by another open tab of this app — close the other tab to continue.",
+        );
+      };
     } catch {
       resolve(null);
     }
@@ -44,7 +70,12 @@ function openDb(): Promise<IDBDatabase | null> {
     const first = await openOnce();
     if (first) return first;
     await new Promise((r) => setTimeout(r, 300));
-    return openOnce();
+    const second = await openOnce();
+    if (!second) {
+      storageHealth.memoryFallback = true;
+      console.warn("IndexedDB unavailable — transcripts in this tab will not survive a reload.");
+    }
+    return second;
   })();
   // Ask the browser not to evict us (Safari ITP); best-effort.
   try {
@@ -55,7 +86,7 @@ function openDb(): Promise<IDBDatabase | null> {
   return dbPromise;
 }
 
-type StoreName = "messages" | "media";
+type StoreName = "messages" | "media" | "projectHandles";
 
 export async function idbPut(store: StoreName, value: Record<string, unknown>): Promise<void> {
   const db = await openDb();
@@ -131,9 +162,10 @@ export async function idbWipe(): Promise<void> {
     return;
   }
   await new Promise<void>((resolve) => {
-    const tx = db.transaction(["messages", "media"], "readwrite");
+    const tx = db.transaction(["messages", "media", "projectHandles"], "readwrite");
     tx.objectStore("messages").clear();
     tx.objectStore("media").clear();
+    tx.objectStore("projectHandles").clear();
     tx.oncomplete = () => resolve();
     tx.onerror = () => resolve();
   });

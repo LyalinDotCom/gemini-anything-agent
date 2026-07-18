@@ -63,7 +63,7 @@ const streamOf = (events: unknown[], options: { hang?: boolean } = {}) => ({
 });
 
 const validRequest = {
-  agent: "gemini-anything-v1",
+  agent: "gai-anything-v1",
   input: "hello",
   environment: "remote" as const,
   store: true
@@ -133,7 +133,7 @@ describe("GenAI SDK adapter", () => {
     expect(interaction.id).toBe("int-1");
     const params = mocks.interactions.create.mock.calls[0][0];
     expect(params).toMatchObject({
-      agent: "gemini-anything-v1",
+      agent: "gai-anything-v1",
       input: "hello",
       environment: "remote",
       store: true,
@@ -146,6 +146,16 @@ describe("GenAI SDK adapter", () => {
     await expect(
       client().createAgent({ id: "x", base_agent: "not-a-real-base" as never })
     ).rejects.toBeInstanceOf(GeminiApiValidationError);
+    expect(mocks.agents.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects Google's reserved custom-agent id prefixes with an actionable error", async () => {
+    const error = await client()
+      .createAgent({ id: "gemini-browser-v1", base_agent: "antigravity-preview-05-2026" })
+      .catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(GeminiApiValidationError);
+    expect((error as Error).message).toContain("Google-reserved prefix");
     expect(mocks.agents.create).not.toHaveBeenCalled();
   });
 
@@ -166,7 +176,7 @@ describe("GenAI SDK adapter", () => {
         return "sdk helper";
       }
     })(), {
-      id: "gemini-anything-v1",
+      id: "gai-anything-v1",
       base_agent: "antigravity-preview-05-2026",
       created_at: new Date("2026-07-05T12:00:00.000Z"),
       metadata: new Map([["mode", "test"]]),
@@ -189,12 +199,12 @@ describe("GenAI SDK adapter", () => {
     });
     mocks.agents.get.mockResolvedValue(response);
 
-    const agent = await client().getAgent("gemini-anything-v1");
+    const agent = await client().getAgent("gai-anything-v1");
 
     expect(() => structuredClone(agent)).not.toThrow();
     expect(Object.getPrototypeOf(agent)).toBe(Object.prototype);
     expect(agent).toMatchObject({
-      id: "gemini-anything-v1",
+      id: "gai-anything-v1",
       base_agent: "antigravity-preview-05-2026",
       created_at: "2026-07-05T12:00:00.000Z",
       metadata: { mode: "test" },

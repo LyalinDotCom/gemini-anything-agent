@@ -6,7 +6,9 @@
 //
 // agents/AGENTS.md                       → /.agents/AGENTS.md   (persona & rules)
 // agents/bin/gai                         → /.agents/bin/gai     (launcher → npx -y @lyalindotcom/gai)
+// agents/bin/browser                     → /.agents/bin/browser (launcher → npx -y @playwright/cli)
 // agents/skills/gemini-anything/SKILL.md → /.agents/skills/gemini-anything/SKILL.md
+// agents/skills/browser-testing/SKILL.md  → /.agents/skills/browser-testing/SKILL.md
 // (the user's key)                       → /.env                (GEMINI_API_KEY=…; sourced by the launcher)
 //
 // The key ships as /.env — the same mechanism the Electron app uses — so the shared
@@ -18,9 +20,12 @@
 // an agent-level prompt out. The request-level slot carries only fresh per-call
 // context (see controller). All media capability comes from the PUBLISHED CLI
 // @lyalindotcom/gai via the shared launcher — never a local reimplementation
-// (hard rule; see the repo-root AGENTS.md).
+// (hard rule; see the repo-root AGENTS.md). Browser automation independently
+// comes from the published Playwright agent CLI through its own launcher.
 import agentsMd from "../../../agents/AGENTS.md?raw";
+import browserLauncher from "../../../agents/bin/browser?raw";
 import gaiLauncher from "../../../agents/bin/gai?raw";
+import browserSkill from "../../../agents/skills/browser-testing/SKILL.md?raw";
 import geminiSkill from "../../../agents/skills/gemini-anything/SKILL.md?raw";
 import type { InlineSource } from "./interactionParams";
 
@@ -30,6 +35,8 @@ export function buildEnvSources(apiKey: string): InlineSource[] {
     { type: "inline", target: "/.env", content: `GEMINI_API_KEY=${apiKey}\n` },
     { type: "inline", target: "/.agents/bin/gai", content: gaiLauncher },
     { type: "inline", target: "/.agents/skills/gemini-anything/SKILL.md", content: geminiSkill },
+    { type: "inline", target: "/.agents/bin/browser", content: browserLauncher },
+    { type: "inline", target: "/.agents/skills/browser-testing/SKILL.md", content: browserSkill },
   ];
 }
 

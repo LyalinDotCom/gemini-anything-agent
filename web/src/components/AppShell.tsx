@@ -14,6 +14,8 @@ import { ChatDiagnosticsPanel } from "./ChatDiagnosticsPanel";
 import { SettingsPanel } from "./SettingsPanel";
 import { Sidebar } from "./Sidebar";
 import { WorkspacePanel } from "./WorkspacePanel";
+import { profileForSession } from "../agentProfiles";
+import { AboutPanel } from "./AboutPanel";
 
 type PanelTab = "files" | "diagnostics";
 
@@ -81,6 +83,7 @@ export function AppShell() {
   const isMobile = useIsMobile();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const [panelTab, setPanelTab] = useState<PanelTab | null>(null);
   const [cancelingServer, setCancelingServer] = useState(false);
   const outputSignatures = useRef<Record<string, string>>({});
@@ -103,6 +106,7 @@ export function AppShell() {
   );
 
   const active = activeSessionId ? sessions[activeSessionId] : null;
+  const activeProfile = active ? profileForSession(active) : null;
   const activeFiles = active?.envFiles ?? [];
   const resourceCount = activeFiles.length;
   const outputSignature = activeFiles
@@ -133,7 +137,7 @@ export function AppShell() {
 
   const openOutputFile = (file: OutputFileRecord) => {
     pauseAllMedia();
-    if (file.kind === "image" || file.kind === "video") {
+    if (file.kind === "image" || file.kind === "video" || file.kind === "html" || file.kind === "text") {
       setAudioFile(null);
       setPreviewFile(file);
     } else if (file.kind === "audio") {
@@ -290,6 +294,7 @@ export function AppShell() {
   const sidebar = (
     <Sidebar
       onOpenSettings={() => setSettingsOpen(true)}
+      onOpenAbout={() => setAboutOpen(true)}
       onNavigate={isMobile ? () => setDrawerOpen(false) : undefined}
     />
   );
@@ -372,8 +377,9 @@ export function AppShell() {
           >
             {active?.title ?? "Gemini Anything"}
           </span>
-          {active?.mode === "deep-research" && (
+          {activeProfile && (
             <span
+              title={`${activeProfile.description} ${activeProfile.model}.`}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -385,8 +391,8 @@ export function AppShell() {
                 borderRadius: 20,
               }}
             >
-              <Icon name="brain" size={13} />
-              Deep Research
+              <Icon name={activeProfile.icon} size={13} />
+              {activeProfile.label}
             </span>
           )}
           {active && (
@@ -558,6 +564,7 @@ export function AppShell() {
         </aside>
       )}
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
+      {aboutOpen && <AboutPanel onClose={() => setAboutOpen(false)} />}
       <ResourceLightbox
         file={previewFile}
         onClose={() => setPreviewFile(null)}

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ClipboardEventHandler, ReactNode, Ref } from "react";
 import { Loader2 } from "lucide-react";
 
 export const TextField = ({
@@ -48,7 +48,9 @@ export const TextArea = ({
   placeholder,
   hint,
   disabled = false,
-  mono = false
+  mono = false,
+  textareaRef,
+  onPaste
 }: {
   label?: string;
   value: string;
@@ -58,16 +60,20 @@ export const TextArea = ({
   hint?: string;
   disabled?: boolean;
   mono?: boolean;
+  textareaRef?: Ref<HTMLTextAreaElement>;
+  onPaste?: ClipboardEventHandler<HTMLTextAreaElement>;
 }) => (
   <label className="field">
     {label && <span className="field-label">{label}</span>}
     <textarea
+      ref={textareaRef}
       value={value}
       rows={rows}
       placeholder={placeholder}
       disabled={disabled}
       spellCheck={false}
       className={mono ? "mono" : undefined}
+      onPaste={onPaste}
       onChange={(event) => onChange(event.target.value)}
     />
     {hint && <small className="field-hint">{hint}</small>}

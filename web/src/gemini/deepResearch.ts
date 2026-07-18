@@ -4,7 +4,8 @@
 //   (gaicli run.ts pattern) → terminal interaction rendered like any other turn.
 // Survives reloads: resumeResearchIfNeeded re-adopts the placeholder message.
 import { blocksToParts, settleParts, type MediaStampedBlock } from "../chat/blocksToParts";
-import { MODELS } from "../models";
+import { profileForSession } from "../agentProfiles";
+import { effectiveRunOptions } from "../state/runOptions";
 import { useStore } from "../state/store";
 import type { ContentPart, Message } from "../state/types";
 import { uid } from "../utils/id";
@@ -37,6 +38,7 @@ function renderOutcome(sessionId: string, messageId: string, outcome: StreamOutc
     errorMessage: done && status !== "completed" ? `Research ended: ${status}.` : undefined,
     interactionId: outcome.interactionId || undefined,
     usage: outcome.usage,
+    completedAt: done ? Date.now() : undefined,
   });
 }
 
@@ -100,6 +102,7 @@ async function watch(sessionId: string, messageId: string, interactionId: string
     useStore.getState().patchMessage(sessionId, messageId, {
       status: "error",
       errorMessage: toFriendly(e).message,
+      completedAt: Date.now(),
     });
     useStore.getState().patchSession(sessionId, { research: null });
     useStore.getState().setStreaming(sessionId, false);
@@ -149,12 +152,14 @@ export async function sendResearchTurn(sessionId: string, text: string): Promise
   store.persistTranscript(sessionId);
 
   try {
+    const profile = profileForSession(session);
     const params = buildInteractionParams({
-      agent: MODELS.deepResearch,
+      agent: profile.agentId,
       input: text.trim(),
       previousInteractionId: session.lastInteractionId ?? undefined,
       environmentId: session.environmentId ?? undefined,
       deepResearch: true,
+      thinkingSummaries: effectiveRunOptions(session).thinkingSummaries,
       stream: false,
     });
     // retries "none": an auto-retried POST would start a duplicate research run.
@@ -174,6 +179,7 @@ export async function sendResearchTurn(sessionId: string, text: string): Promise
       status: "error",
       errorMessage: toFriendly(e).message,
       parts: [],
+      completedAt: Date.now(),
     });
     useStore.getState().patchSession(sessionId, { research: null });
     useStore.getState().setStreaming(sessionId, false);

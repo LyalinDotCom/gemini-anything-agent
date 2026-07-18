@@ -8,7 +8,8 @@ export const FALLBACK_RUNTIME: RuntimeConfig = {
   envPath: ".env",
   chatStorePath: "chats",
   docsLastChecked: "2026-06-22",
-  agentId: "gemini-anything-v1",
+  agentId: "gai-anything-v1",
+  browserAgentId: "gai-browser-v1",
   npmPackage: "@lyalindotcom/gai",
   npmVersion: "latest"
 };

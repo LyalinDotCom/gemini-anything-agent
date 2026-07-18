@@ -1889,29 +1889,19 @@ svg {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 3px;
 }
 
-.composer-specialized-toggle {
-  height: 28px;
-  padding: 0 8px;
+.composer-agent-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 4px 7px 4px 5px;
+  border: none;
   border-radius: 8px;
-  font-size: 11px;
-  font-weight: 600;
+  background: transparent;
   color: var(--muted);
-  white-space: nowrap;
-}
-
-.composer-specialized-toggle.on {
-  color: var(--teal-dark);
-}
-
-.composer-specialized-toggle svg {
-  flex: 0 0 auto;
-}
-
-.composer-specialized-toggle span:last-child {
-  min-width: 0;
+  cursor: pointer;
 }
 
 .composer-agent-label {
@@ -1925,27 +1915,25 @@ svg {
   color: var(--teal-dark);
 }
 
-.composer-agent-switch {
+.composer-agent-trigger-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: none;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--ink-2);
 }
 
-.composer-agent-switch:hover:not(:disabled) {
+.composer-agent-trigger:hover:not(:disabled),
+.composer-agent-trigger[aria-expanded="true"] {
   background: var(--surface-2);
 }
 
-.composer-agent-switch:disabled {
+.composer-agent-trigger:disabled {
   cursor: not-allowed;
-  opacity: 0.55;
+  opacity: 0.7;
 }
 
 .composer-agent-menu {
@@ -1955,23 +1943,25 @@ svg {
   z-index: 30;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  min-width: 168px;
-  padding: 4px;
-  border-radius: 9px;
+  gap: 4px;
+  width: min(320px, calc(100vw - 32px));
+  padding: 6px;
+  border: 0.5px solid rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
   background: #fff;
-  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.1), 0 8px 24px rgba(0, 0, 0, 0.16);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.18);
 }
 
 .composer-agent-menu button {
-  padding: 6px 9px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 9px;
+  padding: 9px;
   border: none;
-  border-radius: 6px;
+  border-radius: 9px;
   background: transparent;
   color: inherit;
   text-align: left;
-  font-size: 12px;
-  font-weight: 550;
   cursor: pointer;
 }
 
@@ -1982,6 +1972,52 @@ svg {
 .composer-agent-menu button.selected {
   color: var(--teal-dark);
   background: rgba(14, 124, 117, 0.09);
+}
+
+.composer-agent-option-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+
+.composer-agent-menu button.selected .composer-agent-option-icon {
+  background: rgba(14, 124, 117, 0.13);
+  color: var(--teal-dark);
+}
+
+.composer-agent-option-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.composer-agent-option-copy strong {
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.composer-agent-option-copy > span {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.composer-agent-option-copy small {
+  width: max-content;
+  margin-top: 2px;
+  padding: 2px 5px;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.045);
+  color: var(--muted);
+  font-size: 9.5px;
+  font-weight: 650;
+  line-height: 1.2;
 }
 
 .run-options {
@@ -5468,7 +5504,7 @@ button:disabled {
 
 .sample-prompt-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
   gap: 10px;
   max-height: min(43vh, 392px);
   min-height: 0;
@@ -5477,6 +5513,7 @@ button:disabled {
 }
 
 .sample-prompt {
+  position: relative;
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto auto;
   min-width: 0;
@@ -5489,6 +5526,25 @@ button:disabled {
   cursor: pointer;
   text-align: left;
   transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.sample-prompt-agent {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  padding: 3px 6px;
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(26, 29, 42, 0.78);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.2);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.sample-prompt-agent.browser {
+  background: rgba(67, 56, 202, 0.88);
 }
 
 .sample-prompt:hover {
@@ -5555,8 +5611,10 @@ button:disabled {
   border: none;
   border-radius: 0;
   background: none;
+  box-sizing: border-box;
   font-size: 13.5px;
   line-height: 1.4;
+  overflow-y: hidden;
   resize: none;
 }
 
@@ -5593,19 +5651,17 @@ button:disabled {
   font-weight: 500;
 }
 
-.chat-app .composer-specialized-toggle {
-  min-width: 102px;
-  height: 28px;
-  padding: 0 9px;
+.chat-app .composer-agent-trigger {
+  min-height: 28px;
+  padding: 3px 8px 3px 5px;
   border-radius: 9px;
   background: var(--b-soft);
   color: var(--b-ink);
-  font-size: 12px;
-  font-weight: 500;
 }
 
-.chat-app .composer-specialized-toggle.on {
-  color: var(--b-blue);
+.chat-app .composer-agent-trigger-icon {
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--b-ink);
 }
 
 .chat-app .composer-agent-label {

@@ -38,6 +38,7 @@ export interface TurnParams {
   agent?: string;
   model?: string;
   input: InteractionInput;
+  /** Tools declared on the request; an empty array explicitly sends no tools. */
   toolset?: ToolDecl[];
   previousInteractionId?: string;
   /** Environment id from the previous turn — REQUIRED for continuations. */
@@ -46,6 +47,10 @@ export interface TurnParams {
   /** Seed a fresh remote environment with files (degraded/no-managed-agent mode). */
   seedSources?: InlineSource[];
   deepResearch?: boolean;
+  store?: boolean;
+  background?: boolean;
+  serviceTier?: "standard" | "flex" | "priority";
+  thinkingSummaries?: "none" | "auto";
   stream: boolean;
 }
 
@@ -64,13 +69,25 @@ export function buildInteractionParams(p: TurnParams): Record<string, unknown> {
   }
 
   if (p.systemInstruction) body.system_instruction = p.systemInstruction;
-  if (p.toolset && p.toolset.length > 0) body.tools = p.toolset;
+  if (p.toolset) body.tools = p.toolset;
   if (p.previousInteractionId) body.previous_interaction_id = p.previousInteractionId;
+
+  if (!p.deepResearch) {
+    if (p.store !== undefined) body.store = p.store;
+    if (p.background && p.store !== false) body.background = true;
+    if (p.serviceTier && p.serviceTier !== "standard") body.service_tier = p.serviceTier;
+    if (p.thinkingSummaries && p.thinkingSummaries !== "none") {
+      body.agent_config = { type: "dynamic", thinking_summaries: p.thinkingSummaries };
+    }
+  }
 
   if (p.deepResearch) {
     body.background = true;
     body.store = true; // background runs must be stored to be reattachable/pollable
-    body.agent_config = { type: "deep-research", thinking_summaries: "auto" };
+    body.agent_config = {
+      type: "deep-research",
+      thinking_summaries: p.thinkingSummaries === "none" ? "auto" : (p.thinkingSummaries ?? "auto"),
+    };
   }
 
   return body;

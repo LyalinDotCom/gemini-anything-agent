@@ -19,6 +19,7 @@ export type RuntimeConfig = {
   chatStorePath: string;
   docsLastChecked: string;
   agentId: string;
+  browserAgentId: string;
   npmPackage: string;
   npmVersion: string;
 };

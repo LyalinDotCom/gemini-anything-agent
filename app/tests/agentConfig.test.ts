@@ -3,7 +3,7 @@ import { agentConfigHash } from "../src/main/agentConfig";
 import { ANTIGRAVITY_BASE_AGENT, type AgentDefinition } from "../src/sdk";
 
 const definitionWithKey = (apiKey: string): AgentDefinition => ({
-  id: "gemini-anything-v1",
+  id: "gai-anything-v1",
   base_agent: ANTIGRAVITY_BASE_AGENT,
   tools: [{ type: "code_execution" }],
   base_environment: {

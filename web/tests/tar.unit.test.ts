@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { parseTar } from "../src/utils/tar";
+import { parseTar, parseTarStream } from "../src/utils/tar";
 
 function tarOf(entries: Array<{ name: string; content: string; type?: string; linkName?: string }>): ArrayBuffer {
   const blocks: Uint8Array[] = [];
@@ -78,5 +78,59 @@ describe("parseTar", () => {
 
   test("empty archive → no entries", () => {
     expect(parseTar(new Uint8Array(1024).buffer)).toEqual([]);
+  });
+
+  test("stream reader keeps selected artifacts and skips unrelated bodies across chunk boundaries", async () => {
+    const bytes = new Uint8Array(tarOf([
+      { name: "workspace/cache/large.bin", content: "x".repeat(4097) },
+      { name: "workspace/output/report.json", content: "{\"ok\":true}" },
+    ]));
+    let offset = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (offset >= bytes.length) return controller.close();
+        controller.enqueue(bytes.slice(offset, offset + 73));
+        offset += 73;
+      },
+    });
+    const { entries, unresolvedLinks } = await parseTarStream(stream, (name) => name.startsWith("workspace/output/"));
+    expect(entries.map((entry) => entry.name)).toEqual(["workspace/output/report.json"]);
+    expect(new TextDecoder().decode(entries[0].data)).toBe("{\"ok\":true}");
+    expect(unresolvedLinks).toEqual([]);
+  });
+
+  test("stream reader reports hard links whose target the filter excluded", async () => {
+    const bytes = new Uint8Array(tarOf([
+      { name: "workspace/cache/img.png", content: "PNGDATA" },
+      { name: "workspace/output/img.png", content: "", type: "1", linkName: "workspace/cache/img.png" },
+    ]));
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes);
+        controller.close();
+      },
+    });
+    const { entries, unresolvedLinks } = await parseTarStream(stream, (name) => name.startsWith("workspace/output/"));
+    expect(entries).toEqual([]);
+    expect(unresolvedLinks).toEqual([{ name: "workspace/output/img.png", linkName: "workspace/cache/img.png" }]);
+  });
+
+  test("stream reader enforces the included-bytes cap without counting skipped bodies", async () => {
+    const bytes = new Uint8Array(tarOf([
+      { name: "workspace/cache/huge.bin", content: "x".repeat(5000) },
+      { name: "workspace/output/small.txt", content: "ok" },
+      { name: "workspace/output/big.txt", content: "y".repeat(600) },
+    ]));
+    const streamOf = () =>
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(bytes);
+          controller.close();
+        },
+      });
+    const include = (name: string) => name.startsWith("workspace/output/");
+    const ok = await parseTarStream(streamOf(), include, 1000);
+    expect(ok.entries.map((entry) => entry.name)).toEqual(["workspace/output/small.txt", "workspace/output/big.txt"]);
+    await expect(parseTarStream(streamOf(), include, 500)).rejects.toThrow(/included-content limit/);
   });
 });

@@ -49,6 +49,26 @@ describe("buildInteractionParams", () => {
     expect(body.environment).toBeUndefined();
   });
 
+  test("advanced chat options map to interaction fields", () => {
+    const body = buildInteractionParams({
+      agent: MODELS.chatAgentBase,
+      input: "ship it",
+      toolset: [],
+      store: true,
+      background: true,
+      serviceTier: "priority",
+      thinkingSummaries: "auto",
+      stream: false,
+    });
+    expect(body).toMatchObject({
+      store: true,
+      background: true,
+      service_tier: "priority",
+      tools: [],
+      agent_config: { type: "dynamic", thinking_summaries: "auto" },
+    });
+  });
+
   test("deep research continuations carry the previous environment id when present", () => {
     const body = buildInteractionParams({
       agent: MODELS.deepResearch,

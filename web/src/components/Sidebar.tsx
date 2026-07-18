@@ -2,6 +2,7 @@ import { useState } from "react";
 import { isUntouchedSession, useStore } from "../state/store";
 import { T } from "../tokens";
 import { Icon, IconButton, Spinner } from "./atoms";
+import { profileForSession } from "../agentProfiles";
 
 function relativeTime(ts: number): string {
   const d = Date.now() - ts;
@@ -16,9 +17,11 @@ function relativeTime(ts: number): string {
 
 export function Sidebar({
   onOpenSettings,
+  onOpenAbout,
   onNavigate,
 }: {
   onOpenSettings: () => void;
+  onOpenAbout: () => void;
   onNavigate?: () => void;
 }) {
   const sessionOrder = useStore((s) => s.sessionOrder);
@@ -28,9 +31,11 @@ export function Sidebar({
   const deleteSession = useStore((s) => s.deleteSession);
   const setActiveSession = useStore((s) => s.setActiveSession);
   const renameSession = useStore((s) => s.renameSession);
+  const reorderSession = useStore((s) => s.reorderSession);
   const streaming = useStore((s) => s.streaming);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
+  const [draggingId, setDraggingId] = useState<string | null>(null);
 
   return (
     <div
@@ -79,9 +84,34 @@ export function Sidebar({
             const session = sessions[id];
             if (!session) return null;
             const active = id === activeSessionId;
+            const profile = profileForSession(session);
             return (
               <div
                 key={id}
+                draggable={editingId !== id}
+                onDragStart={(event) => {
+                  setDraggingId(id);
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData("text/plain", id);
+                }}
+                onDragEnd={() => setDraggingId(null)}
+                onDragOver={(event) => {
+                  if (draggingId && draggingId !== id) event.preventDefault();
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const source = draggingId || event.dataTransfer.getData("text/plain");
+                  if (source && source !== id) {
+                    // Dropping on the lower half inserts below the hovered row
+                    // (null target appends); insert-before alone made every
+                    // downward move land one slot short.
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    const below = event.clientY > rect.top + rect.height / 2;
+                    const beforeId = below ? (sessionOrder[sessionOrder.indexOf(id) + 1] ?? null) : id;
+                    if (beforeId !== source) reorderSession(source, beforeId);
+                  }
+                  setDraggingId(null);
+                }}
                 onClick={() => {
                   setActiveSession(id);
                   onNavigate?.();
@@ -94,6 +124,7 @@ export function Sidebar({
                   marginBottom: 2,
                   borderRadius: T.radiusSm,
                   background: active ? T.bgHover : "transparent",
+                  opacity: draggingId === id ? 0.5 : 1,
                   cursor: "pointer",
                 }}
                 onMouseEnter={(e) => {
@@ -103,7 +134,7 @@ export function Sidebar({
                   (e.currentTarget as HTMLDivElement).style.background = active ? T.bgHover : "transparent";
                 }}
               >
-                <Icon name={session.mode === "deep-research" ? "brain" : "chat"} size={15} color={T.textFaint} />
+                <Icon name={profile.icon} size={15} color={T.textFaint} />
                 {editingId === id ? (
                   <input
                     autoFocus
@@ -172,6 +203,9 @@ export function Sidebar({
       </div>
 
       <div style={{ padding: 10, borderTop: `1px solid ${T.borderSoft}` }}>
+        <button type="button" onClick={onOpenAbout} style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, padding: "9px 12px", borderRadius: T.radiusSm, border: "none", background: "transparent", color: T.textDim, fontSize: 13.5, cursor: "pointer" }}>
+          <Icon name="sparkle" size={16} /> About
+        </button>
         <button
           type="button"
           onClick={onOpenSettings}

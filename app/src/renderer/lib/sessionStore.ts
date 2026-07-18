@@ -181,7 +181,9 @@ export const sanitizeSessionHistory = (value: unknown): Session[] => {
           : undefined,
       error: sanitizeError(item.error),
       imageAttachments: sanitizeImageAttachments(item.imageAttachments),
-      parentLocalId: typeof item.parentLocalId === "string" ? item.parentLocalId : undefined
+      parentLocalId: typeof item.parentLocalId === "string" ? item.parentLocalId : undefined,
+      migratedFromAgentId:
+        typeof item.migratedFromAgentId === "string" ? item.migratedFromAgentId : undefined
     });
   }
 
@@ -306,6 +308,7 @@ export const renameSessionsForAgent = (
       ...session,
       agentId: toAgentId,
       agentSnapshot: { ...session.agentSnapshot, id: toAgentId } as ManagedAgent,
+      migratedFromAgentId: session.migratedFromAgentId ?? fromAgentId,
       request:
         session.request.agent === fromAgentId
           ? { ...session.request, agent: toAgentId }

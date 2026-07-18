@@ -29,19 +29,19 @@ const solutionParts = [
     summary: "A local control surface for exercising real managed-agent runs with visibility into prompts, events, artifacts, and continuity.",
     features: [
       "Stored chat chains and sandbox reuse",
-      "Per-chat Anything / plain AGY switch",
+      "Per-chat Antigravity, Browser, and Deep Research modes",
       "Timeline for commands, search, URLs, and outputs",
       "Output drawer for media, HTML, Markdown, and text"
     ]
   },
   {
     title: "Agent",
-    eyebrow: "Managed Antigravity runtime",
+    eyebrow: "Managed Antigravity profiles",
     icon: Bot,
     summary: "A hosted Linux sandbox running the shared `agents/` payload, with native tools and artifact conventions.",
     features: [
-      "Antigravity base with code, search, and URL tools",
-      "Mounts AGENTS.md, skill, launcher, and sandbox .env",
+      "Antigravity and Browser profiles with code, search, and URL tools",
+      "Mounts the shared AGENTS.md, skills, launchers, and sandbox .env",
       "Keeps coding, research, and file work native",
       "Writes user-facing artifacts to /workspace/output"
     ]
@@ -61,9 +61,10 @@ const solutionParts = [
 ];
 
 const collaborationSteps = [
-  "The app deploys one managed agent from the repo's shared `agents/` folder and streams every turn back into the UI.",
+  "The app deploys selectable Antigravity and Browser managed-agent profiles from the same shared `agents/` folder and streams every turn back into the UI.",
   "The agent handles normal work with native tools, filesystem state, and the `/workspace/output` artifact contract.",
   "When media or Gemini utility work is needed, the agent shells out to `bash /.agents/bin/gai`, which resolves the latest scoped npm CLI.",
+  "In Browser mode, the agent uses `bash /.agents/bin/browser` for real headless navigation, interaction, and test evidence.",
   "Generated artifacts land in the sandbox output folder; the app pulls, caches, previews, and saves them locally."
 ];
 

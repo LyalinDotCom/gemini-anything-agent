@@ -1,18 +1,24 @@
-import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import {
   AlertTriangle,
+  Bot,
   ChevronRight,
   ChevronsUpDown,
+  Gauge,
   ImagePlus,
   Loader2,
+  MonitorCheck,
   Play,
+  Search,
   Sliders,
   Sparkles,
   X,
-  XCircle
+  XCircle,
+  type LucideIcon
 } from "lucide-react";
 import { uid, type AgentMode, type ComposeState, type ImagePartDraft } from "../lib/builderState";
 import { IconButton, TextArea, TextField, Toggle } from "./primitives";
+import { resizeComposerTextarea, type ComposerScrollAlignment } from "../lib/composerTextarea";
 
 type Setter = Dispatch<SetStateAction<ComposeState>>;
 
@@ -55,10 +61,40 @@ const imagePreviewSrc = (part: ImagePartDraft): string => `data:${part.mimeType}
 const imageTooltip = (part: ImagePartDraft): string =>
   [part.name, part.path, formatBytes(part.bytes)].filter(Boolean).join("\n");
 
-const AGENT_MODE_LABELS: Record<AgentMode, string> = {
-  anything: "Antigravity",
-  "deep-research": "Deep Research",
-  "deep-research-max": "Deep Research Max"
+export const AGENT_MODES: Record<
+  AgentMode,
+  { label: string; description: string; model: string; icon: LucideIcon }
+> = {
+  antigravity: {
+    label: "Antigravity",
+    description: "Fast, plain managed agent for general-purpose work.",
+    model: "Antigravity preview",
+    icon: Bot
+  },
+  anything: {
+    label: "Anything",
+    description: "Antigravity with media creation and browser tools.",
+    model: "Antigravity preview",
+    icon: Sparkles
+  },
+  browser: {
+    label: "Browser",
+    description: "Headless navigation, screenshots, and website testing.",
+    model: "Antigravity preview",
+    icon: MonitorCheck
+  },
+  "deep-research": {
+    label: "Deep Research",
+    description: "Long-running research with sourced, structured reports.",
+    model: "Deep Research preview",
+    icon: Search
+  },
+  "deep-research-max": {
+    label: "Deep Research Max",
+    description: "Highest-effort research for complex investigations.",
+    model: "Deep Research Max preview",
+    icon: Gauge
+  }
 };
 
 export const Composer = ({
@@ -98,25 +134,50 @@ export const Composer = ({
   const [showOptions, setShowOptions] = useState(false);
   const [agentMenuOpen, setAgentMenuOpen] = useState(false);
   const agentMenuRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const lastInputEventRef = useRef<{ value: string; alignment: ComposerScrollAlignment } | null>(null);
+  const pasteTextPendingRef = useRef(false);
+  const inputResizeTimerRef = useRef<number | undefined>(undefined);
+
+  useLayoutEffect(() => {
+    const lastInput = lastInputEventRef.current;
+    const alignment = lastInput?.alignment ?? "start";
+    const textarea = inputRef.current;
+    if (textarea) resizeComposerTextarea(textarea, alignment);
+    if (!textarea) return;
+    const frame = window.requestAnimationFrame(() => {
+      textarea.scrollTop = alignment === "start" ? 0 : textarea.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [compose.input]);
 
   useEffect(() => {
     if (!agentMenuOpen) {
       return;
     }
-    const closeOnOutsideClick = (event: MouseEvent) => {
+    const closeOnOutsideClick = (event: PointerEvent) => {
       if (!agentMenuRef.current?.contains(event.target as Node)) {
         setAgentMenuOpen(false);
       }
     };
-    document.addEventListener("mousedown", closeOnOutsideClick);
-    return () => document.removeEventListener("mousedown", closeOnOutsideClick);
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setAgentMenuOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", closeOnOutsideClick, true);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick, true);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
   }, [agentMenuOpen]);
 
   useEffect(() => {
-    if (agentLocked) {
+    if (agentLocked || locked) {
       setAgentMenuOpen(false);
     }
-  }, [agentLocked]);
+  }, [agentLocked, locked]);
   const disabledPreviousInteractionId = useRef<string | undefined>(undefined);
   const disabledEnvironmentId = useRef<string | undefined>(undefined);
   const disabledEnvironmentWasSpecific = useRef(false);
@@ -130,13 +191,9 @@ export const Composer = ({
   const reusingLatestEnvironment = compose.reuseEnvironment && !manualEnvironment && autoEnvironmentId;
   const contextOverrideCount = explicitPreviousInteractionId ? 1 : compose.store && !compose.autoContinue ? 1 : 0;
   const environmentOverrideCount = compose.overrideEnvironment ? 1 : !compose.reuseEnvironment ? 1 : 0;
-  const deepResearch = compose.agentMode !== "anything";
-  const specializedToolsLocked = locked || agentLocked;
-  const specializedToolsTitle = agentLocked
-    ? "This conversation's Antigravity mode is fixed after its first run. Start a new chat to switch modes."
-    : compose.specializedToolsEnabled
-      ? "Use the Gemini Anything agent payload for this chat."
-      : "Use the raw Antigravity base agent for this chat.";
+  const deepResearch = compose.agentMode === "deep-research" || compose.agentMode === "deep-research-max";
+  const selectedAgent = AGENT_MODES[compose.agentMode];
+  const SelectedAgentIcon = selectedAgent.icon;
   const imageParts = compose.parts.filter((part): part is ImagePartDraft => part.kind === "image");
   const attachedImageCount = sentImageParts.length + imageParts.length;
   const optionCount =
@@ -371,11 +428,29 @@ export const Composer = ({
       )}
       <div className="composer-field" onKeyDown={submitOnEnter}>
         <TextArea
+          textareaRef={inputRef}
           value={compose.input}
-          rows={2}
+          rows={1}
           placeholder="Ask the agent to do something…  (Enter to run, Shift+Enter for newline)"
           disabled={locked}
-          onChange={(input) => setCompose((current) => ({ ...current, inputMode: "string", input }))}
+          onPaste={(event) => {
+            pasteTextPendingRef.current = Boolean(event.clipboardData.getData("text/plain"));
+          }}
+          onChange={(input) => {
+            const alignment: ComposerScrollAlignment = pasteTextPendingRef.current ? "start" : "end";
+            lastInputEventRef.current = {
+              value: input,
+              alignment,
+            };
+            pasteTextPendingRef.current = false;
+            setCompose((current) => ({ ...current, inputMode: "string", input }));
+            if (inputRef.current) resizeComposerTextarea(inputRef.current, alignment);
+            if (inputResizeTimerRef.current !== undefined) window.clearTimeout(inputResizeTimerRef.current);
+            inputResizeTimerRef.current = window.setTimeout(() => {
+              if (inputRef.current) resizeComposerTextarea(inputRef.current, alignment);
+              inputResizeTimerRef.current = undefined;
+            }, 32);
+          }}
         />
       </div>
 
@@ -401,74 +476,54 @@ export const Composer = ({
           />
         </label>
         <div className="composer-agent-cluster">
-          {!deepResearch && (
-            <label
-              className={`toggle composer-specialized-toggle ${compose.specializedToolsEnabled ? "on" : ""} ${
-                specializedToolsLocked ? "disabled" : ""
-              }`}
-              title={specializedToolsTitle}
-            >
-              <input
-                type="checkbox"
-                checked={compose.specializedToolsEnabled}
-                disabled={specializedToolsLocked}
-                onChange={(event) =>
-                  setCompose((current) => ({
-                    ...current,
-                    specializedToolsEnabled: event.target.checked
-                  }))
-                }
-              />
-              <span className="toggle-track" aria-hidden>
-                <span className="toggle-thumb" />
-              </span>
-              <Sparkles size={13} />
-              <span>{compose.specializedToolsEnabled ? "Anything" : "Plain AGY"}</span>
-            </label>
-          )}
-          <div className={`composer-agent ${deepResearch ? "active" : ""}`} ref={agentMenuRef}>
-            <span
-              className="composer-agent-label"
+          <div className={`composer-agent ${compose.agentMode !== "antigravity" ? "active" : ""}`} ref={agentMenuRef}>
+            <button
+              type="button"
+              className="composer-agent-trigger"
               title={
                 agentLocked
                   ? "This conversation's agent is fixed after its first run. Start a new chat to use a different agent."
-                  : deepResearch
-                    ? "Deep Research runs in the background and can take up to 60 minutes."
-                    : "The managed agent handling this prompt"
+                  : `${selectedAgent.description} ${selectedAgent.model}.`
               }
+              aria-label={`Agent: ${selectedAgent.label}`}
+              aria-expanded={agentMenuOpen}
+              disabled={locked || agentLocked}
+              onClick={() => setAgentMenuOpen((value) => !value)}
             >
-              {AGENT_MODE_LABELS[compose.agentMode]}
-            </span>
-            {!agentLocked && (
-              <button
-                type="button"
-                className="composer-agent-switch"
-                title="Change agent"
-                aria-label="Change agent"
-                aria-expanded={agentMenuOpen}
-                disabled={locked}
-                onClick={() => setAgentMenuOpen((value) => !value)}
-              >
-                <ChevronsUpDown size={12} />
-              </button>
-            )}
+              <span className="composer-agent-trigger-icon" aria-hidden>
+                <SelectedAgentIcon size={14} />
+              </span>
+              <span className="composer-agent-label">{selectedAgent.label}</span>
+              {!agentLocked && <ChevronsUpDown size={12} aria-hidden />}
+            </button>
             {!agentLocked && agentMenuOpen && (
-              <div className="composer-agent-menu" role="menu">
-                {(Object.keys(AGENT_MODE_LABELS) as AgentMode[]).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    role="menuitemradio"
-                    aria-checked={compose.agentMode === mode}
-                    className={compose.agentMode === mode ? "selected" : ""}
-                    onClick={() => {
-                      setCompose((current) => ({ ...current, agentMode: mode }));
-                      setAgentMenuOpen(false);
-                    }}
-                  >
-                    {AGENT_MODE_LABELS[mode]}
-                  </button>
-                ))}
+              <div className="composer-agent-menu" role="menu" aria-label="Choose an agent">
+                {(Object.keys(AGENT_MODES) as AgentMode[]).map((mode) => {
+                  const option = AGENT_MODES[mode];
+                  const OptionIcon = option.icon;
+                  return (
+                    <button
+                      key={mode}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={compose.agentMode === mode}
+                      className={compose.agentMode === mode ? "selected" : ""}
+                      onClick={() => {
+                        setCompose((current) => ({ ...current, agentMode: mode }));
+                        setAgentMenuOpen(false);
+                      }}
+                    >
+                      <span className="composer-agent-option-icon" aria-hidden>
+                        <OptionIcon size={16} />
+                      </span>
+                      <span className="composer-agent-option-copy">
+                        <strong>{option.label}</strong>
+                        <span>{option.description}</span>
+                        <small>{option.model}</small>
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>

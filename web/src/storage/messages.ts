@@ -12,6 +12,7 @@ export async function saveTranscript(sessionId: string, messages: Message[]): Pr
 
 export async function deleteSessionData(sessionId: string): Promise<void> {
   await idbDelete("messages", sessionId);
+  await idbDelete("projectHandles", sessionId);
   await idbDeleteMediaForSession(sessionId);
   for (const [id, url] of urlCache) {
     if (id.startsWith(`${sessionId}:`)) {

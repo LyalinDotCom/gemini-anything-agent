@@ -12,13 +12,13 @@ const session = (
     startedAt: number;
   }
 ): Session => ({
-  agentId: "gemini-anything-v1",
+  agentId: "gai-anything-v1",
   agentSnapshot: {
-    id: "gemini-anything-v1",
+    id: "gai-anything-v1",
     base_agent: "antigravity-preview-05-2026"
   },
   request: {
-    agent: "gemini-anything-v1",
+    agent: "gai-anything-v1",
     input: "make something",
     environment: "remote",
     store: true
@@ -50,9 +50,9 @@ describe("conversation continuity", () => {
       seed: { id: "int-server-failed", status: "failed", environment_id: "env-server-failed" }
     });
 
-    expect(latestContinuableSession([complete, running, failed, serverFailed], "gemini-anything-v1")?.localId)
+    expect(latestContinuableSession([complete, running, failed, serverFailed], "gai-anything-v1")?.localId)
       .toBe("complete");
-    expect(latestReusableEnvironmentSession([complete, running, failed, serverFailed], "gemini-anything-v1")?.localId)
+    expect(latestReusableEnvironmentSession([complete, running, failed, serverFailed], "gai-anything-v1")?.localId)
       .toBe("complete");
   });
 
@@ -62,7 +62,7 @@ describe("conversation continuity", () => {
 
     const request = withAutoContinuity(
       {
-        agent: "gemini-anything-v1",
+        agent: "gai-anything-v1",
         input: "fix it",
         environment: "remote",
         store: true
@@ -83,7 +83,7 @@ describe("conversation continuity", () => {
       localId: "latest",
       startedAt: 2,
       request: {
-        agent: "gemini-anything-v1",
+        agent: "gai-anything-v1",
         input: "make something",
         environment: "remote",
         store: false
@@ -92,7 +92,7 @@ describe("conversation continuity", () => {
 
     const request = withAutoContinuity(
       {
-        agent: "gemini-anything-v1",
+        agent: "gai-anything-v1",
         input: "inspect the files",
         environment: "remote",
         store: true

@@ -1,8 +1,8 @@
 # Gemini Anything Agent App
 
-Electron chat harness for one preconfigured Gemini Managed Agent.
+Electron chat harness for selectable Gemini Managed Agent profiles.
 
-Live media abilities use [`@lyalindotcom/gai`](https://www.npmjs.com/package/@lyalindotcom/gai).
+Live media abilities use [`@lyalindotcom/gai`](https://www.npmjs.com/package/@lyalindotcom/gai), and real browser testing uses the open-source Playwright agent CLI in the hosted Linux sandbox.
 
 ## Setup
 
@@ -32,15 +32,18 @@ npm run dev
 - Deploys or refreshes the managed agent on first chat run.
 - Mounts `agents/` files into the remote sandbox.
 - Copies the key into a generated plaintext sandbox `.env`.
-- Sends all chats to `GEMINI_ANYTHING_AGENT_ID`.
+- Defaults new chats to plain Antigravity; the agent card picker also offers the enhanced Anything profile (`GEMINI_ANYTHING_AGENT_ID`), Browser (`GEMINI_BROWSER_AGENT_ID`), and Deep Research profiles.
 - Reuses `previous_interaction_id` and `environment_id` by default.
 - Downloads generated media into `outputs/managed-agent/`.
+- Runs JavaScript websites in a headless browser and downloads requested screenshots, PDFs, traces, videos, and reports from `/workspace/output/browser/`.
+- Makes every example card select both its prompt and required agent; the two Browser examples select the dedicated Browser profile automatically.
 
 ## Key Warning
 
 - Local `.env` is plaintext.
 - The sandbox `.env` is plaintext.
 - `/.agents/bin/gai` sources the sandbox `.env`.
+- `/.agents/bin/browser` launches Playwright headlessly and does not read the Gemini key.
 
 ## Notes
 

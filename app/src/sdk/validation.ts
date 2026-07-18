@@ -22,6 +22,41 @@ const trimOptional = (value: unknown): unknown => {
   return trimmed.length > 0 ? trimmed : undefined;
 };
 
+// Google reserves these prefixes for first-party agents and models. The API
+// otherwise reports only a generic 400 "invalid argument", so reject them
+// locally with an actionable message before attempting deployment.
+const RESERVED_AGENT_ID_PREFIXES = [
+  "antigravity-",
+  "veo-",
+  "omni-",
+  "lyria-",
+  "imagen-",
+  "gemma-",
+  "gemini-",
+  "google-",
+  "youtube-",
+  "android-",
+  "chrome-",
+  "pixel-",
+  "waze-",
+  "fitbit-",
+  "nest-",
+  "kaggle-"
+] as const;
+
+const reservedAgentIdPrefix = (id: string): string | undefined => {
+  const normalized = id.trim().toLowerCase();
+  return RESERVED_AGENT_ID_PREFIXES.find((prefix) => normalized.startsWith(prefix));
+};
+
+/**
+ * True when the id can never be deployed as a custom agent. Configured ids
+ * from older installs (for example the pre-rename "gemini-anything-v1"
+ * default) must be remapped to a current default instead of being deleted
+ * and failing recreation.
+ */
+export const isReservedAgentId = (id: string): boolean => reservedAgentIdPrefix(id) !== undefined;
+
 export const toolTypeSchema = z.enum(["code_execution", "google_search", "url_context"]);
 
 export const toolConfigSchema: z.ZodType<ToolConfig> = z.union([
@@ -103,7 +138,11 @@ export const agentDefinitionSchema: z.ZodType<AgentDefinition> = z.object({
     .string()
     .trim()
     .min(1, "agent id is required")
-    .max(128, "agent id should stay under 128 characters"),
+    .max(128, "agent id should stay under 128 characters")
+    .refine(
+      (id) => !reservedAgentIdPrefix(id),
+      { message: "agent id cannot start with a Google-reserved prefix (for example 'gemini-')" }
+    ),
   description: z.preprocess(trimOptional, z.string().max(1024).optional()),
   base_agent: z.literal(ANTIGRAVITY_BASE_AGENT),
   system_instruction: z.preprocess(trimOptional, z.string().optional()),

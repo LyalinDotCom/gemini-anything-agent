@@ -469,8 +469,8 @@ describe("interaction recovery semantics", () => {
   const reconnectSession = (overrides: Partial<Session>): Session =>
     ({
       localId: "run-1",
-      agentId: "gemini-anything-v1",
-      request: { agent: "gemini-anything-v1", input: "hi", environment: "remote", store: true },
+      agentId: "gai-anything-v1",
+      request: { agent: "gai-anything-v1", input: "hi", environment: "remote", store: true },
       seed: { id: "int-1", status: "in_progress" },
       startedAt: 1,
       ...overrides
@@ -481,7 +481,7 @@ describe("interaction recovery semantics", () => {
     expect(
       sessionCanReconnect(
         reconnectSession({
-          request: { agent: "gemini-anything-v1", input: "hi", environment: "remote", store: false }
+          request: { agent: "gai-anything-v1", input: "hi", environment: "remote", store: false }
         })
       )
     ).toBe(false);

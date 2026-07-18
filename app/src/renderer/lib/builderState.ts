@@ -39,14 +39,13 @@ export type ImageAttachmentMeta = {
  * Build Sheet (the agent you are building), so it is not duplicated here.
  */
 /** Which managed agent handles the next run. */
-export type AgentMode = "anything" | "deep-research" | "deep-research-max";
+export type AgentMode = "antigravity" | "anything" | "browser" | "deep-research" | "deep-research-max";
 
 export type ComposeState = {
   inputMode: "string" | "parts";
   input: string;
   parts: InputPartDraft[];
   agentMode: AgentMode;
-  specializedToolsEnabled: boolean;
   store: boolean;
   autoContinue: boolean;
   reuseEnvironment: boolean;
@@ -82,6 +81,12 @@ export type Session = {
   imageAttachments?: ImageAttachmentMeta[];
   /** Set when this run was started via "Continue" from another session. */
   parentLocalId?: string;
+  /**
+   * Original agent id when the session was renamed by the legacy-agent
+   * migration. Interactions in this session were created under that agent, so
+   * continuing from them must start a fresh server-side chain.
+   */
+  migratedFromAgentId?: string;
 };
 
 export const uid = (): string => Math.random().toString(36).slice(2, 10);
@@ -90,8 +95,7 @@ export const initialCompose: ComposeState = {
   inputMode: "string",
   input: "",
   parts: [],
-  agentMode: "anything",
-  specializedToolsEnabled: true,
+  agentMode: "antigravity",
   store: true,
   autoContinue: true,
   reuseEnvironment: true,

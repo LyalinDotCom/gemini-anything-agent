@@ -4,6 +4,7 @@ import type { Message } from "../state/types";
 import { T } from "../tokens";
 import { Icon } from "./atoms";
 import { MessageBubble } from "./MessageBubble";
+import { SamplePromptGallery } from "./SamplePromptGallery";
 
 const EMPTY: Message[] = [];
 
@@ -15,6 +16,7 @@ export function ChatView({
   onOpenResourcePath?: (path: string) => void;
 }) {
   const messages = useStore((s) => s.messages[sessionId] ?? EMPTY);
+  const queueRetry = useStore((s) => s.queueRetry);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
 
@@ -48,13 +50,17 @@ export function ChatView({
               <Icon name="sparkle" size={24} />
             </span>
             <h2 style={{ margin: 0, fontSize: 19, fontWeight: 700 }}>What are we doing today?</h2>
-            <p style={{ margin: 0, color: T.textDim, fontSize: 14, textAlign: "center", maxWidth: 420 }}>
-              Ask questions, write and run code, research the web, or generate images — one remote agent figures out
-              what you need.
-            </p>
+            <SamplePromptGallery sessionId={sessionId} />
           </div>
         ) : (
-          messages.map((m) => <MessageBubble key={m.id} message={m} onOpenResourcePath={onOpenResourcePath} />)
+          messages.map((m, index) => <MessageBubble
+            key={m.id}
+            message={m}
+            onOpenResourcePath={onOpenResourcePath}
+            onRetry={m.role === "assistant" && (m.status === "error" || m.status === "stopped")
+              ? () => queueRetry(sessionId, [...messages.slice(0, index)].reverse().find((candidate) => candidate.role === "user"))
+              : undefined}
+          />)
         )}
       </div>
     </div>

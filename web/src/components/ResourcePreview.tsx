@@ -26,8 +26,23 @@ function useResourceUrl(file: OutputFileRecord | null): string | null {
   return url;
 }
 
+function useResourceText(file: OutputFileRecord | null, url: string | null): string | null {
+  const [text, setText] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setText(null);
+    if (!file || file.kind !== "text" || !url) return () => { alive = false; };
+    void fetch(url).then((response) => response.text()).then((value) => {
+      if (alive) setText(value.length > 2_000_000 ? `${value.slice(0, 2_000_000)}\n\n[Preview truncated at 2 MB]` : value);
+    });
+    return () => { alive = false; };
+  }, [file, url]);
+  return text;
+}
+
 export function ResourceLightbox({ file, onClose }: { file: OutputFileRecord | null; onClose: () => void }) {
   const url = useResourceUrl(file);
+  const text = useResourceText(file, url);
   if (!file) return null;
 
   return (
@@ -112,6 +127,17 @@ export function ResourceLightbox({ file, onClose }: { file: OutputFileRecord | n
             src={url}
             style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: T.radiusSm }}
           />
+        )}
+        {url && file.kind === "html" && (
+          <iframe
+            src={url}
+            title={file.label}
+            sandbox="allow-scripts"
+            style={{ width: "100%", height: "100%", border: 0, borderRadius: T.radiusSm, background: "white" }}
+          />
+        )}
+        {url && file.kind === "text" && text !== null && (
+          <pre style={{ width: "100%", height: "100%", boxSizing: "border-box", overflow: "auto", margin: 0, padding: 18, borderRadius: T.radiusSm, background: T.bg, color: T.text, font: `12.5px/1.55 ${T.mono}`, whiteSpace: "pre-wrap" }}>{text}</pre>
         )}
       </div>
     </div>

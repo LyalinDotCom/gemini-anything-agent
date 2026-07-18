@@ -1,9 +1,9 @@
 # AGENTS.md — gemini-anything-agent
 
-One repo, one agent, multiple UIs:
+One repo, one shared agent payload, multiple selectable profiles and UIs:
 
 - `cli/` — source of the published npm CLI **[`@lyalindotcom/gai`](https://www.npmjs.com/package/@lyalindotcom/gai)** (bin: `gai`) — all media capability (image, video, TTS, music, transcription)
-- `agents/` — the managed-agent payload (AGENTS.md, `bin/gai` launcher, skill) — **the single source of truth, SHARED by both UIs**
+- `agents/` — the managed-agent payload (AGENTS.md, media/browser launchers, skills) — **the single source of truth, SHARED by every profile and both UIs**
 - `app/` — Electron chat harness (reads `agents/` from disk at deploy time)
 - `web/` — static browser chat app, Firebase-hosted, user-supplied key (bundles `agents/` via Vite `?raw` imports)
 

@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ -f /.env ]; then
+  set -a
+  . /.env
+  set +a
+fi
+
+export BROWSER_PACKAGE="${GEMINI_ANYTHING_BROWSER_PACKAGE:-@playwright/cli}"
+export BROWSER_VERSION="${GEMINI_ANYTHING_BROWSER_VERSION:-latest}"
+export NODE_USE_ENV_PROXY="${NODE_USE_ENV_PROXY:-1}"
+export NODE_NO_WARNINGS="${NODE_NO_WARNINGS:-1}"
+export WORKSPACE_ROOT="${WORKSPACE_ROOT:-/workspace}"
+export BROWSER_CACHE_ROOT="${GEMINI_ANYTHING_BROWSER_CACHE_ROOT:-/tmp/gemini-anything-browser}"
+# Browser/npm caches are disposable and can be hundreds of MB. Keeping them
+# outside /workspace prevents environment snapshot downloads (used by the app
+# to show output files) from being dominated by Chromium cache data. Override
+# the managed VM's workspace-oriented cache defaults; browser-specific env
+# variables remain available when a different location is explicitly needed.
+export NPM_CONFIG_CACHE="${GEMINI_ANYTHING_BROWSER_NPM_CACHE:-$BROWSER_CACHE_ROOT/npm}"
+export npm_config_cache="$NPM_CONFIG_CACHE"
+export npm_config_loglevel="${npm_config_loglevel:-error}"
+export npm_config_update_notifier="${npm_config_update_notifier:-false}"
+export npm_config_fund="${npm_config_fund:-false}"
+export npm_config_audit="${npm_config_audit:-false}"
+export NO_UPDATE_NOTIFIER="${NO_UPDATE_NOTIFIER:-1}"
+export PLAYWRIGHT_BROWSERS_PATH="${GEMINI_ANYTHING_BROWSER_BINARIES_PATH:-$BROWSER_CACHE_ROOT/ms-playwright}"
+export PLAYWRIGHT_MCP_HEADLESS="${PLAYWRIGHT_MCP_HEADLESS:-true}"
+
+mkdir -p "$NPM_CONFIG_CACHE"
+mkdir -p "$PLAYWRIGHT_BROWSERS_PATH"
+mkdir -p "$WORKSPACE_ROOT/output/browser"
+
+exec npx -y "${BROWSER_PACKAGE}@${BROWSER_VERSION}" "$@"

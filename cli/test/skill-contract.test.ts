@@ -69,6 +69,10 @@ describe("agent skill contract", () => {
     expect(browserSkill).toContain("Ask before submitting purchases");
     expect(browserLauncher).toContain("@playwright/cli");
     expect(browserLauncher).toContain("PLAYWRIGHT_MCP_HEADLESS");
+    expect(browserLauncher).toContain('PLAYWRIGHT_MCP_SANDBOX="${PLAYWRIGHT_MCP_SANDBOX:-false}"');
+    expect(browserLauncher).toContain('"browserName":"chromium"');
+    expect(browserLauncher).toContain('"chromiumSandbox":false');
+    expect(browserLauncher).toContain('install-browser chromium --only-shell');
     expect(browserLauncher).toContain('exec npx -y "${BROWSER_PACKAGE}@${BROWSER_VERSION}"');
   });
 });

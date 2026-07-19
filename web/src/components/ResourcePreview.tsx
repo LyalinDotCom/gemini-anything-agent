@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import type { OutputFileRecord } from "../state/types";
-import { getMediaUrl } from "../storage/messages";
+import { getMediaBase64, getMediaUrl } from "../storage/messages";
 import { T } from "../tokens";
 import { Icon, IconButton, Spinner } from "./atoms";
+import { buildResourceUrlMap, rewriteHtmlResourceUrls } from "./resourceUrls";
 
 function fileName(file: OutputFileRecord): string {
   return file.label.split("/").filter(Boolean).pop() || "resource";
@@ -40,9 +41,61 @@ function useResourceText(file: OutputFileRecord | null, url: string | null): str
   return text;
 }
 
-export function ResourceLightbox({ file, onClose }: { file: OutputFileRecord | null; onClose: () => void }) {
+function useHtmlDocument(
+  file: OutputFileRecord | null,
+  files: readonly OutputFileRecord[],
+  url: string | null,
+): string | null {
+  const [document, setDocument] = useState<string | null>(null);
+  const fileSignature = files.map((entry) => `${entry.mediaId}:${entry.label}:${entry.path}`).join("|");
+  useEffect(() => {
+    let alive = true;
+    setDocument(null);
+    if (!file || file.kind !== "html" || !url) return () => { alive = false; };
+
+    void fetch(url).then((response) => response.text()).then(async (html) => {
+      // A script-only sandbox has an opaque origin, so it cannot read object URLs
+      // created by the parent page. First mark referenced siblings with lightweight
+      // tokens, then inline only those files as data URLs.
+      const tokensByMediaId = new Map(files.map((entry) => [
+        entry.mediaId,
+        `gai-resource:${encodeURIComponent(entry.mediaId)}`,
+      ]));
+      const tokenAssets = buildResourceUrlMap(files, tokensByMediaId);
+      const tokenDocument = rewriteHtmlResourceUrls(html, file.label || file.path, tokenAssets);
+      const referencedIds = new Set<string>();
+      for (const match of tokenDocument.matchAll(/gai-resource:([^"'()\s?#]+)/g)) {
+        try {
+          referencedIds.add(decodeURIComponent(match[1]));
+        } catch {
+          // Ignore malformed generated references and leave them unchanged.
+        }
+      }
+
+      const entries = await Promise.all(files.map(async (entry) => {
+        if (!referencedIds.has(entry.mediaId)) return [entry.mediaId, null] as const;
+        const media = await getMediaBase64(entry.mediaId);
+        return [entry.mediaId, media ? `data:${media.mimeType || entry.mimeType};base64,${media.base64}` : null] as const;
+      }));
+      if (!alive) return;
+      const urls = new Map(entries.filter((entry): entry is readonly [string, string] => Boolean(entry[1])));
+      const assets = buildResourceUrlMap(files, urls);
+      setDocument(rewriteHtmlResourceUrls(html, file.label || file.path, assets));
+    }).catch(() => {
+      if (alive) setDocument("<!doctype html><p>Unable to load this HTML preview.</p>");
+    });
+
+    return () => { alive = false; };
+    // The signature tracks file identity without retriggering for an equivalent array.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [file?.mediaId, file?.kind, file?.label, file?.path, url, fileSignature]);
+  return document;
+}
+
+export function ResourceLightbox({ file, files, onClose }: { file: OutputFileRecord | null; files: readonly OutputFileRecord[]; onClose: () => void }) {
   const url = useResourceUrl(file);
   const text = useResourceText(file, url);
+  const htmlDocument = useHtmlDocument(file, files, url);
   if (!file) return null;
 
   return (
@@ -128,9 +181,9 @@ export function ResourceLightbox({ file, onClose }: { file: OutputFileRecord | n
             style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: T.radiusSm }}
           />
         )}
-        {url && file.kind === "html" && (
+        {url && file.kind === "html" && htmlDocument !== null && (
           <iframe
-            src={url}
+            srcDoc={htmlDocument}
             title={file.label}
             sandbox="allow-scripts"
             style={{ width: "100%", height: "100%", border: 0, borderRadius: T.radiusSm, background: "white" }}

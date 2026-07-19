@@ -23,5 +23,9 @@ export function resizeComposerTextarea(
   const naturalHeight = textarea.scrollHeight + pixels(style.borderTopWidth) + pixels(style.borderBottomWidth);
   textarea.style.height = `${Math.max(minHeight, Math.min(naturalHeight, maxHeight))}px`;
   textarea.style.overflowY = naturalHeight > maxHeight ? "auto" : "hidden";
-  textarea.scrollTop = alignment === "start" ? 0 : textarea.scrollHeight;
+  // Read clientHeight after applying the cap so layout is resolved before we
+  // choose the end position. Assigning scrollHeight directly can race the
+  // height change and get clamped to zero in Chromium.
+  const maxScrollTop = Math.max(0, textarea.scrollHeight - textarea.clientHeight);
+  textarea.scrollTop = alignment === "start" ? 0 : maxScrollTop;
 }

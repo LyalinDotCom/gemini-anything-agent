@@ -9,6 +9,8 @@ describe("shared managed-agent payload", () => {
     expect(byTarget.get("/.agents/AGENTS.md")).toContain("Headless browser wrapper");
     expect(byTarget.get("/.agents/bin/gai")).toContain("@lyalindotcom/gai");
     expect(byTarget.get("/.agents/bin/browser")).toContain("@playwright/cli");
+    expect(byTarget.get("/.agents/bin/browser")).toContain('PLAYWRIGHT_MCP_SANDBOX="${PLAYWRIGHT_MCP_SANDBOX:-false}"');
+    expect(byTarget.get("/.agents/bin/browser")).toContain('"browserName":"chromium"');
     expect(byTarget.get("/.agents/skills/gemini-anything/SKILL.md")).toContain("Gemini Anything Media Skill");
     expect(byTarget.get("/.agents/skills/browser-testing/SKILL.md")).toContain("Browser Testing Skill");
   });

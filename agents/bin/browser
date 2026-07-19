@@ -27,9 +27,31 @@ export npm_config_audit="${npm_config_audit:-false}"
 export NO_UPDATE_NOTIFIER="${NO_UPDATE_NOTIFIER:-1}"
 export PLAYWRIGHT_BROWSERS_PATH="${GEMINI_ANYTHING_BROWSER_BINARIES_PATH:-$BROWSER_CACHE_ROOT/ms-playwright}"
 export PLAYWRIGHT_MCP_HEADLESS="${PLAYWRIGHT_MCP_HEADLESS:-true}"
+# Managed-agent Linux containers execute as root. Playwright's official CLI
+# maps this environment variable to chromiumSandbox=false / --no-sandbox.
+export PLAYWRIGHT_MCP_SANDBOX="${PLAYWRIGHT_MCP_SANDBOX:-false}"
+export PLAYWRIGHT_MCP_CONFIG="${PLAYWRIGHT_MCP_CONFIG:-$BROWSER_CACHE_ROOT/cli.config.json}"
 
 mkdir -p "$NPM_CONFIG_CACHE"
 mkdir -p "$PLAYWRIGHT_BROWSERS_PATH"
 mkdir -p "$WORKSPACE_ROOT/output/browser"
+
+# Select the Playwright-managed Chromium executable instead of assuming that a
+# system Chrome channel exists in every managed VM. Keep this disposable config
+# beside the browser cache so it never leaks into workspace snapshots.
+if [ ! -f "$PLAYWRIGHT_MCP_CONFIG" ]; then
+  printf '%s\n' '{"browser":{"browserName":"chromium","launchOptions":{"chromiumSandbox":false}}}' > "$PLAYWRIGHT_MCP_CONFIG"
+fi
+
+# Fresh managed VMs do not consistently include system Chrome. The official
+# installer is idempotent and reuses PLAYWRIGHT_BROWSERS_PATH, so an `open`
+# command prepares the matching Playwright-managed Chromium build before the
+# session daemon starts. Other commands stay fast and reuse that installation.
+for argument in "$@"; do
+  if [ "$argument" = "open" ]; then
+    npx -y "${BROWSER_PACKAGE}@${BROWSER_VERSION}" install-browser chromium --only-shell
+    break
+  fi
+done
 
 exec npx -y "${BROWSER_PACKAGE}@${BROWSER_VERSION}" "$@"

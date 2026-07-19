@@ -567,6 +567,7 @@ export function AppShell() {
       {aboutOpen && <AboutPanel onClose={() => setAboutOpen(false)} />}
       <ResourceLightbox
         file={previewFile}
+        files={activeFiles}
         onClose={() => setPreviewFile(null)}
       />
     </div>

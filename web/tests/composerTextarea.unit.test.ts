@@ -10,8 +10,9 @@ const computedStyle = {
   borderBottomWidth: "0px",
 };
 
-const textarea = (scrollHeight: number) => ({
+const textarea = (scrollHeight: number, clientHeight = 108) => ({
   scrollHeight,
+  clientHeight,
   scrollTop: -1,
   style: { height: "", overflowY: "" },
 }) as unknown as HTMLTextAreaElement;
@@ -47,6 +48,6 @@ describe("composer textarea sizing", () => {
 
     const typed = textarea(220);
     resizeComposerTextarea(typed, "end");
-    expect(typed.scrollTop).toBe(220);
+    expect(typed.scrollTop).toBe(112);
   });
 });

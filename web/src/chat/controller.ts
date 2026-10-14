@@ -377,7 +377,7 @@ export async function sendTurn(sessionId: string, turn: TurnInput): Promise<void
           : `Using ${profile.label} (${agentName})`,
         detail: profile.managed && agentInfo
           ? `profile: ${profile.label}\nagent: ${agentName}\nbase: ${agentInfo.baseAgent}\npayload: ${agentInfo.payloadFingerprint}\ninstalled: shared agents/ payload (AGENTS.md, media + browser launchers and skills) + API key`
-          : `profile: ${profile.label}\nagent: ${agentName}\nmodel: ${profile.model}`,
+          : `profile: ${profile.label}\nagent: ${agentName}\nmodel: ${options.agentModel}`,
       });
       flush();
     }

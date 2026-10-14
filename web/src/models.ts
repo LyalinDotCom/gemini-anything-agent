@@ -19,3 +19,12 @@ export const CHAT_AGENT_ID = "gai-anything-v1";
 export const BROWSER_AGENT_ID = "gai-browser-v1";
 
 export const APP_NAME = "Gemini Anything";
+
+export const HARNESS_MODELS = [
+  { id: MODELS.text, label: "Gemini 3.8 Flash" },
+  { id: MODELS.reasoning, label: "Gemini 4 Argon" },
+] as const;
+export type HarnessModel = typeof HARNESS_MODELS[number]["id"];
+export function isHarnessModel(value: unknown): value is HarnessModel {
+  return HARNESS_MODELS.some(model => model.id === value);
+}

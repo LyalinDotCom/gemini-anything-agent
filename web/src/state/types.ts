@@ -1,4 +1,4 @@
-import { MODELS } from "../models";
+import { MODELS, type HarnessModel } from "../models";
 import type { LargeImageTemplate } from "../../../shared/largeImageProfile";
 import type { Usage } from "../gemini/streamAdapter";
 import type { AgentMode } from "../agentProfiles";
@@ -7,7 +7,7 @@ import type { Object3dMethod } from "../../../shared/object3dProfile";
 export type SessionMode = "chat" | "deep-research";
 
 export interface RunOptions {
-  agentModel: string;
+  agentModel: HarnessModel;
   store: boolean;
   autoContinue: boolean;
   reuseEnvironment: boolean;

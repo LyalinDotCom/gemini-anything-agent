@@ -10,6 +10,7 @@ import { blobToDataUrl, dataUrlMime, dataUrlToBase64, fileToCompressedDataUrl } 
 import { VoiceRecorder } from "../utils/recorder";
 import { Icon, IconButton, Spinner } from "./atoms";
 import { AgentPicker } from "./AgentPicker";
+import { ModelSelector } from "./ModelSelector";
 import { RunOptionsPanel } from "./RunOptionsPanel";
 import { profileForSession } from "../agentProfiles";
 import { effectiveRunOptions, runOptionCount } from "../state/runOptions";
@@ -452,8 +453,10 @@ export function Composer({ sessionId }: { sessionId: string; onPreviewModel?: (f
             </button>
           )}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 7 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 7, marginTop: 7 }}>
           <AgentPicker sessionId={sessionId} disabled={busyHere} />
+          {!research && <ModelSelector value={options.agentModel} disabled={busyHere || Boolean(session?.pending)}
+            onChange={agentModel => useStore.getState().patchSession(sessionId, { runOptions: { ...options, agentModel } })} />}
           <button
             type="button"
             disabled={busyHere}

@@ -1,4 +1,3 @@
-import { MODELS } from "../models";
 import { profileForSession } from "../agentProfiles";
 import { effectiveRunOptions } from "../state/runOptions";
 import { useStore } from "../state/store";
@@ -35,7 +34,6 @@ export function RunOptionsPanel({ sessionId }: { sessionId: string }) {
       <p style={{ margin: "0 0 7px", color: T.textFaint, fontSize: 11.5 }}>
         {research ? "Deep Research always stores history and runs in the background." : durable ? `${profile.label} stores its long run so it can resume after reload.` : "Defaults preserve chat context and the remote sandbox."}
       </p>
-      {!research && <label style={{ ...row, flexDirection: "column", alignItems: "flex-start", gap: 4 }}><span>Reasoning model</span><select aria-label="Reasoning model" value={options.agentModel} onChange={(event) => set({agentModel:event.target.value})} style={input}><option value={MODELS.text}>Gemini 3.8 Flash</option><option value={MODELS.reasoning}>Gemini 4 Argon</option></select></label>}
       <Toggle label="Store interaction history" checked={research || options.store} disabled={research || durable} onChange={(store) => set({ store, background: store ? options.background : false, autoContinue: store ? options.autoContinue : false })} />
       <Toggle label="Continue chat context" checked={research || (options.store && options.autoContinue)} disabled={research || !options.store} onChange={(autoContinue) => set({ autoContinue, previousInteractionId: autoContinue ? "" : options.previousInteractionId })} />
       <Toggle label="Background execution" checked={research || (options.store && options.background)} disabled={research || durable || !options.store} onChange={(background) => set({ background })} />

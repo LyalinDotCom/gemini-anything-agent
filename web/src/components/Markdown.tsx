@@ -104,7 +104,7 @@ export const Markdown = memo(function Markdown({
           a: ({ href, children }) => {
             let resourcePath: string | null = null;
             if (href?.startsWith("resource:")) {
-              try { const decoded = decodeURIComponent(href.slice("resource:".length)); if (decoded.startsWith("/workspace/output/")) resourcePath = decoded; } catch { /* malformed model output stays plain text */ }
+              try { const decoded = decodeURIComponent(href.slice("resource:".length)); if (decoded.startsWith("/workspace/output/") && !decoded.split("/").some(part => part === ".." || part === ".")) resourcePath = decoded; } catch { /* malformed model output stays plain text */ }
               if (!resourcePath) return <span>{children}</span>;
             }
             return resourcePath ? (

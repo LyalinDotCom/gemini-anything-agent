@@ -28,3 +28,5 @@ test('Markdown links inside code remain literal code', () => {
 });
 
 test("malformed resource links cannot crash rendering or open private configuration", () => { const html=renderToStaticMarkup(<Markdown text="[Bad](resource:%E0%A4) [Private](resource:%2F.env)" />); expect(html).toContain("Bad</span>"); expect(html).toContain("Private</span>"); expect(html).not.toContain("<button"); });
+
+test("resource links cannot traverse outside the output directory", () => { const html=renderToStaticMarkup(<Markdown text="[Private](/workspace/output/../.env)" />); expect(html).toContain("Private</span>"); expect(html).not.toContain("<button"); });

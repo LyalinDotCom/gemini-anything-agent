@@ -2,7 +2,7 @@ import { expect, test, vi } from 'vitest';
 const mock = vi.hoisted(() => ({ ensure:vi.fn(), create: vi.fn().mockRejectedValue({status:503,message:'fixture outage'}) }));
 vi.mock('../src/gemini/client', () => ({ ai: () => ({interactions:{create:mock.create}}), resolveApiKey: () => 'fixture-key' }));
 vi.mock('../src/gemini/agents', () => ({ agentWorkflowFingerprint: (model:string) => model, ensureManagedAgent: mock.ensure }));
-vi.mock('../src/storage/messages', () => ({putMedia:vi.fn(),mediaId:()=>'',listMessages:async()=>[],saveMessages:async()=>{},saveTranscript:async()=>{}}));
+vi.mock('../src/storage/messages', () => ({loadTranscript:async()=>[],putMedia:vi.fn(),mediaId:()=>'',listMessages:async()=>[],saveMessages:async()=>{},saveTranscript:async()=>{}}));
 import { useStore } from '../src/state/store';
 import { sendTurn } from '../src/chat/controller';
 import { HARNESS_MODELS, MODELS } from '../src/models';
@@ -26,22 +26,22 @@ test.each(HARNESS_MODELS)('baseline controller sends $label through agent_config
 
 test('custom-agent retries keep the creation model and cannot add runtime overrides', async()=>{
  mock.create.mockClear();mock.ensure.mockClear();
- mock.ensure.mockResolvedValue({agentId:'gai-anything-v1-4-argon',baseAgent:MODELS.chatAgentBase,reasoningModel:MODELS.reasoning,degraded:false,action:'reused'});
- const sid=useStore.getState().createSession('chat','anything');
- useStore.getState().patchSession(sid,{agentMode:'anything',runOptions:{...DEFAULT_RUN_OPTIONS,agentModel:MODELS.reasoning}});
+ mock.ensure.mockResolvedValue({agentId:'gaa-anywhere-v1-4-argon',baseAgent:MODELS.chatAgentBase,reasoningModel:MODELS.reasoning,degraded:false,action:'reused'});
+ const sid=useStore.getState().createSession('chat','anywhere');
+ useStore.getState().patchSession(sid,{agentMode:'anywhere',runOptions:{...DEFAULT_RUN_OPTIONS,agentModel:MODELS.reasoning}});
  await sendTurn(sid,{text:'First custom-agent turn.'});
  useStore.getState().patchSession(sid,{runOptions:{...DEFAULT_RUN_OPTIONS,agentModel:MODELS.text}});
  await sendTurn(sid,{text:'Retry custom-agent turn.'});
  expect(mock.ensure.mock.calls.map(call=>call[3])).toEqual([MODELS.reasoning,MODELS.reasoning]);
- for(const [body] of mock.create.mock.calls){expect(body.agent).toBe('gai-anything-v1-4-argon');expect(body.agent_config).toBeUndefined();}
+ for(const [body] of mock.create.mock.calls){expect(body.agent).toBe('gaa-anywhere-v1-4-argon');expect(body.agent_config).toBeUndefined();}
 });
 test('the pinned model survives the actual Zustand persistence and rehydration path', async()=>{
  const sid=useStore.getState().createSession();
  useStore.getState().patchSession(sid,{modelUsed:MODELS.reasoning,runOptions:{...DEFAULT_RUN_OPTIONS,agentModel:MODELS.text}});
- const snapshot=localStorage.getItem('aichat-store')!;
+ const snapshot=localStorage.getItem('gaa-store')!;
  expect(JSON.parse(snapshot).state.sessions[sid].modelUsed).toBe(MODELS.reasoning);
  useStore.setState({sessions:{},sessionOrder:[],activeSessionId:null});
- localStorage.setItem('aichat-store',snapshot);
+ localStorage.setItem('gaa-store',snapshot);
  await useStore.persist.rehydrate();
  expect(useStore.getState().sessions[sid].modelUsed).toBe(MODELS.reasoning);
 });

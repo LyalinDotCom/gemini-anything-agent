@@ -1,5 +1,5 @@
 /** Shared 3D View context; discover CLI capabilities at runtime. */
-export const OBJECT3D_AGENT_ID = "gai-object3d-v1";
+export const OBJECT3D_AGENT_ID = "gaa-object3d-v1";
 export const OBJECT3D_VIDEO_MODEL = "gemini-omni-1.1-flash";
 export const OBJECT3D_INVOCATION = [
   "Act as a photographic 3D View specialist. Read `/.agents/skills/photo-to-3d/SKILL.md` before starting.",

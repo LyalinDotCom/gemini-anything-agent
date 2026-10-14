@@ -1,4 +1,4 @@
-// Live tests (real API, real key; skip-not-fail without GEMINI_API_KEY — gaicli style).
+// Live tests (real API, real key; skip-not-fail without GEMINI_API_KEY — SDK style).
 import { describe, expect, test } from "vitest";
 import { ai } from "../src/gemini/client";
 import { buildInteractionParams, tools } from "../src/gemini/interactionParams";

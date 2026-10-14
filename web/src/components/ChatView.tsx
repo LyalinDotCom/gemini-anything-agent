@@ -19,11 +19,14 @@ export function ChatView({
   const queueRetry = useStore((s) => s.queueRetry);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
+  const previousView = useRef({ sessionId, count: 0 });
 
   useEffect(() => {
     const el = scrollerRef.current;
-    if (el && pinnedRef.current) el.scrollTop = el.scrollHeight;
-  }, [messages]);
+    if (previousView.current.sessionId !== sessionId || previousView.current.count === 0) pinnedRef.current = true;
+    if (el && pinnedRef.current) el.scrollTop = messages.length ? el.scrollHeight : 0;
+    previousView.current = { sessionId, count: messages.length };
+  }, [messages, sessionId]);
 
   return (
     <div

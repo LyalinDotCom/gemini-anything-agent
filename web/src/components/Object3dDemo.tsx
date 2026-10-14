@@ -11,7 +11,7 @@ export default function Object3dDemo() {
       <style>{`.photo-object-layout{display:grid;grid-template-columns:minmax(220px,300px) minmax(0,1fr);gap:28px;flex:1}.photo-object-viewer{min-width:0;height:max(500px,calc(100dvh - 200px))}@media(max-width:760px){.photo-object-layout{grid-template-columns:minmax(0,1fr)}.photo-object-viewer{grid-row:1;height:500px}}`}</style>
       <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
         <div>
-          <div style={{ font: `11px ${T.mono}`, color: "#8cb5ad", letterSpacing: "0.12em", marginBottom: 9 }}>GEMINI ANYTHING / 3D VIEW</div>
+          <div style={{ font: `11px ${T.mono}`, color: "#8cb5ad", letterSpacing: "0.12em", marginBottom: 9 }}>GEMINI ANYWHERE AGENT / 3D VIEW</div>
           <h1 style={{ margin: 0, fontSize: "clamp(25px, 3.5vw, 42px)", fontWeight: 500, letterSpacing: "-0.045em" }}>A photograph. Every side.</h1>
         </div>
         <a href="/" style={button}>Create with your own photo ↗</a>

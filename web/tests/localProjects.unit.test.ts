@@ -63,7 +63,7 @@ describe("local project sync", () => {
     await idbPut("projectHandles", { id, handle: root as unknown as FileSystemDirectoryHandle });
     const result = await syncEntriesToProject(id, [], false);
     expect(result?.metadataWritten).toBe(true);
-    const metadata = root.children.get(".gemini-anything");
+    const metadata = root.children.get(".gaa");
     expect(new TextDecoder().decode(metadata?.files.get("conversation.md"))).toContain("Build the demo");
     expect(JSON.parse(new TextDecoder().decode(metadata?.files.get("conversation.json"))).session.id).toBe(id);
     useStore.getState().deleteSession(id);

@@ -2,6 +2,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { T } from "../tokens";
 
 const ICON_PATHS: Record<string, string> = {
+  edit: "M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L9 17l-4 1 1-4Z",
   plus: "M12 5v14M5 12h14",
   send: "M5 12 20 5l-3.5 7L20 19 5 12Zm0 0h8",
   stop: "M7 7h10v10H7z",

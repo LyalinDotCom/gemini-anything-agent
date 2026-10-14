@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { isUntouchedSession, useStore } from "../state/store";
+import { useRef, useState } from "react";
+import { useStore } from "../state/store";
 import { T } from "../tokens";
 import { Icon, IconButton, Spinner } from "./atoms";
 import { profileForSession } from "../agentProfiles";
@@ -19,13 +19,16 @@ export function Sidebar({
   onOpenSettings,
   onOpenAbout,
   onNavigate,
+  onClose,
 }: {
   onOpenSettings: () => void;
   onOpenAbout: () => void;
   onNavigate?: () => void;
+  onClose?: () => void;
 }) {
   const sessionOrder = useStore((s) => s.sessionOrder);
   const sessions = useStore((s) => s.sessions);
+  const drafts = useStore((s) => s.draftText);
   const activeSessionId = useStore((s) => s.activeSessionId);
   const createSession = useStore((s) => s.createSession);
   const deleteSession = useStore((s) => s.deleteSession);
@@ -33,6 +36,7 @@ export function Sidebar({
   const renameSession = useStore((s) => s.renameSession);
   const reorderSession = useStore((s) => s.reorderSession);
   const streaming = useStore((s) => s.streaming);
+  const cancelledEdit = useRef(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -50,6 +54,10 @@ export function Sidebar({
       }}
     >
       <div style={{ padding: 12 }}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+          <div style={{flex:1}}><strong style={{fontSize:15}}>GAA</strong><div style={{fontSize:11,color:T.textFaint,marginTop:3}}>Gemini Anywhere Agent</div></div>
+          {onClose && <IconButton name="x" label="Close chat history" onClick={onClose} />}
+        </div>
         <button
           type="button"
           onClick={() => {
@@ -83,6 +91,8 @@ export function Sidebar({
           sessionOrder.map((id) => {
             const session = sessions[id];
             if (!session) return null;
+            const preview = drafts[id]?.trim().replace(/\s+/g, " ").slice(0, 42);
+            const displayTitle = !session.titleManuallySet && session.title === "New chat" && preview ? preview : session.title;
             const active = id === activeSessionId;
             const profile = profileForSession(session);
             return (
@@ -123,6 +133,7 @@ export function Sidebar({
                   padding: "9px 10px",
                   marginBottom: 2,
                   borderRadius: T.radiusSm,
+                  minHeight: 44,
                   background: active ? T.bgHover : "transparent",
                   opacity: draggingId === id ? 0.5 : 1,
                   cursor: "pointer",
@@ -142,12 +153,13 @@ export function Sidebar({
                     onClick={(e) => e.stopPropagation()}
                     onChange={(e) => setDraftTitle(e.target.value)}
                     onBlur={() => {
-                      if (draftTitle.trim()) renameSession(id, draftTitle.trim());
+                      if (!cancelledEdit.current && draftTitle.trim() && draftTitle.trim() !== session.title) renameSession(id, draftTitle.trim());
+                      cancelledEdit.current = false;
                       setEditingId(null);
                     }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                      if (e.key === "Escape") setEditingId(null);
+                      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancelledEdit.current = true; setEditingId(null); }
                     }}
                     style={{
                       flex: 1,
@@ -162,15 +174,18 @@ export function Sidebar({
                     }}
                   />
                 ) : (
-                  <span
+                  <button
+                    type="button"
+                    aria-label={`Open chat: ${displayTitle}`}
+                    aria-current={active ? "page" : undefined}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
-                      setEditingId(id);
+                      cancelledEdit.current = false; setEditingId(id);
                       setDraftTitle(session.title);
                     }}
                     title="Double-click to rename"
                     style={{
-                      flex: 1,
+                      flex: 1, minWidth: 0, minHeight: 36, textAlign: "left", padding: 0, border: 0, background: "transparent", cursor: "pointer",
                       fontSize: 13.5,
                       whiteSpace: "nowrap",
                       overflow: "hidden",
@@ -178,24 +193,27 @@ export function Sidebar({
                       color: active ? T.text : T.textDim,
                     }}
                   >
-                    {session.title}
-                  </span>
+                    {displayTitle}
+                  </button>
                 )}
-                {streaming[id] ? (
+                {streaming[id] || session.pending ? (
                   <Spinner size={11} color={T.accent} />
                 ) : (
                   <span style={{ fontSize: 11.5, color: T.textFaint }}>{relativeTime(session.updatedAt)}</span>
                 )}
+                <span onClick={event => event.stopPropagation()} style={{display:"inline-flex"}}>
+                <IconButton name="edit" label="Rename chat" size={14} onClick={() => { cancelledEdit.current = false; setEditingId(id); setDraftTitle(session.title); }} style={{width:28,height:32}} />
                 <IconButton
                   name="trash"
-                  label={isUntouchedSession(session) ? "Nothing to delete yet" : "Delete chat"}
+                  label={streaming[id] || session.pending ? "Stop this run before deleting" : "Delete chat"}
+                  disabled={Boolean(streaming[id] || session.pending)}
                   size={14}
-                  disabled={isUntouchedSession(session)}
                   onClick={() => {
                     if (window.confirm(`Delete "${session.title}"?`)) deleteSession(id);
                   }}
-                  style={{ width: 24, height: 24 }}
+                  style={{ width: 28, height: 32 }}
                 />
+                </span>
               </div>
             );
           })

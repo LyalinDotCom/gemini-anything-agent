@@ -5,7 +5,7 @@ import { OBJECT3D_AGENT_ID } from "../../shared/object3dProfile";
 
 export type AgentMode =
   | "antigravity"
-  | "anything"
+  | "anywhere"
   | "browser"
   | "object3d"
   | "large-image"
@@ -42,9 +42,9 @@ export const AGENT_PROFILES: Record<AgentMode, AgentProfile> = {
     clientToolset: true,
     browserPersona: false,
   },
-  anything: {
-    mode: "anything",
-    label: "Anything",
+  anywhere: {
+    mode: "anywhere",
+    label: "Anywhere",
     description: "Antigravity with media creation and browser tools.",
     model: "Antigravity preview",
     icon: "sparkle",
@@ -116,17 +116,7 @@ export function profileForMode(mode: AgentMode | undefined): AgentProfile {
   return AGENT_PROFILES[mode ?? DEFAULT_AGENT_MODE];
 }
 
-/**
- * Resolve a session to its agent profile, including the legacy fallback for
- * sessions saved before agentMode existed (their research runs carried
- * mode: "deep-research"). Every resolution site must use this — the fallback
- * rule lives only here.
- */
-export function profileForSession(session: {
-  agentMode?: AgentMode;
-  mode?: string;
-}): AgentProfile {
-  return profileForMode(
-    session.agentMode ?? (session.mode === "deep-research" ? "deep-research" : undefined),
-  );
+/** Resolve the current profile; a new draft starts with the baseline harness. */
+export function profileForSession(session: { agentMode?: AgentMode }): AgentProfile {
+  return profileForMode(session.agentMode);
 }

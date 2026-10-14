@@ -1,6 +1,6 @@
 // Browser-local API key storage. Ported from Spark-Project src/gemini/keyStore.ts:
 // localStorage + change listeners + cross-tab sync; permissive if storage is unavailable.
-const STORAGE_KEY = "aichat.geminiApiKey.v1";
+const STORAGE_KEY = "gaa.geminiApiKey.v1";
 
 const listeners = new Set<() => void>();
 

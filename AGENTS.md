@@ -1,10 +1,10 @@
-# AGENTS.md — gemini-anything-agent
+# AGENTS.md — Gemini Anywhere Agent (GAA)
 
-The web chat app in `web/` is the active modernization target. `agents/` is the canonical managed-agent payload; `shared/agentAssets.ts` lists the identical assets mounted by both UIs. `app/` is the Electron harness and `cli/` is the legacy published GAI CLI; do not broaden web work into unrelated changes there.
+The web chat app in `web/` is the active modernization target. `agents/` is the canonical managed-agent payload; `shared/agentAssets.ts` lists the identical assets mounted by both UIs. `app/` is the Electron harness and `cli/` is the archived media CLI; do not broaden web work into unrelated changes there.
 
 ## Current rules
 
-1. All generated media and delegated Gemini operations use Google's official `google-gemini/gemini-api-cli` release through `bash /.agents/bin/gemini-api`. The latest verified release is v0.4.2. This supersedes the former requirement to use `@lyalindotcom/gai`; never deploy or suggest the retired media launcher in an active workflow.
+1. All generated media and delegated Gemini operations use Google's official `google-gemini/gemini-api-cli` release through `bash /.agents/bin/gemini-api`. The latest verified release is v0.4.2. Never deploy or suggest the retired media launcher in an active workflow.
 2. Discover capabilities from the installed CLI's `--help`, subcommand help and request schema. Do not implement model calls through a custom Python/REST client or wrapper library. Native helpers only process existing artifacts.
 3. Keep `agents/` shared. Both UIs deploy the same manifest and receive the key separately as `/.env`. No per-UI forks of instructions, skills or launchers. Never expose or commit keys.
 4. The shared official launcher installs checksum-verified published binaries into the durable workspace cache. Preserve HTTPS/proxy compatibility and noninteractive operation.
@@ -13,3 +13,5 @@ The web chat app in `web/` is the active modernization target. `agents/` is the 
 7. Preserve unrelated existing work. Scope GitHub changes to the web app, its shared agent payload, relevant tests and documentation. Keep large generated samples out of Git; retain or retrieve their published Firebase assets.
 
 The web app migrated from the retired `~/Source/Projects/ai-chatbot-agents` repository. Do not resurrect that project.
+
+8. Branding is Gemini Anywhere Agent (GAA). Use GAA identifiers for active agents, skills, downloads and browser storage. Do not add backward-compatibility aliases or migrations.

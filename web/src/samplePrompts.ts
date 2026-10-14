@@ -15,7 +15,7 @@ import {
   type SamplePromptData,
 } from "../../app/src/renderer/lib/samplePromptData";
 
-export type SamplePrompt = Omit<SamplePromptData, "thumbnailKey"> & { thumbnail: string };
+export type SamplePrompt = Omit<SamplePromptData, "thumbnailKey" | "agentMode"> & { thumbnail: string; agentMode: "anywhere" | "browser" };
 
 const THUMBNAILS: Record<SamplePromptData["thumbnailKey"], string> = {
   "cat-image": sampleCatImageUrl,
@@ -32,5 +32,6 @@ const THUMBNAILS: Record<SamplePromptData["thumbnailKey"], string> = {
 
 export const SAMPLE_PROMPTS: SamplePrompt[] = SAMPLE_PROMPT_DATA.map(({ thumbnailKey, ...data }) => ({
   ...data,
+  agentMode: thumbnailKey.startsWith("browser-") ? "browser" : "anywhere",
   thumbnail: THUMBNAILS[thumbnailKey],
 }));

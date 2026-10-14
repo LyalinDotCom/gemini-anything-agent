@@ -50,8 +50,8 @@ function currentPayload(model = MODELS.text as string): { sources: InlineSource[
 }
 
 function descriptionFor(agentId: string, fingerprint: string): string {
-  const role = agentId.startsWith(OBJECT3D_AGENT_ID) ? "photo-to-3D object" : agentId.includes("browser") ? "browser testing" : agentId.includes("large-image") ? "large images" : "anything";
-  return `gemini-anything web ${role} managed agent (payload-${fingerprint})`;
+  const role = agentId.startsWith(OBJECT3D_AGENT_ID) ? "photo-to-3D object" : agentId.includes("browser") ? "browser testing" : agentId.includes("large-image") ? "large images" : "anywhere";
+  return `Gemini Anywhere Agent (GAA) web ${role} managed agent (payload-${fingerprint})`;
 }
 
 function fingerprintFromDescription(description: unknown): string | null {
@@ -113,7 +113,7 @@ async function createAgent(client: ReturnType<typeof ai>, agentId: string, sourc
  */
 // Google-reserved id prefixes (mirrors the Electron sdk's validation list). The
 // API rejects creating these with a generic 400, so an ensure would delete an
-// existing agent it can never replace — e.g. the pre-rename "gemini-anything-v1".
+// existing agent it can never replace.
 const RESERVED_AGENT_ID =
   /^(antigravity|veo|omni|lyria|imagen|gemma|gemini|google|youtube|android|chrome|pixel|waze|fitbit|nest|kaggle)-/i;
 
@@ -210,5 +210,8 @@ export async function deleteAgent(agentId: string): Promise<void> {
     await client.agents.delete(agentId);
   } catch (e) {
     if (toFriendly(e).kind !== "not-found") throw toFriendly(e);
+  }
+  for (const key of verifiedAgents.keys()) {
+    if (key.startsWith(`${agentId}:`)) verifiedAgents.delete(key);
   }
 }

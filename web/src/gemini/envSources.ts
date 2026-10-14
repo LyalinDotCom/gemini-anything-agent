@@ -17,7 +17,7 @@ import largeAsset10 from "../../../agents/skills/gigapixel-gemini-mosaic/viewer/
 import agentsMd from "../../../agents/AGENTS.md?raw";
 import browserLauncher from "../../../agents/bin/browser?raw";
 import browserSkill from "../../../agents/skills/browser-testing/SKILL.md?raw";
-import geminiSkill from "../../../agents/skills/gemini-anything/SKILL.md?raw";
+import geminiSkill from "../../../agents/skills/gemini-anywhere/SKILL.md?raw";
 import officialCliLauncher from "../../../agents/bin/gemini-api?raw";
 import object3dSetup from "../../../agents/bin/object3d-setup?raw";
 import object3dSkill from "../../../agents/skills/photo-to-3d/SKILL.md?raw";
@@ -45,7 +45,7 @@ const assets: Record<typeof AGENT_ASSET_PATHS[number], string> = {
   "skills/gigapixel-gemini-mosaic/viewer/deepzoom.js": largeAsset10,
 
   "bin/browser": browserLauncher,
-  "skills/gemini-anything/SKILL.md": geminiSkill,
+  "skills/gemini-anywhere/SKILL.md": geminiSkill,
   "skills/browser-testing/SKILL.md": browserSkill,
   "bin/gemini-api": officialCliLauncher,
   "bin/object3d-setup": object3dSetup,

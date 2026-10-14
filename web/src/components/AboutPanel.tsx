@@ -12,10 +12,10 @@ export function AboutPanel({ onClose }: { onClose: () => void }) {
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 60, display: "grid", placeItems: "center" }}>
       <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.64)" }} />
-      <section role="dialog" aria-modal="true" aria-label="About Gemini Anything" style={{ position: "relative", width: "min(680px, calc(100vw - 28px))", maxHeight: "84vh", overflowY: "auto", padding: 20, borderRadius: T.radius, border: `1px solid ${T.border}`, background: T.bgElev }}>
+      <section role="dialog" aria-modal="true" aria-label="About Gemini Anywhere Agent" style={{ position: "relative", width: "min(680px, calc(100vw - 28px))", maxHeight: "84vh", overflowY: "auto", padding: 20, borderRadius: T.radius, border: `1px solid ${T.border}`, background: T.bgElev }}>
         <header style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ width: 34, height: 34, borderRadius: 10, display: "grid", placeItems: "center", color: T.accent, background: T.accentSoft }}><Icon name="sparkle" size={18} /></span>
-          <div style={{ flex: 1 }}><h2 style={{ margin: 0, fontSize: 18 }}>Gemini Anything</h2><p style={{ margin: "3px 0 0", color: T.textFaint, fontSize: 12.5 }}>One agent payload, two complete apps.</p></div>
+          <div style={{ flex: 1 }}><h2 style={{ margin: 0, fontSize: 18 }}>Gemini Anywhere Agent</h2><p style={{ margin: "3px 0 0", color: T.textFaint, fontSize: 12.5 }}>One agent payload, two complete apps.</p></div>
           <IconButton name="x" label="Close" onClick={onClose} />
         </header>
         <p style={{ color: T.textDim, lineHeight: 1.6, fontSize: 13.5 }}>A managed-agent prototype that keeps normal work native, uses a published CLI for media, and gives Browser mode a real Playwright-powered Linux browser. Artifacts stay under <code style={{ fontFamily: T.mono }}>/workspace/output</code> and sync into the app or a user-linked local folder.</p>

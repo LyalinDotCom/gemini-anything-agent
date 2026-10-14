@@ -15,10 +15,10 @@ export const MODELS = {
 } as const;
 
 /** The app-managed agent id created under the user's key on first chat. */
-export const CHAT_AGENT_ID = "gai-anything-v1";
-export const BROWSER_AGENT_ID = "gai-browser-v1";
+export const CHAT_AGENT_ID = "gaa-anywhere-v1";
+export const BROWSER_AGENT_ID = "gaa-browser-v1";
 
-export const APP_NAME = "Gemini Anything";
+export const APP_NAME = "Gemini Anywhere Agent";
 
 export const HARNESS_MODELS = [
   { id: MODELS.text, label: "Gemini 3.8 Flash" },

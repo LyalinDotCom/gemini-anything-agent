@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-root="${TMPDIR:-/tmp}/gai-large-images"
+root="${TMPDIR:-/tmp}/gaa-large-images"
 mkdir -p "$root"
 if ! python3 -m venv --help >/dev/null 2>&1; then
   DEBIAN_FRONTEND=noninteractive apt-get update >"$root/setup.log" 2>&1

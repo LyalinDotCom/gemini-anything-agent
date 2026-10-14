@@ -9,12 +9,12 @@ describe("shared managed-agent payload", () => {
     const byTarget = new Map(sources.map((source) => [source.target, source.content]));
 
     expect(byTarget.get("/.agents/AGENTS.md")).toContain("Headless browser wrapper");
-    expect(byTarget.has("/.agents/bin/gai")).toBe(false);
+    expect(sources.filter(source => source.target.startsWith("/.agents/bin/")).map(source => source.target).sort()).toEqual(["/.agents/bin/browser", "/.agents/bin/gemini-api", "/.agents/bin/large-image-setup", "/.agents/bin/object3d-setup"]);
     expect(byTarget.get("/.agents/bin/gemini-api")).toContain("google-gemini/gemini-api-cli");
     expect(byTarget.get("/.agents/bin/browser")).toContain("@playwright/cli");
     expect(byTarget.get("/.agents/bin/browser")).toContain('PLAYWRIGHT_MCP_SANDBOX="${PLAYWRIGHT_MCP_SANDBOX:-false}"');
     expect(byTarget.get("/.agents/bin/browser")).toContain('"browserName":"chromium"');
-    expect(byTarget.get("/.agents/skills/gemini-anything/SKILL.md")).toContain("Gemini API Media Skill");
+    expect(byTarget.get("/.agents/skills/gemini-anywhere/SKILL.md")).toContain("Gemini API Media Skill");
     expect(byTarget.get("/.agents/skills/browser-testing/SKILL.md")).toContain("Browser Testing Skill");
   });
 

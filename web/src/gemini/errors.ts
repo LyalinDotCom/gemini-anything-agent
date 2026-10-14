@@ -1,5 +1,5 @@
 // Error normalization: every SDK/network failure becomes a FriendlyError with a kind
-// the UI can render and (where known) a retry hint. Merges gaicli's status handling
+// the UI can render and (where known) a retry hint. Merges the SDK's status handling
 // with Spark's handleGeminiError message heuristics.
 export type ErrorKind =
   | "no-key"

@@ -59,7 +59,7 @@ def main():
             edited=out/(name+'-edited.jpg')
             response=out/(name+'-response.json')
             metadata=json.loads(response.read_text())
-            if not isinstance(metadata,dict) or metadata.get('error') or not (metadata.get('ok') is True or (metadata.get('path') and (metadata.get('response_id') or metadata.get('interaction_id')))):raise ValueError('Missing successful actual CLI response metadata')
+            if not isinstance(metadata,dict) or metadata.get('error') or not ((metadata.get('path') and (metadata.get('response_id') or metadata.get('interaction_id')))):raise ValueError('Missing successful actual CLI response metadata')
             reference=out/(name+'-input.png')
             with Image.open(reference) as image,Image.open(base) as baseline:
                 if image.size!=(r-x,b-y) or not np.array_equal(np.asarray(image.convert('RGB')),np.asarray(baseline.crop(box).convert('RGB'))):

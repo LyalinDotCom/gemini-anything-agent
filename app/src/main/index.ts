@@ -189,7 +189,7 @@ const currentInvocationContext = (): string => {
     "- You are running as a remote Gemini Managed Agent in a Google-hosted Linux sandbox.",
     "- Workspace root in the sandbox: `/workspace`.",
     "- Durable artifact folder in the sandbox: `/workspace/output`.",
-    "- Mounted agent instruction files: `/.agents/AGENTS.md` and `/.agents/skills/gemini-anything/SKILL.md`.",
+    "- Mounted agent instruction files: `/.agents/AGENTS.md` and `/.agents/skills/gemini-anywhere/SKILL.md`.",
     "- Mounted media CLI wrapper: `/.agents/bin/gai`.",
     "- Mounted headless browser wrapper and skill: `/.agents/bin/browser` and `/.agents/skills/browser-testing/SKILL.md`.",
     "- Follow-up turns may include two independent continuity pointers: `previous_interaction_id` for conversation context and `environment` for sandbox/filesystem state.",
@@ -289,8 +289,8 @@ const buildAnythingAgentDefinition = (agentId: string): AgentDefinition => {
     },
     {
       type: "inline" as const,
-      target: ".agents/skills/gemini-anything/SKILL.md",
-      content: readAgentAsset("skills/gemini-anything/SKILL.md")
+      target: ".agents/skills/gemini-anywhere/SKILL.md",
+      content: readAgentAsset("skills/gemini-anywhere/SKILL.md")
     },
     {
       type: "inline" as const,

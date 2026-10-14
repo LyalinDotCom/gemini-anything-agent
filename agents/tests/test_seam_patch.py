@@ -12,7 +12,7 @@ class SeamPatchTests(unittest.TestCase):
    command=[sys.executable,str(SCRIPT),'--run',str(run),'--spec',str(spec)]
    subprocess.run(command+['prepare'],check=True,capture_output=True)
    Image.new('RGB',(768,768),'black').save(run/'seam-repairs/join-edited.jpg')
-   (run/'seam-repairs/join-response.json').write_text('{"ok":true}')
+   (run/'seam-repairs/join-response.json').write_text('{"path":"/workspace/patch.png","response_id":"fixture-response"}')
    for _ in range(2):
     subprocess.run(command+['apply'],check=True,capture_output=True)
     pixels=np.asarray(Image.open(run/'mosaic.png'))
@@ -29,7 +29,7 @@ class SeamPatchTests(unittest.TestCase):
    command=[sys.executable,str(SCRIPT),'--run',str(run),'--spec',str(spec)]
    subprocess.run(command+['prepare'],check=True,capture_output=True)
    Image.new('RGB',(64,64),'black').save(run/'seam-repairs/join-edited.jpg')
-   (run/'seam-repairs/join-response.json').write_text('{"ok":true}')
+   (run/'seam-repairs/join-response.json').write_text('{"path":"/workspace/patch.png","response_id":"fixture-response"}')
    result=subprocess.run(command+['apply'],capture_output=True)
    self.assertNotEqual(result.returncode,0);self.assertEqual(before,(run/'mosaic.png').read_bytes())
  def test_rebuilt_mosaic_cannot_be_overwritten_by_stale_repair(self):
@@ -55,7 +55,7 @@ class SeamPatchTests(unittest.TestCase):
    spec=run/'spec.json';spec.write_text(json.dumps([{'name':'join','box':[0,0,768,768]}]))
    command=[sys.executable,str(SCRIPT),'--run',str(run),'--spec',str(spec)]
    subprocess.run(command+['prepare'],check=True,capture_output=True)
-   Image.new('RGB',(768,768),'black').save(run/'seam-repairs/join-edited.jpg');(run/'seam-repairs/join-response.json').write_text('{"ok":true}')
+   Image.new('RGB',(768,768),'black').save(run/'seam-repairs/join-edited.jpg');(run/'seam-repairs/join-response.json').write_text('{"path":"/workspace/patch.png","response_id":"fixture-response"}')
    definition=importlib.util.spec_from_file_location('seam_patch',SCRIPT);module=importlib.util.module_from_spec(definition);definition.loader.exec_module(module)
    actual=module.os.replace
    def interrupt(source,destination):

@@ -177,8 +177,9 @@ export function AppShell() {
 
   useEffect(() => {
     // Never park the user on a dead end: land in a conversation immediately.
-    if (sessionOrder.length === 0) createSession();
-    else if (!activeSessionId) setActiveSession(sessionOrder[0]);
+    const current = useStore.getState();
+    if (current.sessionOrder.length === 0) current.createSession();
+    else if (!current.activeSessionId || !current.sessions[current.activeSessionId]) current.setActiveSession(current.sessionOrder[0]);
   }, [activeSessionId, sessionOrder, setActiveSession, createSession]);
 
   useEffect(() => {
@@ -292,11 +293,26 @@ export function AppShell() {
     }
   };
 
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const returnFocus = document.querySelector<HTMLElement>('[aria-label="Open menu"]');
+    document.querySelector<HTMLElement>('[aria-label="Close chat history"]')?.focus();
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setDrawerOpen(false); };
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("keydown", onKey); requestAnimationFrame(() => {
+      const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-modal="true"]');
+      (dialog?.querySelector<HTMLElement>("button, input") ?? returnFocus)?.focus();
+    }); };
+  }, [drawerOpen]);
+
+  useEffect(() => { if (!isMobile) setDrawerOpen(false); }, [isMobile]);
+
   const sidebar = (
     <Sidebar
-      onOpenSettings={() => setSettingsOpen(true)}
-      onOpenAbout={() => setAboutOpen(true)}
-      onNavigate={isMobile ? () => setDrawerOpen(false) : undefined}
+      onOpenSettings={() => { setDrawerOpen(false); setSettingsOpen(true); }}
+      onOpenAbout={() => { setDrawerOpen(false); setAboutOpen(true); }}
+      onNavigate={isMobile ? () => { setDrawerOpen(false); setPanelTab(null); } : undefined}
+      onClose={isMobile ? () => setDrawerOpen(false) : undefined}
     />
   );
 
@@ -315,7 +331,7 @@ export function AppShell() {
       {!isMobile && sidebar}
 
       {isMobile && drawerOpen && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 40 }}>
+        <div role="dialog" aria-modal="true" aria-label="Chat history" style={{ position: "fixed", inset: 0, zIndex: 40 }}>
           <div
             onClick={() => setDrawerOpen(false)}
             style={{
@@ -341,6 +357,7 @@ export function AppShell() {
       )}
 
       <div
+        inert={isMobile && drawerOpen}
         style={{
           flex: 1,
           minWidth: 0,
@@ -363,9 +380,11 @@ export function AppShell() {
             <IconButton
               name="menu"
               label="Open menu"
+              style={{width:44,height:40}}
               onClick={() => setDrawerOpen(true)}
             />
           )}
+          {isMobile && <IconButton name="plus" label="Start new chat" style={{width:44,height:40}} onClick={() => { createSession(); setDrawerOpen(false); setPanelTab(null); }} />}
           <span
             style={{
               flex: 1,
@@ -376,9 +395,9 @@ export function AppShell() {
               textOverflow: "ellipsis",
             }}
           >
-            {active?.title ?? "Gemini Anything"}
+            {active?.title ?? "Gemini Anywhere Agent"}
           </span>
-          {activeProfile && (
+          {activeProfile && !isMobile && (
             <span
               title={`${activeProfile.description} ${activeProfile.model}.`}
               style={{

@@ -2,7 +2,7 @@
 // media blobs live separately (referenced by mediaId) so localStorage stays tiny
 // (Spark's 5MB lesson). Falls back to in-memory maps when IDB is unavailable
 // (private mode) — the app keeps working for the current page lifetime.
-const DB_NAME = "aichat";
+const DB_NAME = "gaa";
 const DB_VERSION = 2;
 
 let dbPromise: Promise<IDBDatabase | null> | null = null;

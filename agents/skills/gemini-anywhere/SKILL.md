@@ -1,11 +1,11 @@
 ---
-name: gemini-anything
+name: gemini-anywhere
 description: Generate images, video, speech or music, transcribe media, and manage Gemini files or delegated agents through Google's official Gemini API CLI.
 ---
 
 # Gemini API Media Skill
 
-All new media is generated with Google's published `google-gemini/gemini-api-cli` inside this managed Linux agent. Use only `bash /.agents/bin/gemini-api`. Do not install or call the retired GAI npm CLI, implement model calls in Python/REST, inspect package caches, or invent another media wrapper. Ordinary answers, research, planning and code use native managed-agent tools.
+All new media is generated with Google's published `google-gemini/gemini-api-cli` inside this managed Linux agent. Use only `bash /.agents/bin/gemini-api`. Do not install or call another media CLI, implement model calls in Python/REST, inspect package caches, or invent another media wrapper. Ordinary answers, research, planning and code use native managed-agent tools.
 
 Discover the installed command tree with `bash /.agents/bin/gemini-api --help`, then the relevant subcommand's `--help`. Inspect its `--schema` for advanced request bodies; validate unfamiliar inputs with `--dry-run` before a paid call. Validate a dependent operation only after its source exists: dry runs do not generate files. A missing planned output is not a generation failure; run its producer first. The binary's help, usage and schema are the source of truth for supported flags, models, formats and defaults. Do not copy flags from another CLI or an earlier release. Unsupported capabilities must be reported, not replaced with custom API code.
 

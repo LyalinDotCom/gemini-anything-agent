@@ -1,7 +1,7 @@
 // Deep Research sessions: background interactions that outlive the tab.
 //   start → interaction id persisted on the session → watch via streaming reattach
 //   (interactions.get(id, {stream:true, last_event_id})) with a 10s poll fallback
-//   (gaicli run.ts pattern) → terminal interaction rendered like any other turn.
+//   (stored-run pattern) → terminal interaction rendered like any other turn.
 // Survives reloads: resumeResearchIfNeeded re-adopts the placeholder message.
 import { blocksToParts, settleParts, type MediaStampedBlock } from "../chat/blocksToParts";
 import { profileForSession } from "../agentProfiles";

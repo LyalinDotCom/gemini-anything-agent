@@ -16,7 +16,7 @@ export const AGENT_ASSET_PATHS = [
   "skills/gigapixel-gemini-mosaic/viewer/deepzoom.js",
 
   "bin/browser",
-  "skills/gemini-anything/SKILL.md",
+  "skills/gemini-anywhere/SKILL.md",
   "skills/browser-testing/SKILL.md",
   "bin/gemini-api",
   "bin/object3d-setup",

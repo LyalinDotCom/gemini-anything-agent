@@ -1,3 +1,4 @@
+import { withChatTurnLock } from "./turnLock";
 import { LARGE_IMAGE_INVOCATION, largeImageTemplateInstruction } from "../../../shared/largeImageProfile";
 // sendTurn: the whole life of one chat turn.
 //   ensure agent → stream interaction → live-render blocks → (requires_action?
@@ -204,15 +205,6 @@ function freshCallContext(browserMode: boolean, override?: string, object3dMode 
   ].filter(Boolean).join("\n\n");
 }
 
-/** Local, model-free session title: nothing runs on the client but string math. */
-function titleFromText(text: string): string | null {
-  const clean = text.trim().replace(/\s+/g, " ");
-  if (!clean) return null;
-  const words = clean.split(" ").slice(0, 6).join(" ");
-  const cut = words.length > 42 ? `${words.slice(0, 42)}…` : words;
-  return cut.charAt(0).toUpperCase() + cut.slice(1);
-}
-
 /** Pull /workspace/output files produced by a turn down into this chat's file index. Best-effort. */
 function syncOutputMediaBestEffort(sessionId: string, environmentId: string): void {
   void syncOutputMedia(sessionId, environmentId).catch((error) => {
@@ -244,6 +236,16 @@ function condenseTranscript(messages: Message[]): string {
 }
 
 export async function sendTurn(sessionId: string, turn: TurnInput): Promise<void> {
+  await withChatTurnLock(sessionId, false, async () => {
+    // A queued send must see the prior owner's committed transcript and pointer.
+    await useStore.persist.rehydrate();
+    if (useStore.getState().streaming[sessionId]) return;
+    useStore.setState(s => ({ hydrated: { ...s.hydrated, [sessionId]: false } }));
+    await sendTurnUnlocked(sessionId, turn);
+  });
+}
+
+async function sendTurnUnlocked(sessionId: string, turn: TurnInput): Promise<void> {
   // Transcript must be hydrated before we append/persist, or we'd overwrite the
   // stored history with just this turn.
   await useStore.getState().hydrateSession(sessionId);
@@ -251,7 +253,7 @@ export async function sendTurn(sessionId: string, turn: TurnInput): Promise<void
   if (store.streaming[sessionId]) return; // one turn per session; other sessions run independently
   const session = store.sessions[sessionId];
   if (!session || (!turn.text.trim() && !turn.attachments?.length)) return;
-  if (session.pending) { await recoverPendingTurn(sessionId); return; }
+  if (session.pending) { await recoverPendingTurnUnlocked(sessionId); return; }
   store.patchSession(sessionId, {cancelNotice:undefined});
 
   // ---- user message
@@ -685,16 +687,7 @@ export async function sendTurn(sessionId: string, turn: TurnInput): Promise<void
         },
   );
   useStore.getState().setStreaming(sessionId, false);
-  useStore.getState().persistTranscript(sessionId);
-
-  // Title locally from the first message — no client-side model calls, ever.
-  if (!sawError && !aborted) {
-    const current = useStore.getState().sessions[sessionId];
-    if (current && current.title === "New chat") {
-      const title = titleFromText(turn.text) ?? (turn.attachments?.length ? "Voice & media chat" : null);
-      if (title) useStore.getState().renameSession(sessionId, title);
-    }
-  }
+  await useStore.getState().persistTranscript(sessionId);
 
   // Pull whatever the agent saved under /workspace/output down to this device (the
   // media handoff contract): snapshot → tar → IndexedDB → parts on this message.
@@ -765,6 +758,10 @@ const recovering = new Set<string>();
  * purely from local cache: no server calls.
  */
 export async function recoverPendingTurn(sessionId: string): Promise<void> {
+  await withChatTurnLock(sessionId, true, () => recoverPendingTurnUnlocked(sessionId));
+}
+
+async function recoverPendingTurnUnlocked(sessionId: string): Promise<void> {
   const store = useStore.getState();
   const session = store.sessions[sessionId];
   const pending = session?.pending;
@@ -901,14 +898,6 @@ export async function recoverPendingTurn(sessionId: string): Promise<void> {
       ...(outcome.status === "requires_action" ? {chainBroken:true} : {}),
     });
 
-    const current = useStore.getState().sessions[sessionId];
-    if (current && current.title === "New chat") {
-      const lastUser = [...(useStore.getState().messages[sessionId] ?? [])].reverse().find((m) => m.role === "user");
-      const text = lastUser?.parts.find((p): p is Extract<ContentPart, { kind: "text" }> => p.kind === "text")?.text;
-      const title = text ? titleFromText(text) : null;
-      if (title) useStore.getState().renameSession(sessionId, title);
-    }
-
     const envId = outcome.environmentId || session.environmentId;
     if (envId) syncOutputMediaBestEffort(sessionId, envId);
   } catch (e) {
@@ -949,6 +938,6 @@ export async function recoverPendingTurn(sessionId: string): Promise<void> {
     recovering.delete(pending.interactionId);
     aborters.delete(sessionId);
     useStore.getState().setStreaming(sessionId, false);
-    useStore.getState().persistTranscript(sessionId);
+    await useStore.getState().persistTranscript(sessionId);
   }
 }

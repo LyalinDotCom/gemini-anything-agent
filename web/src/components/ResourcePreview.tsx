@@ -62,12 +62,12 @@ function useHtmlDocument(
       // tokens, then inline only those files as data URLs.
       const tokensByMediaId = new Map(files.map((entry) => [
         entry.mediaId,
-        `gai-resource:${encodeURIComponent(entry.mediaId)}`,
+        `gaa-resource:${encodeURIComponent(entry.mediaId)}`,
       ]));
       const tokenAssets = buildResourceUrlMap(files, tokensByMediaId);
       const tokenDocument = rewriteHtmlResourceUrls(html, file.label || file.path, tokenAssets);
       const referencedIds = new Set<string>();
-      for (const match of tokenDocument.matchAll(/gai-resource:([^"'()\s?#]+)/g)) {
+      for (const match of tokenDocument.matchAll(/gaa-resource:([^"'()\s?#]+)/g)) {
         try {
           referencedIds.add(decodeURIComponent(match[1]));
         } catch {

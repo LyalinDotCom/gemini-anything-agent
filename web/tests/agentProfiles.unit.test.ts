@@ -7,7 +7,7 @@ describe("agent profiles", () => {
   test("Antigravity is the default and custom profiles use valid stable ids", () => {
     expect(DEFAULT_AGENT_MODE).toBe("antigravity");
     expect(profileForMode(undefined).agentId).toBe(MODELS.chatAgentBase);
-    expect(AGENT_PROFILES.anything.agentId).toBe(CHAT_AGENT_ID);
+    expect(AGENT_PROFILES.anywhere.agentId).toBe(CHAT_AGENT_ID);
     expect(AGENT_PROFILES.browser.agentId).toBe(BROWSER_AGENT_ID);
     expect(AGENT_PROFILES.object3d.agentId).toBe(OBJECT3D_AGENT_ID);
     expect(AGENT_PROFILES.object3d.managed).toBe(true);
@@ -21,7 +21,7 @@ describe("agent profiles", () => {
     const { DEFAULT_RUN_OPTIONS } = await import("../src/state/types");
     const runOptions = { ...DEFAULT_RUN_OPTIONS, store: false, background: false };
     expect(effectiveRunOptions({ agentMode: "object3d", runOptions })).toMatchObject({ store: true, background: true });
-    expect(effectiveRunOptions({ agentMode: "anything", runOptions })).toMatchObject({ store: false, background: false });
+    expect(effectiveRunOptions({ agentMode: "anywhere", runOptions })).toMatchObject({ store: false, background: false });
   });
   test("both research levels are represented", () => {
     expect(AGENT_PROFILES["deep-research"].agentId).toBe(MODELS.deepResearch);
@@ -30,10 +30,6 @@ describe("agent profiles", () => {
 
   test("profileForSession resolves every session shape the same way at every call site", () => {
     expect(profileForSession({ agentMode: "browser" }).mode).toBe("browser");
-    // Legacy pre-agentMode research session.
-    expect(profileForSession({ mode: "deep-research" }).mode).toBe("deep-research");
-    // Legacy pre-agentMode chat session.
-    expect(profileForSession({ mode: "chat" }).mode).toBe(DEFAULT_AGENT_MODE);
     expect(profileForSession({}).mode).toBe(DEFAULT_AGENT_MODE);
   });
 });

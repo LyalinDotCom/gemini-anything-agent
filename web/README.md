@@ -1,6 +1,6 @@
-# Gemini Anything — Web
+# Gemini Anywhere Agent — Web
 
-The browser UI for the Gemini Anything managed agent (the Electron UI lives in
+The browser UI for the Gemini Anywhere Agent managed agent (the Electron UI lives in
 [../app/](../app/); both deploy the **same shared agent** from [../agents/](../agents/)).
 One idea taken all the way: **every AI interaction runs in a remote, server-side agent
 container — the web client is just a static terminal.** You open a static page, paste your
@@ -24,7 +24,7 @@ your browser as files.
 - **Linked local projects** — Chrome/Edge users can grant a local folder and sync the
   `/workspace/output` project tree directly to disk; other browsers download the snapshot
 - **Container files panel** — browse, preview, download, or snapshot anything in the sandbox
-- **Six selectable profiles** — Antigravity (default), Anything, Browser, 3D View,
+- **Six selectable profiles** — Antigravity (default), Anywhere, Browser, 3D View,
   Deep Research, and Deep Research Max, pinned per conversation
 - **Photo to 3D View** — upload a photo or choose a rocket/person-and-cat sample; the
   agent uses Google's official Gemini API CLI v0.4.2 inside its Linux sandbox for
@@ -45,7 +45,7 @@ your browser as files.
 - **Advanced run controls** — persistence, context/environment reuse, background execution,
   service tier, thinking summaries, tool overrides, system instructions, and explicit ids
 - **Agent-aware examples** — the same ten one-click demo cards as Electron select both the
-  prompt and the required Anything or Browser profile
+  prompt and the required Anywhere or Browser profile
 - **Deep Research + Max** — background research sessions that survive reloads
 - **Voice messages** — mic audio goes straight into the chain; the *agent* hears it (no
   client-side transcription)
@@ -58,16 +58,16 @@ Browser (static, key in localStorage)
   ▼
 Selected profile
   ├─ Antigravity → antigravity-preview-09-2026 directly
-  ├─ Anything    → gai-anything-v1 custom managed agent
-  ├─ Browser     → gai-browser-v1 custom managed agent
-  ├─ 3D View     → gai-object3d-v1 custom managed agent
-  ├─ Large Images → gai-large-image-v1 custom managed agent
+  ├─ Anywhere    → gaa-anywhere-v1 custom managed agent
+  ├─ Browser     → gaa-browser-v1 custom managed agent
+  ├─ 3D View     → gaa-object3d-v1 custom managed agent
+  ├─ Large Images → gaa-large-image-v1 custom managed agent
   └─ Research    → deep-research[-max]-preview-04-2026
   ├─ persistent remote container per session (environment_id chained turn to turn)
   ├─ /.agents/AGENTS.md            persona + artifact contract   (shared: ../agents/)
   ├─ /.env                         GEMINI_API_KEY=… — sourced by the launcher, never printed
   ├─ /.agents/bin/gemini-api              checksum-verified official CLI launcher   (shared: ../agents/)
-  ├─ /.agents/skills/gemini-anything/SKILL.md   media routing via the mounted launcher help (shared: ../agents/)
+  ├─ /.agents/skills/gemini-anywhere/SKILL.md   media routing via the mounted launcher help (shared: ../agents/)
   ├─ /.agents/bin/browser          launcher → npx -y @playwright/cli      (shared: ../agents/)
   └─ /.agents/skills/browser-testing/SKILL.md   browser workflow + safety rules (shared: ../agents/)
   │
@@ -101,7 +101,7 @@ the repo-root [agents/](../agents/) folder — **shared with the Electron app in
 |---|---|---|
 | `../agents/AGENTS.md` | `/.agents/AGENTS.md` | Persona, tool routing, artifact contract |
 | `../agents/bin/gemini-api` | `/.agents/bin/gemini-api` | Launcher for Google’s official Gemini API CLI |
-| `../agents/skills/gemini-anything/SKILL.md` | `/.agents/skills/gemini-anything/SKILL.md` | Media routing + guardrails; capabilities via `bash /.agents/bin/gemini-api --help` |
+| `../agents/skills/gemini-anywhere/SKILL.md` | `/.agents/skills/gemini-anywhere/SKILL.md` | Media routing + guardrails; capabilities via `bash /.agents/bin/gemini-api --help` |
 | `../agents/bin/browser` | `/.agents/bin/browser` | Headless launcher for the published [`@playwright/cli`](https://playwright.dev/agent-cli/installation) package |
 | `../agents/skills/browser-testing/SKILL.md` | `/.agents/skills/browser-testing/SKILL.md` | Browser workflow, artifact contract, and untrusted-page safety rules |
 
@@ -165,7 +165,7 @@ This app lives in its own Firebase project (`ai-chatbot-agent-54153`) — always
 - The sandbox reaches the internet through an HTTP proxy — `curl`/`urllib`/`npx` work, raw
   sockets/DNS don't.
 - Model/agent ids are pinned in [src/models.ts](src/models.ts); `@google/genai` pinned to
-  exactly 2.27.0 (`agents`/`interactions` marked experimental upstream).
+  exactly 2.29.1 (`agents`/`interactions` marked experimental upstream).
 - Free-tier keys rate-limit fast on agent turns; 429s surface with a retry hint.
 - Direct folder linking uses the permission-gated File System Access API and therefore
   requires desktop Chrome/Edge and HTTPS (localhost works for development). Folder handles
@@ -205,3 +205,11 @@ Validation included live image, TTS, transcription, video, music and HTML artifa
 The reasoning model selector is always visible beside the harness picker (including the baseline Antigravity harness), with exactly Gemini 3.8 Flash and Gemini 4 Argon. Baseline calls send `{ type: "antigravity", model }` in `agent_config`; custom agents configure the model at creation. Live paid-key checks verified both models and native output-file retrieval. On 2026-10-14 the Managed Agents endpoint rejected `agent_config.thinking_level` for both medium and high with HTTP 400, so the UI does not expose unsupported effort controls. Re-run `BASELINE_MODELS_LIVE=1 npm exec -- vitest run tests/baselineModels.live.test.ts` with a paid key to verify this contract.
 
 The model is selected before the first submitted turn and then pinned for that conversation. Completing, cancelling, stopping or failing a turn does not unlock it. Choose **New chat** to use another model. This is the harness's conversation policy: Google's baseline Antigravity API accepts per-interaction configuration, while a saved custom agent's model is fixed at creation.
+
+## GAA chat navigation
+
+**New chat** always creates a fresh conversation, including while another chat runs. Mobile has a direct header shortcut and a history drawer that closes when you select a chat, create a chat, or open settings/about. Chats receive a title from their first prompt immediately; explicit renames remain yours. Unsent text survives switching chats and reloads, and history shows draft previews. Tabs share the chat index while retaining their own selected conversation and live run state.
+
+The Gemini Anywhere Agent rename intentionally starts fresh browser storage (`gaa-store`, IndexedDB `gaa`, key `gaa.geminiApiKey.v1`) and managed-agent IDs. There are no old-name aliases or migrations. Re-enter your API key after upgrading; earlier browser data is not imported. History stays local to each browser/device.
+
+Navigation validation: 142 web unit tests, TypeScript/production build, 34 native processing tests, live concurrent baseline/Anywhere requests, a real container artifact confirming official CLI 0.4.2 and the renamed skill path, reload recovery, and desktop/mobile history/rename/draft checks. Peer review used Opus 5.5 High and Gemini 4 Argon Medium.

@@ -106,7 +106,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.6)" }} />
-      <div
+      <div role="dialog" aria-modal="true" aria-label="Settings"
         style={{
           position: "relative",
           width: "min(560px, calc(100vw - 28px))",
@@ -226,7 +226,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
           {agentMsg && <p style={{ margin: "10px 0 0", fontSize: 12.5, color: T.textDim }}>{agentMsg}</p>}
 
           <p style={{ margin: "12px 0 0", fontSize: 12, color: T.textFaint }}>
-            This app manages only its Anything, Browser, 3D View, and Large Images profiles by exact id. Other agents on your key are never
+            This app manages only its Anywhere, Browser, 3D View, and Large Images profiles by exact id. Other agents on your key are never
             listed or touched.
           </p>
         </div>
@@ -251,7 +251,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               if (window.confirm("Wipe ALL local data — every conversation, image, and setting on this device?")) {
                 void idbWipe().then(() => {
                   try {
-                    localStorage.removeItem("aichat-store");
+                    localStorage.removeItem("gaa-store");
                   } catch {
                     // ignore
                   }

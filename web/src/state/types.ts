@@ -63,6 +63,8 @@ export interface OutputFileRecord {
 export interface Session {
   id: string;
   title: string;
+  titleManuallySet?: boolean;
+  titleUpdatedAt?: number;
   createdAt: number;
   updatedAt: number;
   mode: SessionMode;

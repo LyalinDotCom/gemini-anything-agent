@@ -1,4 +1,4 @@
-export const LARGE_IMAGE_AGENT_ID = 'gai-large-image-v1';
+export const LARGE_IMAGE_AGENT_ID = 'gaa-large-image-v1';
 export type LargeImageTemplate = 'generic' | 'seuss-world';
 export const LARGE_IMAGE_INVOCATION = [
  'You are a large-image specialist. Read /.agents/skills/gigapixel-gemini-mosaic/SKILL.md before starting.',

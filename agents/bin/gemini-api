@@ -33,6 +33,5 @@ if [ ! -x "$binary" ]; then
   rm -rf "$staging"
   trap - EXIT
 fi
-if [ -f /.agents/bin/gai ]; then rm -f /.agents/bin/gai 2>/dev/null || true; fi
 export GEMINI_CLI_AGENT_MODE=1
 exec "$binary" --no-interactive "$@"

@@ -57,7 +57,7 @@ export function KeyGate() {
           >
             <Icon name="sparkle" size={20} />
           </span>
-          <span style={{ fontWeight: 700, fontSize: 17 }}>Gemini Anything</span>
+          <span style={{ fontWeight: 700, fontSize: 17 }}>Gemini Anywhere Agent</span>
         </div>
 
         <h1 style={{ fontSize: 26, lineHeight: 1.25, margin: "0 0 10px", fontWeight: 700 }}>

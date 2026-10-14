@@ -9,7 +9,7 @@ Both UIs deploy this same payload under their custom profile IDs. The web app al
 | File | Where it goes |
 | --- | --- |
 | `AGENTS.md` | Mounted at `/.agents/AGENTS.md` — the durable instruction layer: extended abilities, routing rules, artifact conventions, response style. |
-| `skills/gemini-anything/SKILL.md` | Mounted at `/.agents/skills/gemini-anything/SKILL.md` — official Gemini API CLI usage and guardrails. |
+| `skills/gemini-anywhere/SKILL.md` | Mounted at `/.agents/skills/gemini-anywhere/SKILL.md` — official Gemini API CLI usage and guardrails. |
 | `skills/browser-testing/SKILL.md` | Mounted at `/.agents/skills/browser-testing/SKILL.md` — browser-testing workflow, artifact contract, and safety rules. |
 | `bin/browser` | Mounted at `/.agents/bin/browser` — the headless Playwright agent CLI launcher. |
 | `bin/gemini-api` | Mounted at `/.agents/bin/gemini-api` — installs and runs Google's checksum-verified Gemini API CLI v0.4.2 release for every media workflow. |

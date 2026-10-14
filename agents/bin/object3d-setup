@@ -4,7 +4,7 @@ set -euo pipefail
 # Native artifact processing only: model calls always go through a published CLI.
 [ "$(uname -s)" = Linux ] || { echo "Run 3D setup inside the managed Linux sandbox." >&2; exit 1; }
 # Keep native dependency caches out of the persisted output snapshot.
-root="${TMPDIR:-/tmp}/gai-photo-to-3d"
+root="${TMPDIR:-/tmp}/gaa-photo-to-3d"
 mkdir -p "$root"
 # Avoid feeding package installation transcripts back through every agent turn.
 setup_log="$root/setup.log"

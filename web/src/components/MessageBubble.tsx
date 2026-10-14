@@ -416,7 +416,7 @@ export const MessageBubble = memo(function MessageBubble({
             const url = URL.createObjectURL(new Blob([responseText], { type: "text/markdown" }));
             const link = document.createElement("a");
             link.href = url;
-            link.download = "gemini-anything-response.md";
+            link.download = "gaa-response.md";
             link.click();
             setTimeout(() => URL.revokeObjectURL(url), 30_000);
           }} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 7px", borderRadius: 6, border: `1px solid ${T.borderSoft}`, background: "transparent", color: T.textFaint, cursor: "pointer", fontSize: 11.5 }}><Icon name="download" size={12} /> Save</button>

@@ -34,7 +34,7 @@ async function writeConversationMetadata(root: FileSystemDirectoryHandle, sessio
   const session = state.sessions[sessionId];
   if (!session) return false;
   const messages = state.messages[sessionId] ?? [];
-  const metadata = await root.getDirectoryHandle(".gemini-anything", { create: true });
+  const metadata = await root.getDirectoryHandle(".gaa", { create: true });
   await writeBytes(metadata, "conversation.json", JSON.stringify({ session, messages }, null, 2));
   const markdown = messages.map((message) => {
     const body = message.parts.flatMap((part) => {
@@ -60,7 +60,7 @@ export async function getProjectHandle(sessionId: string): Promise<FileSystemDir
 
 export async function linkProjectFolder(sessionId: string): Promise<FileSystemDirectoryHandle> {
   if (!window.showDirectoryPicker) throw new Error("Folder linking is not supported by this browser.");
-  const handle = await window.showDirectoryPicker({ id: `gemini-anything-${sessionId}`, mode: "readwrite" });
+  const handle = await window.showDirectoryPicker({ id: `gaa-${sessionId}`, mode: "readwrite" });
   await idbPut("projectHandles", { id: sessionId, handle });
   // A freshly linked folder needs the full backfill regardless of prior syncs.
   writtenBySession.delete(sessionId);

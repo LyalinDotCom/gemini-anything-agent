@@ -117,7 +117,7 @@ export function functionResultPart(
   return { type: "function_result", call_id: callId, name, result };
 }
 
-/** An image input part (uploads/vision). Wire shape from gaicli files.ts. */
+/** An image input part (uploads/vision). Uses the Interactions API input shape. */
 export function imagePart(base64Data: string, mimeType: string): Record<string, unknown> {
   return { type: "image", data: base64Data, mime_type: mimeType };
 }

@@ -12,7 +12,7 @@ def sha(path):
 
 def cli_succeeded(metadata):
  if not isinstance(metadata,dict) or metadata.get('error') or metadata.get('ok') is False:return False
- return metadata.get('ok') is True or (isinstance(metadata.get('path'),str) and bool(metadata.get('response_id') or metadata.get('interaction_id')))
+ return (isinstance(metadata.get('path'),str) and bool(metadata.get('response_id') or metadata.get('interaction_id')))
 
 def main():
  p=argparse.ArgumentParser(description=__doc__)
@@ -45,7 +45,7 @@ def main():
   response_id=metadata.get('response_id') or metadata.get('interaction_id')
   if response_id and response_id in response_ids:raise ValueError('Duplicate generation response ID')
   if response_id:response_ids.add(response_id)
-  reports.append({'file':str(path.relative_to(run)),'sha256':sha(path),'model':metadata.get('model'),'ok':True,'response_format':'legacy' if metadata.get('ok') is True else 'gemini-api-cli','response_id':metadata.get('response_id') or metadata.get('interaction_id')})
+  reports.append({'file':str(path.relative_to(run)),'sha256':sha(path),'model':metadata.get('model'),'ok':True,'response_format':'gemini-api-cli','response_id':metadata.get('response_id') or metadata.get('interaction_id')})
  for name in ['mosaic.jpg','preview_overview.jpg','deepzoom.zip','qa/summary.json']:
   if (run/name).stat().st_mtime_ns<(run/'mosaic.png').stat().st_mtime_ns:raise ValueError('Derived artifact predates final PNG: '+name)
  final={name:{'bytes':(run/name).stat().st_size,'sha256':sha(run/name)} for name in ['mosaic.png','mosaic.jpg','preview_overview.jpg','deepzoom.zip']}

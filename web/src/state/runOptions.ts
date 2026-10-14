@@ -1,11 +1,12 @@
 import { DEFAULT_RUN_OPTIONS, type RunOptions } from "./types";
-import { isHarnessModel } from "../models";
+import { isHarnessModel, type HarnessModel } from "../models";
 
 /** One defaulting layer for every reader: sessions persist only what the user
  *  changed; everything else tracks the live defaults. */
-export function effectiveRunOptions(session: { runOptions?: RunOptions; agentMode?: string }): RunOptions {
+export function effectiveRunOptions(session: { runOptions?: RunOptions; agentMode?: string; modelUsed?: HarnessModel }): RunOptions {
   const options = { ...DEFAULT_RUN_OPTIONS, ...(session.runOptions ?? {}) };
   if (!isHarnessModel(options.agentModel)) options.agentModel = DEFAULT_RUN_OPTIONS.agentModel;
+  if (isHarnessModel(session.modelUsed)) options.agentModel = session.modelUsed;
   return (session.agentMode === "object3d" || session.agentMode === "large-image") ? { ...options, store: true, background: true } : options;
 }
 

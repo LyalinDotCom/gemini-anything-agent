@@ -66,6 +66,8 @@ export interface Session {
   createdAt: number;
   updatedAt: number;
   mode: SessionMode;
+  /** Pinned on the first submitted turn; stopping never releases this choice. */
+  modelUsed?: HarnessModel;
   /** Selected before the first turn, then pinned for the life of the conversation. */
   agentMode?: AgentMode;
   /** Photographic object method; Blender packages every method. */

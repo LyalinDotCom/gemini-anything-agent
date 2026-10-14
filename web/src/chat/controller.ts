@@ -6,6 +6,7 @@ import { LARGE_IMAGE_INVOCATION, largeImageTemplateInstruction } from "../../../
 // (interaction.created) so even an aborted turn chains correctly, and environmentId
 // is always threaded into continuations (required by the API).
 import { profileForSession } from "../agentProfiles";
+import { isHarnessModel } from "../models";
 import { ensureManagedAgent, agentWorkflowFingerprint } from "../gemini/agents";
 import { buildCredentialNetwork, credentialBindingError } from "../../../shared/credentialBinding";
 import { OBJECT3D_INVOCATION, object3dMethodInstruction } from "../../../shared/object3dProfile";
@@ -301,6 +302,7 @@ export async function sendTurn(sessionId: string, turn: TurnInput): Promise<void
   let pendingMarkedFor = "";
   let serverTerminated = false;
   const options = effectiveRunOptions(session);
+  if (!isHarnessModel(session.modelUsed)) store.patchSession(sessionId, { modelUsed: options.agentModel });
   const profile = profileForSession(session);
 
   const patchAssistant = (extra?: Partial<Message>) => {

@@ -22,3 +22,15 @@ test('a run that completed before cancellation keeps its completed status',async
  mock.cancel.mockResolvedValue({id:'completed-id',status:'completed'});await cancelServerTurn(sessionId);
  expect(useStore.getState().messages[sessionId].find(m=>m.id==='assistant')?.status).toBe('complete');expect(useStore.getState().sessions[sessionId].pending).toBeNull();
 });
+
+test('confirmed cancellation preserves the conversation model selection', async()=>{
+ const sessionId=useStore.getState().createSession();
+ useStore.getState().patchSession(sessionId,{modelUsed:'gemini-4-argon',pending:{interactionId:'cancelled-id',messageId:'assistant',startedAt:Date.now()}});
+ useStore.getState().appendMessage(sessionId,{id:'assistant',role:'assistant',createdAt:Date.now(),status:'streaming',parts:[]});
+ useStore.getState().setStreaming(sessionId,true);
+ mock.cancel.mockResolvedValue({id:'cancelled-id',status:'cancelled'});
+ await cancelServerTurn(sessionId);
+ expect(useStore.getState().sessions[sessionId].pending).toBeNull();
+ expect(useStore.getState().streaming[sessionId]).toBe(false);
+ expect(useStore.getState().sessions[sessionId].modelUsed).toBe('gemini-4-argon');
+});

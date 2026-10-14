@@ -4,6 +4,7 @@ import { validateKey } from "../gemini/client";
 import { toFriendly } from "../gemini/errors";
 import { clearStoredKey, setStoredKey } from "../gemini/keyStore";
 import { BROWSER_AGENT_ID, CHAT_AGENT_ID, MODELS } from "../models";
+import { OBJECT3D_AGENT_ID } from "../../../shared/object3dProfile";
 import { useStore } from "../state/store";
 import { idbWipe } from "../storage/db";
 import { T } from "../tokens";
@@ -169,7 +170,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         <h3 style={sectionTitle}>Managed agent</h3>
         <div style={card}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-            <span style={{ fontFamily: T.mono, fontSize: 13.5 }}>{agent?.agentId || `${CHAT_AGENT_ID} / ${BROWSER_AGENT_ID}`}</span>
+            <span style={{ fontFamily: T.mono, fontSize: 13.5 }}>{agent?.agentId || `${CHAT_AGENT_ID} / ${BROWSER_AGENT_ID} / ${OBJECT3D_AGENT_ID}`}</span>
             <span
               style={{
                 fontSize: 11.5,
@@ -192,7 +193,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             <GhostButton
               busy={agentBusy}
               onClick={() =>
-                void runAgentAction(async () => setAgent(await ensureManagedAgent(agent?.agentId || CHAT_AGENT_ID, agent, true)), "Agent verified.")
+                void runAgentAction(async () => setAgent(await ensureManagedAgent(agent?.agentId || CHAT_AGENT_ID, agent, true, agent?.reasoningModel)), "Agent verified.")
               }
             >
               Verify now
@@ -203,7 +204,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 void runAgentAction(async () => {
                   const id = agent?.agentId || CHAT_AGENT_ID;
                   await deleteAgent(id);
-                  setAgent(await ensureManagedAgent(id, null, true));
+                  setAgent(await ensureManagedAgent(id, null, true, agent?.reasoningModel));
                 }, "Agent recreated fresh.")
               }
             >
@@ -225,7 +226,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
           {agentMsg && <p style={{ margin: "10px 0 0", fontSize: 12.5, color: T.textDim }}>{agentMsg}</p>}
 
           <p style={{ margin: "12px 0 0", fontSize: 12, color: T.textFaint }}>
-            This app manages only its Anything and Browser profiles by exact id. Other agents on your key are never
+            This app manages only its Anything, Browser, 3D View, and Large Images profiles by exact id. Other agents on your key are never
             listed or touched.
           </p>
         </div>

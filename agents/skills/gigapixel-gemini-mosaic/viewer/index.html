@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Deep Zoom Viewer</title>
+  <meta name="description" content="Interactive multi-resolution Deep Zoom viewer." />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <canvas id="dz-canvas"></canvas>
+
+  <div class="controls-pill">
+    <button id="btn-zoom-out" class="ctrl-btn" title="Zoom out">−</button>
+    <button id="btn-fit" class="ctrl-btn" title="Fit to screen">Fit</button>
+    <button id="btn-1to1" class="ctrl-btn" title="1:1 native resolution">1:1</button>
+    <button id="btn-zoom-in" class="ctrl-btn" title="Zoom in">+</button>
+  </div>
+
+  <div class="minimap-wrap" title="Click or drag to navigate">
+    <canvas id="minimap-canvas"></canvas>
+  </div>
+
+  <script src="deepzoom.js"></script>
+</body>
+</html>

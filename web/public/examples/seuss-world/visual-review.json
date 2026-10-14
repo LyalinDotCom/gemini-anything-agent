@@ -1,0 +1,20 @@
+{
+  "status": "experimental; major joins repaired, remaining local imperfection",
+  "major_repairs_verified": [
+    "airship contour and rigging",
+    "orphan head removed and roof coherent",
+    "upper train carriages and ghost bridge"
+  ],
+  "known_issues": [
+    {
+      "description": "Small lower locomotive front/track terminates abruptly",
+      "near_pixel": [
+        2000,
+        3500
+      ]
+    }
+  ],
+  "global_seamless_claim": false,
+  "generated_regions": 49,
+  "final_gemini_crop_repairs": 3
+}

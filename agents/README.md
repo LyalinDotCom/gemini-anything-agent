@@ -4,15 +4,25 @@ Everything the app loads into the deployed managed agent lives in this folder
 as plain files. Edit them directly to tune the agent; there are no copies of
 this content anywhere in the code.
 
-The Electron app can deploy this same payload under general Antigravity and dedicated Browser profile IDs. The profile changes fresh per-request guidance, not these mounted files, so the payload remains byte-identical.
+Both UIs deploy this same payload under their custom profile IDs. The web app also offers the 3D View and Large Images profiles. Profiles change fresh per-request guidance, not these mounted files, so the payload remains byte-identical. `shared/agentAssets.ts` lists every mounted asset for both UIs.
 
 | File | Where it goes |
 | --- | --- |
 | `AGENTS.md` | Mounted at `/.agents/AGENTS.md` — the durable instruction layer: extended abilities, routing rules, artifact conventions, response style. |
-| `skills/gemini-anything/SKILL.md` | Mounted at `/.agents/skills/gemini-anything/SKILL.md` — detailed gai usage and guardrails. |
-| `bin/gai` | Mounted at `/.agents/bin/gai` — the media CLI wrapper the skill invokes. |
+| `skills/gemini-anything/SKILL.md` | Mounted at `/.agents/skills/gemini-anything/SKILL.md` — official Gemini API CLI usage and guardrails. |
 | `skills/browser-testing/SKILL.md` | Mounted at `/.agents/skills/browser-testing/SKILL.md` — browser-testing workflow, artifact contract, and safety rules. |
 | `bin/browser` | Mounted at `/.agents/bin/browser` — the headless Playwright agent CLI launcher. |
+| `bin/gemini-api` | Mounted at `/.agents/bin/gemini-api` — installs and runs Google's checksum-verified Gemini API CLI v0.4.2 release for every media workflow. |
+| `bin/large-image-setup` | Mounted at `/.agents/bin/large-image-setup` — installs local image-composition and viewer-packaging dependencies. |
+| `skills/gigapixel-gemini-mosaic/` | Shared generic large-image engine, native checkpointed composition, crop repair, QA and deep-zoom packaging. |
+| `skills/dr-seuss-world/` | Shared optional world pack for the two-skill example; generic requests do not use this pack. |
+| `bin/object3d-setup` | Mounted at `/.agents/bin/object3d-setup` — installs native Blender, ffmpeg, and CPU geometry dependencies. |
+| `skills/photo-to-3d/` | Mounted at `/.agents/skills/photo-to-3d/` — the workflow plus native reconstruction and Blender scripts. |
+
+The 3D View profile generates and validates a full circle of photographic Gemini
+views inside its managed Linux agent. The shared photo-to-3d skill requires both
+opposite profiles and an inspected coverage manifest, then uses native processing
+and Blender to package image textures with transparency. Rounded photo is retired.
 
 ## Why there is no system prompt file
 
@@ -26,8 +36,8 @@ small per-request "invocation context" block (current date/time, sandbox
 paths, continuity notes), which is the one thing that must be fresh per call.
 
 The sandbox `/.env` is **not** a file here: it is generated at deploy time from
-the host `.env` (`GEMINI_API_KEY`, media/browser npm package versions, model overrides). API
-keys are redacted from config hashes and from anything shown in the UI.
+the user key (`GEMINI_API_KEY`) separately from the shared assets. API
+keys are never shown in the UI.
 
 ## How changes take effect
 

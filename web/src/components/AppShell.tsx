@@ -1,3 +1,4 @@
+import { isModelFile } from "../utils/modelFiles";
 import { useEffect, useRef, useState } from "react";
 import { cancelServerTurn, recoverPendingTurn } from "../chat/controller";
 import { resumeResearchIfNeeded } from "../gemini/deepResearch";
@@ -137,7 +138,7 @@ export function AppShell() {
 
   const openOutputFile = (file: OutputFileRecord) => {
     pauseAllMedia();
-    if (file.kind === "image" || file.kind === "video" || file.kind === "html" || file.kind === "text") {
+    if (isModelFile(file) || file.kind === "image" || file.kind === "video" || file.kind === "html" || file.kind === "text") {
       setAudioFile(null);
       setPreviewFile(file);
     } else if (file.kind === "audio") {
@@ -487,7 +488,7 @@ export function AppShell() {
               onOpenResourcePath={(path) => void openResourcePath(path)}
             />
             <AudioDock file={audioFile} onClose={() => setAudioFile(null)} />
-            <Composer key={`composer-${active.id}`} sessionId={active.id} />
+            <Composer key={`composer-${active.id}`} sessionId={active.id} onPreviewModel={openOutputFile} />
           </>
         )}
       </div>

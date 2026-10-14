@@ -23,6 +23,7 @@ const ICON_PATHS: Record<string, string> = {
   code: "M8 6 3 12l5 6m8-12 5 6-5 6M14 4l-4 16",
   sparkle: "M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3Zm7 11 .9 2.6L22.5 18l-2.6.9L19 21.5l-.9-2.6L15.5 18l2.6-1.4L19 14Z",
   brain: "M12 4a3 3 0 0 0-3 3v10a3 3 0 1 0 6 0V7a3 3 0 0 0-3-3Zm-3 4H7a3 3 0 0 0 0 6h2m6-6h2a3 3 0 0 1 0 6h-2",
+  cube: "M12 3 3 8v9l9 5 9-5V8l-9-5ZM3 8l9 5 9-5M12 13v9",
   menu: "M4 7h16M4 12h16M4 17h16",
   folder: "M3 6h6l2 2h10v11H3zM3 6v13",
 };

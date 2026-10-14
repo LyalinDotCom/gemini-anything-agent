@@ -1,0 +1,48 @@
+{
+  "method": "Gemini native crop edits, preserved128px context frame and32px boundary blend",
+  "base_sha256": "f72ba7906d51be3cb7f40ad4e8250da338c0764494a2520f70755dd31f83adfe",
+  "size": [
+    13334,
+    7500
+  ],
+  "patches": [
+    {
+      "name": "airships",
+      "box": [
+        4300,
+        0,
+        7052,
+        1536
+      ],
+      "input_sha256": "9c0415391ad13bd5e658084e016305fa6e4c15f659b69fad0cc772c9807e2fba",
+      "edited_sha256": "19c7b206acd78f4659cb0655db1fa799c9151b1496a37d6baa507a1e007ed839",
+      "cli_response_file": "airships-response.json"
+    },
+    {
+      "name": "character",
+      "box": [
+        0,
+        2400,
+        2752,
+        3936
+      ],
+      "input_sha256": "a1cb058e7fd2751393a7a30ec2437f849f89dfccb7a7f2d22676a0941c1564fb",
+      "edited_sha256": "def7ff613e39258fb7ebf4e8cfe9fbf58d699c3498a0b0122460bedebaa2d2f6",
+      "cli_response_file": "character-response.json"
+    },
+    {
+      "name": "bridge",
+      "box": [
+        1400,
+        2900,
+        4152,
+        4436
+      ],
+      "input_sha256": "b725490536fed7d8e571288bddf0e535dc04697bdb7d9bf764ba99709fe1d064",
+      "edited_sha256": "51986f2bb57861622cb76f420efafd647790edc39e3acaa8d39f67c80b3279e8",
+      "cli_response_file": "bridge-response.json"
+    }
+  ],
+  "final_sha256": "6ae9960adf93ba1b0a4e333ace803ea45c78f6cdaa07182c0a2dc8b87e5decc5",
+  "manual_visual_review_required": true
+}

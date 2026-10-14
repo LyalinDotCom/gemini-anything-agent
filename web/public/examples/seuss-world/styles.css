@@ -1,0 +1,103 @@
+:root {
+  --bg-canvas: #f4ede0;
+  --panel-bg: rgba(252, 248, 240, 0.92);
+  --panel-border: rgba(34, 42, 48, 0.14);
+  --ink-primary: #1c242b;
+  --shadow-soft: 0 8px 24px rgba(28, 36, 43, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-canvas);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+#dz-canvas {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  cursor: grab;
+  touch-action: none;
+}
+
+#dz-canvas:active {
+  cursor: grabbing;
+}
+
+/* Top-Right Zoom Buttons */
+.controls-pill {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  background: var(--panel-bg);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--shadow-soft);
+  padding: 5px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 20;
+}
+
+button.ctrl-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--ink-primary);
+  font-family: inherit;
+  font-size: 0.84rem;
+  font-weight: 600;
+  padding: 7px 11px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.14s ease, transform 0.1s ease;
+}
+
+button.ctrl-btn:hover {
+  background: rgba(28, 36, 43, 0.08);
+}
+
+button.ctrl-btn:active {
+  transform: scale(0.96);
+}
+
+/* Bottom-Right Minimap Navigator */
+.minimap-wrap {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  background: var(--panel-bg);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--shadow-soft);
+  border-radius: 10px;
+  padding: 4px;
+  cursor: crosshair;
+  z-index: 20;
+}
+
+#minimap-canvas {
+  display: block;
+  width: 196px;
+  height: 110px;
+  border-radius: 6px;
+}
+
+@media (max-width: 700px) {
+  #minimap-canvas {
+    width: 136px;
+    height: 76px;
+  }
+}

@@ -1,34 +1,15 @@
 # AGENTS.md — gemini-anything-agent
 
-One repo, one shared agent payload, multiple selectable profiles and UIs:
+The web chat app in `web/` is the active modernization target. `agents/` is the canonical managed-agent payload; `shared/agentAssets.ts` lists the identical assets mounted by both UIs. `app/` is the Electron harness and `cli/` is the legacy published GAI CLI; do not broaden web work into unrelated changes there.
 
-- `cli/` — source of the published npm CLI **[`@lyalindotcom/gai`](https://www.npmjs.com/package/@lyalindotcom/gai)** (bin: `gai`) — all media capability (image, video, TTS, music, transcription)
-- `agents/` — the managed-agent payload (AGENTS.md, media/browser launchers, skills) — **the single source of truth, SHARED by every profile and both UIs**
-- `app/` — Electron chat harness (reads `agents/` from disk at deploy time)
-- `web/` — static browser chat app, Firebase-hosted, user-supplied key (bundles `agents/` via Vite `?raw` imports)
+## Current rules
 
-## Hard rules — do not re-litigate
+1. All generated media and delegated Gemini operations use Google's official `google-gemini/gemini-api-cli` release through `bash /.agents/bin/gemini-api`. The latest verified release is v0.4.2. This supersedes the former requirement to use `@lyalindotcom/gai`; never deploy or suggest the retired media launcher in an active workflow.
+2. Discover capabilities from the installed CLI's `--help`, subcommand help and request schema. Do not implement model calls through a custom Python/REST client or wrapper library. Native helpers only process existing artifacts.
+3. Keep `agents/` shared. Both UIs deploy the same manifest and receive the key separately as `/.env`. No per-UI forks of instructions, skills or launchers. Never expose or commit keys.
+4. The shared official launcher installs checksum-verified published binaries into the durable workspace cache. Preserve HTTPS/proxy compatibility and noninteractive operation.
+5. Photographic 3D references and large-image regions are generated with Gemini inside the managed Linux agent. No third-party hosted 3D service or alternative generator. Local libraries and Blender may process/package those artifacts. Preserve photographic textures and transparency; do not return the rejected organic silhouette reconstruction.
+6. Read current official releases and SDK contracts when modernizing Managed Agents. Test complete web requests, stream recovery and actual artifacts before publishing to Firebase. Peer bug bashes use Opus 5.5 High and Gemini 4 Argon Medium; the primary agent owns verified fixes and final implementation.
+7. Preserve unrelated existing work. Scope GitHub changes to the web app, its shared agent payload, relevant tests and documentation. Keep large generated samples out of Git; retain or retrieve their published Firebase assets.
 
-1. **Media = the published `@lyalindotcom/gai` CLI, run via `npx`.** The sandbox gets a
-   one-line launcher (`agents/bin/gai` → `/.agents/bin/gai`) that `exec`s
-   `npx -y @lyalindotcom/gai@latest "$@"`. Agent docs tell the agent exactly one thing
-   about capabilities: discover them with `bash /.agents/bin/gai --help` (then subcommand
-   `--help`). Nothing model- or flag-specific goes into docs — future models/modalities
-   arrive through CLI updates, never doc edits. **NEVER** replace or augment this with a
-   local reimplementation, Python helper, wrapper library, or hand-rolled REST calls —
-   Dmitry has explicitly ordered this after a drift incident (a local `gemini_helper.py`
-   was once built in the predecessor repo; it was a mistake and was removed).
-2. **`agents/` stays shared.** Both UIs must deploy the identical payload from `agents/`;
-   never fork per-UI copies of instructions, skills, or the launcher. The key ships
-   separately as `/.env` (`GEMINI_API_KEY=…`) by BOTH UIs so the shared launcher works
-   byte-identically.
-3. **Never write a bare `gai` command in agent-facing docs** — unscoped `gai` on npm is an
-   unrelated third-party package (a GDB tool), and agents have historically npm-resolved
-   bare names to it. Always `bash /.agents/bin/gai` in docs and the scoped
-   `@lyalindotcom/gai` in code.
-4. `npx` works inside the managed-agent sandbox (HTTP proxy egress; launcher sets
-   `NODE_USE_ENV_PROXY=1` + npm cache under `/workspace`) — field-tested. Do not
-   "optimize" it away on networking grounds.
-
-The `web/` app was migrated from the retired `~/Source/Projects/ai-chatbot-agents` repo
-(2026-07-06); that project is archived and must not be resurrected as a separate agent.
+The web app migrated from the retired `~/Source/Projects/ai-chatbot-agents` repository. Do not resurrect that project.

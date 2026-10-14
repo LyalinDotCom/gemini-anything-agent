@@ -1,6 +1,7 @@
 // First-launch key onboarding (Spark KeyGate pattern): paste key → live validation
 // ping → stored in this browser only. The key never touches our servers because
 // there are none.
+import { LARGE_IMAGE_UI_READY } from "../agentProfiles";
 import { useState } from "react";
 import { validateKey } from "../gemini/client";
 import { setStoredKey } from "../gemini/keyStore";
@@ -111,6 +112,10 @@ export function KeyGate() {
             The key is checked against the agents API before we save it.
           </p>
         )}
+
+        <a href="/?sample3d=person-cat" style={{ display: "block", marginTop: 22, color: T.accent, fontSize: 13.5 }}>Explore the 3D View sample — no key needed ↗</a>
+
+        {LARGE_IMAGE_UI_READY && <a href="/?sampleLarge=seuss-world" style={{ display:"block",marginTop:12,color:T.accent,fontSize:13.5 }}>Explore the 100 MP world — no key needed ↗</a>}
 
         <div style={{ marginTop: 22, display: "flex", gap: 16, alignItems: "center" }}>
           <a

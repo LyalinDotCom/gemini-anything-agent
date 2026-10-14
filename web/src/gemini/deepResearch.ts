@@ -164,6 +164,7 @@ export async function sendResearchTurn(sessionId: string, text: string): Promise
     });
     // retries "none": an auto-retried POST would start a duplicate research run.
     const created = (await ai().interactions.create(params as never, {
+      maxRetries: 0,
       retries: { strategy: "none" },
     } as never)) as Record<string, unknown>;
     const interactionId = String(created.id ?? "");

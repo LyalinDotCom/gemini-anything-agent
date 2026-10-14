@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root="${TMPDIR:-/tmp}/gai-large-images"
+mkdir -p "$root"
+if ! python3 -m venv --help >/dev/null 2>&1; then
+  DEBIAN_FRONTEND=noninteractive apt-get update >"$root/setup.log" 2>&1
+  DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv >>"$root/setup.log" 2>&1
+fi
+[ -x "$root/venv/bin/python" ] || python3 -m venv "$root/venv"
+if ! "$root/venv/bin/python" -c 'import PIL,numpy,cv2' >/dev/null 2>&1; then
+  "$root/venv/bin/pip" install --disable-pip-version-check pillow numpy opencv-python-headless >>"$root/setup.log" 2>&1 || { tail -n 30 "$root/setup.log" >&2; exit 1; }
+fi
+printf '%s\n' "$root/venv/bin/python"

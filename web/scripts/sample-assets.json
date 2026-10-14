@@ -1,0 +1,38 @@
+[
+  {
+    "path": "person-cat.jpg",
+    "sha256": "ffdbdfdae46b1bfada88f0768c8fcf583554cadcf0bbcc26248edae47a26e1b8"
+  },
+  {
+    "path": "toy-rocket.jpg",
+    "sha256": "74806d6f4d15968a924ed988673a231c15e54fd03306a59c44c69767564662f5"
+  },
+  {
+    "path": "person-cat-views-v3.glb",
+    "sha256": "48e5895d3dfa0ff174574cb486e9fd2a9052c198efbe8752720abdc168f0bda5"
+  },
+  {
+    "path": "person-cat-views-v3.blend",
+    "sha256": "f5aa440ff051624688676468ba47725fafedd7d5c10a7cd1f4f961c0e1187ac9"
+  },
+  {
+    "path": "seuss-world/mosaic.png",
+    "sha256": "6ae9960adf93ba1b0a4e333ace803ea45c78f6cdaa07182c0a2dc8b87e5decc5"
+  },
+  {
+    "path": "seuss-world/mosaic.jpg",
+    "sha256": "6c20b7a032c087b0cf207feb307ac55c7a8b8aaf110033533e04f7d7bd1d9472"
+  },
+  {
+    "path": "seuss-world/preview_overview.jpg",
+    "sha256": "b64bbd5da76b76a5413822ce5c480fda52da7391d2f6789d9e5fb4efb7761da3"
+  },
+  {
+    "path": "seuss-world/deepzoom.zip",
+    "sha256": "6d2b57ad0b0632a80bb29a25a44e2d9fa71b88ba3d190067a3e72ed914ad6741"
+  },
+  {
+    "path": "seuss-world/overview.jpg",
+    "sha256": "4100618beb16a9fa240b8b96dfd688d5895c8caf65731cf0d14802c4bb5b1d5d"
+  }
+]

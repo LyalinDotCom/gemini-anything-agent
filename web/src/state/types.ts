@@ -1,9 +1,13 @@
+import { MODELS } from "../models";
+import type { LargeImageTemplate } from "../../../shared/largeImageProfile";
 import type { Usage } from "../gemini/streamAdapter";
 import type { AgentMode } from "../agentProfiles";
+import type { Object3dMethod } from "../../../shared/object3dProfile";
 
 export type SessionMode = "chat" | "deep-research";
 
 export interface RunOptions {
+  agentModel: string;
   store: boolean;
   autoContinue: boolean;
   reuseEnvironment: boolean;
@@ -17,9 +21,13 @@ export interface RunOptions {
   overrideEnvironment: boolean;
   environmentId: string;
   previousInteractionId: string;
+  useCredential: boolean;
+  credentialId: string;
+  credentialDomain: string;
 }
 
 export const DEFAULT_RUN_OPTIONS: RunOptions = {
+  agentModel: MODELS.text,
   store: true,
   autoContinue: true,
   reuseEnvironment: true,
@@ -33,10 +41,15 @@ export const DEFAULT_RUN_OPTIONS: RunOptions = {
   overrideEnvironment: false,
   environmentId: "",
   previousInteractionId: "",
+  useCredential: false,
+  credentialId: "",
+  credentialDomain: "",
 };
 
 export interface OutputFileRecord {
   fingerprint: string;
+  remoteOnly?: boolean;
+  environmentId?: string;
   path: string;
   label: string;
   kind: "image" | "audio" | "video" | "html" | "text" | "file";
@@ -55,6 +68,16 @@ export interface Session {
   mode: SessionMode;
   /** Selected before the first turn, then pinned for the life of the conversation. */
   agentMode?: AgentMode;
+  /** Photographic object method; Blender packages every method. */
+  object3dMethod?: Object3dMethod;
+  largeImageTemplate?: LargeImageTemplate;
+  /** Gallery-selected photo, consumed by the composer without sending a turn. */
+  samplePhoto?: "person-cat" | "rocket";
+  /** Shared payload installed when the photographic workspace was started. */
+  object3dPayloadFingerprint?: string;
+  agentPayloadFingerprint?: string;
+  migrationContext?: string | null;
+  cancelNotice?: string;
   /** Advanced request controls, scoped to this conversation. */
   runOptions?: RunOptions;
   /** Display name for a user-approved local project directory handle stored in IDB. */
@@ -81,7 +104,7 @@ export interface Session {
    * not local cache — is the source of truth and we reattach. Absent = finished
    * state, render purely from cache with zero server calls.
    */
-  pending?: { interactionId: string; messageId: string; startedAt: number } | null;
+  pending?: { interactionId: string; messageId: string; startedAt: number; workflowFingerprint?: string } | null;
 }
 
 export type MessageStatus = "complete" | "streaming" | "stopped" | "error";

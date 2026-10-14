@@ -7,7 +7,7 @@ export function AboutPanel({ onClose }: { onClose: () => void }) {
   const parts = [
     ["Web + Electron", "Two chat surfaces with the same profiles, recovery, files, and previews."],
     ["Managed agent", "A hosted Linux workbench mounting the shared agents/ payload."],
-    ["gai + Browser", "Published CLI launchers add media creation and real headless website testing."],
+    ["Gemini API CLI + Browser", "Google’s official CLI and a browser launcher add media creation and real headless website testing."],
   ];
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 60, display: "grid", placeItems: "center" }}>

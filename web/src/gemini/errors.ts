@@ -42,7 +42,7 @@ export function toFriendly(e: unknown): FriendlyError {
   const low = raw.toLowerCase();
   const status = extractStatus(e);
 
-  if ((e as Error)?.name === "AbortError" || low.includes("aborted")) {
+  if ((e as Error)?.name === "AbortError" || (status === undefined && low.includes("aborted"))) {
     return new FriendlyError("aborted", "Stopped.");
   }
   if (low.includes("api key not valid") || low.includes("api_key_invalid") || status === 401 || status === 403) {

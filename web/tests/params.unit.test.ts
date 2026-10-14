@@ -3,6 +3,14 @@ import { buildInteractionParams, functionResultPart, tools } from "../src/gemini
 import { MODELS } from "../src/models";
 
 describe("buildInteractionParams", () => {
+  test("attaches OAuth by credential id while preserving a continuing environment and seed files", () => {
+    const sources = [{ type: "inline" as const, target: "/.env", content: "GEMINI_API_KEY=test-key\n" }];
+    const config = { network: { allowlist: [{ domain: "api.example.com", credential: "user-connection" }, { domain: "*" }] }, env: { SERVICE_TOKEN: { credential: "service-key" } } };
+    const body = buildInteractionParams({ agent: "gai-anything-v1", input: "continue", previousInteractionId: "turn-1", environmentId: "existing-env", seedSources: sources, environmentConfig: config, stream: false });
+    expect(body.environment).toEqual({ type: "remote", environment_id: "existing-env", sources, ...config });
+    expect(body.previous_interaction_id).toBe("turn-1");
+    expect(JSON.stringify(body)).not.toContain("refresh_token");
+  });
   test("agent turn 1 auto-enables remote environment", () => {
     const body = buildInteractionParams({
       agent: MODELS.chatAgentBase,
@@ -110,3 +118,7 @@ describe("buildInteractionParams", () => {
     expect(part).toEqual({ type: "function_result", call_id: "call_1", name: "generate_image", result: "ok" });
   });
 });
+
+ test("base agent reasoning selection uses the current Antigravity config schema",()=>{const body=buildInteractionParams({agent:MODELS.chatAgentBase,agentModel:MODELS.reasoning,input:"hello",stream:true});expect(body.agent_config).toEqual({type:"antigravity",model:MODELS.reasoning});});
+
+ test("custom agents never receive unsupported runtime config overrides",()=>{const body=buildInteractionParams({agent:"gai-anything-v1",agentModel:MODELS.reasoning,thinkingSummaries:"auto",input:"hello",stream:true});expect(body.agent_config).toBeUndefined();});

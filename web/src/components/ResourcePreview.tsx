@@ -1,9 +1,12 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { isModelFile } from "../utils/modelFiles";
 import type { OutputFileRecord } from "../state/types";
 import { getMediaBase64, getMediaUrl } from "../storage/messages";
 import { T } from "../tokens";
 import { Icon, IconButton, Spinner } from "./atoms";
 import { buildResourceUrlMap, rewriteHtmlResourceUrls } from "./resourceUrls";
+const DeepZoomViewer = lazy(() => import("./DeepZoomViewer"));
+const ModelViewer = lazy(() => import("./ModelViewer"));
 
 function fileName(file: OutputFileRecord): string {
   return file.label.split("/").filter(Boolean).pop() || "resource";
@@ -166,6 +169,8 @@ export function ResourceLightbox({ file, files, onClose }: { file: OutputFileRec
       </div>
       <div style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}>
         {!url && <Spinner size={20} color={T.text} />}
+        {url && /deepzoom\.zip$/i.test(file.label || file.path) && <Suspense fallback={<Spinner size={20}/>}><DeepZoomViewer url={url}/></Suspense>}
+        {url && isModelFile(file) && <Suspense fallback={<Spinner size={20} />}><ModelViewer url={url} name={fileName(file)} /></Suspense>}
         {url && file.kind === "image" && (
           <img
             src={url}

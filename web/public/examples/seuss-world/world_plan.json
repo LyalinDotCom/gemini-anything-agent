@@ -1,0 +1,209 @@
+{
+  "world_name": "The Whimsical Wonder-Continent of Oobladore",
+  "world_overview": "A vast, joyous storybook continent crafted in the timeless style of Dr. Seuss illustration. The world spans high azure skies filled with soaring patchwork airships and floating cloud isles, descending through candy-striped crags and cascading turquoise waterfalls into bustling valleys full of S-curved leaning towers, spiral-roofed workshops, looping mono-rail contraptions, and groves of fluffy pom-pom truffula-style trees, down to joyful coastal deltas and carnival harbors.",
+  "style": "Original Dr. Seuss storybook illustration style. Masterful loose black ink line art with whimsical expressive hatching, crosshatching, and contour lines on warm cream textured paper (#fdf6e7). Vibrant transparent watercolor washes in coral-pink, bright aquamarine-turquoise, sunny buttercup-yellow, tangerine orange, and fresh mint green. Joyous, playful, warm storybook energy.",
+  "style_rules": "Strictly ZERO straight vertical walls, generic rectangular European houses, Tudor half-timbering, triangular gable roofs, medieval stone castles, or realistic green broccoli trees. Every house, workshop, arch, and tower MUST lean, bend in playful S-curves, flare wider at the top than the base, perch precariously on striped stilts, and end in coiling curlicues. Flora consists of slender striped trunks topped by fluffy spherical pom-pom crowns in hot pink, coral, turquoise, yellow, and tangerine, plus oversized chartreuse fiddlehead ferns. Every region contains 15-25 visible expressive cartoon creatures (120-210 px tall) with fuzzy round bellies, floppy ears, springy antennae, striped tall hats, and polka-dot vests, riding whimsical contraptions like patchwork ornithopter-bicycles, multi-bell brass horns, and teapot paddleboats. Strict continuity: rivers, bridges, railway tracks, and hill contours connect seamlessly across tile boundaries.",
+  "macro_map_prompt": "Wide-angle panoramic master map of the complete Whimsical Wonder-Continent of Oobladore in classic Dr. Seuss storybook illustration style. Warm cream paper background (#fdf6e7) with vibrant ink linework and rich watercolor washes of coral pink, bright turquoise, tangerine orange, and buttercup yellow. Top sky tier filled with soaring patchwork airships, curly white clouds, and floating mini-islands. Upper tier features slender crags with leaning spiral observatories and tumbling turquoise waterfalls. Middle tier is a bustling valley network of S-curved striped buildings, loop-the-loop brass rail tracks, and candy-striped pom-pom tree forests. Lower tier features meandering turquoise rivers with curved arch bridges leading to a vibrant coastal delta with teapot paddleboats and carnival piers. Inhabited by dozens of joyful whimsical creatures. Zero straight lines, zero European Tudor houses. Perfectly balanced 16:9 panoramic storybook continent composition.",
+  "grid": [
+    7,
+    7
+  ],
+  "districts": {
+    "0,0": {
+      "title": "Zephyr Isle & Kite-Glider Loft",
+      "scene": "High western sky realm with floating pastel cumulus isles. A leaning corkscrew weather-station on striped stilts anchors three giant patchwork kite-gliders. Six long-eared Snooflers in striped vests steer flying bicycle-ornithopters between spiral perches. Wispy curlicue cloud trails drift eastward into neighboring skies."
+    },
+    "0,1": {
+      "title": "Cumulus Spire & Whistle-Cloud Perch",
+      "scene": "Floating marshmallow-puff islands connected by candy-striped rope bridges. A central curled brass flute-tower blows multi-colored smoke puffs into the azure sky. Ten feathered Piptoots in polka-dot bowties ride pedal-powered winged unicycles across suspension wires connecting to adjacent clouds."
+    },
+    "0,2": {
+      "title": "The Great Patchwork Air-Galleon Flotilla",
+      "scene": "Mid-upper sky dominated by three billowing patchwork zeppelins with striped envelopes in coral and turquoise. Suspended wicker gondolas feature brass telescopes and spinning pinwheel propellers. Twelve joyful Whimzees wave from leaning balconies, while glider-bikes sail toward the central cloud harbor."
+    },
+    "0,3": {
+      "title": "Apex Cloud Citadel of Oobladore",
+      "scene": "The highest floating landmass, crowned by an opulent S-curved palace with flared onion dome tips and curling spires. A grand brass trumpet array chimes over the continent. Sixteen fuzzy-bellied royal Snoodlers in tall striped stovepipe hats operate wind-catching sails, with aerial gondola cables stretching east and west."
+    },
+    "0,4": {
+      "title": "Breezy Bell-Tower & Windmill Spire",
+      "scene": "A floating island of lavender moss holding a teetering seven-tier windmill tower with scalloped turquoise blades. Brass wind-chimes hang from curved gables. Eleven feathered Flitter-beasts in striped caps pedal tandem tandem-gliders, guiding spiral cloud currents flowing from the central citadel toward the eastern peaks."
+    },
+    "0,5": {
+      "title": "The Sunburst Balloon Harbor",
+      "scene": "A bustling aerial mooring yard tethered to floating crags. Giant tangerine and buttercup-striped hot air balloons dock at curved wooden gangplanks. Fourteen cheery Grin-birds and fuzzy hoppers pack crates of starfruit onto pedal-copters, preparing for flights across the continental skies."
+    },
+    "0,6": {
+      "title": "Far-East Aurora Roost & Dawn Watch",
+      "scene": "The easternmost aerial promontory where swirling iridescent dawn-mist curls around crooked spiral towers. A giant brass horn with four coiled bells catches morning breezes. Ten jaunty Plumed Pips in polka-dot scarves fly pedal-bicycles with feather-spoke wheels, looking out over the great continental horizon."
+    },
+    "1,0": {
+      "title": "Zephyr Peak & Glider-Launch Crag",
+      "scene": "Jagged yet whimsical pastel pink mountain pinnacle dropping sheer to western foothills. A teetering wooden launch ramp juts over the precipice, supporting three glider-craft with striped wings. Twelve helmeted Wizzlers with spiral antennae cheer as flight-riders take off into the cloud-strewn skies above."
+    },
+    "1,1": {
+      "title": "Singing Falls & The Coral Aqueduct",
+      "scene": "A magnificent turquoise waterfall roaring down striped purple cliff faces. A slender arched coral-pink aqueduct spans the chasm, carrying bubbling water toward eastern valleys. Fourteen fuzzy-tailed Bouncers in striped sweaters fish with curly poles from precarious stilt-shacks clinging to the wet rock."
+    },
+    "1,2": {
+      "title": "The High Observatory of Gribble-Crag",
+      "scene": "Perched atop a spiral stone spire, an astronomical dome twists like a seashell with three brass telescoping lenses. Cantilevered wooden stairways snake down the cliff. Fifteen bespectacled Snorkel-mice in red bowties calibrate spinning globe contraptions and adjust signal mirrors reflecting morning light."
+    },
+    "1,3": {
+      "title": "Crown-Peak Pass & The Great Sky-Tram",
+      "scene": "The central continental mountain pass connecting north and south. Massive striped wooden towers support heavy braided ropes where two enclosed brass passenger cars swing over yawning chasms. Eighteen travelers in colorful tall caps wave cheerily, while mountain goats with curled horns graze on turquoise moss."
+    },
+    "1,4": {
+      "title": "Echo Canyon & The Seven-Trumpet Spire",
+      "scene": "A deep winding canyon with terraced pink-and-cream cliff dwellings. A colossal brass musical organ with seven coiled flared bells is powered by a plunging mountain torrent. Sixteen musical Fiddlers in checkered vests pump giant bellows and blow joyful notes echoing down into the valleys below."
+    },
+    "1,5": {
+      "title": "Pine-Pom Crest & Mountain Watch",
+      "scene": "High rocky ridgeline populated by slender pom-pom trees with bright magenta tufts swaying in mountain gusts. A crooked lookout cabin on three tall striped stilts overlooks the eastern valley slopes. Thirteen fuzzy Lookouts in tasseled nightcaps peer through brass spyglasses at incoming airships."
+    },
+    "1,6": {
+      "title": "Sunrise Spire & The Eastern Mist Falls",
+      "scene": "Dramatic eastern sea-cliffs where high waterfalls plunge into mist clouds. A spiral stone watchtower topped with a gilded weather-rooster overlooks the great ocean horizon. Twelve adventurous Pip-scouts in yellow boots hoist colorful pennants on curling flagpoles alongside a winding cliff staircase."
+    },
+    "2,0": {
+      "title": "Western Foothill Orchards & Corkscrew Mills",
+      "scene": "Rolling coral-and-cream terraced hills planted with spiral melon vines and yellow pom-pom trees. Two leaning corkscrew grist mills with scalloped blades grind glowing blue grain. Fourteen merry Farmers in striped suspenders roll giant round striped pumpkins onto wooden handcarts."
+    },
+    "2,1": {
+      "title": "Truffle-Tuft Forest & Mossy Steeps",
+      "scene": "A dense, vibrant forest of iconic pom-pom trees with yellow-and-black striped trunks and fluffy crowns in hot pink, teal, and tangerine. Winding stepping-stone paths weave between mossy boulders. Sixteen fluffy Poggle-bears in knit vests gather fallen tufts into oversized wicker backpacks."
+    },
+    "2,2": {
+      "title": "Cascading Torrent Gorge & Salmon-Wheel",
+      "scene": "A foaming turquoise river rushing through a deep gorge lined with leaning stilt cottages. A massive wooden paddle-wheel with brass cups lifts river water into irrigation troughs. Seventeen lively Frizzlers pedal tandem water-pumps and net leaping spotted river-fish from rope footbridges."
+    },
+    "2,3": {
+      "title": "The High Terrace Plaza of Oobladore",
+      "scene": "Sprawling stone-paved terrace overlooking the central continental valley. Curved candy-striped colonnades and tiered fountain pools of bubbling mint water. Twenty-two bustling citizens in tall curved hats and polka-dot dresses stroll between pastry carts, listen to brass horn quartets, and feed tame hoop-birds."
+    },
+    "2,4": {
+      "title": "Whistlewind Glade & Fern Grotto",
+      "scene": "Gentle rolling hills carpeted in chartreuse fiddlehead ferns coiling six feet high. Slender turquoise pom-pom trees whisper in the wind. Fifteen curious Snuzzle-beasts with floppy velvet ears play hide-and-seek among hollow musical hollow-logs that whistle harmoniously as breezes blow through."
+    },
+    "2,5": {
+      "title": "Copper-Pipe Springs & The Hillside Spa",
+      "scene": "Terraced hot-water springs steaming with pale lavender mist. An intricate network of curved copper tubes and spouts feeds warm turquoise baths. Eighteen relaxed Oobladites in striped swim-caps soak in scalloped tubs, sipping fizzy sassafras tea delivered by pulley-baskets."
+    },
+    "2,6": {
+      "title": "Eastern Ridge Vineyard & Loom-Hills",
+      "scene": "High eastern terraced hills where striped candy-cane trellises support weeping purple berry clusters. A teetering weaving-mill with a curling roof weaves berry-dyed silk into bright banners. Fourteen nimble Weavers in aprons hang long turquoise and orange pennants across hillside clotheslines."
+    },
+    "3,0": {
+      "title": "Western Rail Loop & Station-on-Stilts",
+      "scene": "A bustling railway terminal elevated on thirty-foot candy-striped wooden stilts. An whimsical steam locomotive with a curved accordion boiler and coiled smokestack loops along elevated wooden trestles. Eighteen travelers in top hats board passenger cars decorated with scalloped awnings and brass lanterns."
+    },
+    "3,1": {
+      "title": "Buttercup Market & Baker's Row",
+      "scene": "Vibrant marketplace street lined with S-curved shops flaring wide at the second stories. Pastel awnings in mint and coral shade stalls heaped with spherical loaves and striped pies. Twenty-one cheerful merchants and shoppers with expressive smiles barter, laugh, and push multi-wheeled pie-barrows."
+    },
+    "3,2": {
+      "title": "The Looping Mono-Rail & River Crossing",
+      "scene": "The great turquoise river sweeps through a canyon crossed by an acrobatic double-loop monorail track. A whimsical single-car train swoops through the loop upside down while passengers wave gleefully. Nineteen spectators on a curved suspension bridge cheer and wave colorful ribbons."
+    },
+    "3,3": {
+      "title": "Grand Confluence Plaza & The Great Clock-Tower",
+      "scene": "The geographic and civic heart of Oobladore. Two winding turquoise rivers merge beneath a grand three-arch stone bridge. At center stands a four-story leaning clock tower with five curved faces, eccentric cuckoo-birds, and spinning sun-gears. Twenty-five festive citizens celebrate a carnival in the plaza."
+    },
+    "3,4": {
+      "title": "The Grand Brass Symphonium & Music Hall",
+      "scene": "An astonishing concert pavilion shaped like a gigantic coiled brass sousaphone with twelve flared bells projecting in all directions. Steam-powered pistons strike silver chimes. Twenty-three enthusiastic musicians and listeners in polka-dot tuxedos dance across the stepped amphitheater."
+    },
+    "3,5": {
+      "title": "Tangerine Tramway & Guild of Tinkers",
+      "scene": "A busy street of eccentric inventors' workshops with smoking crooked chimneys, spinning gyroscopes, and exterior spiraling conveyor belts. A yellow tramcar with striped bicycle wheels climbs the cobbled incline. Twenty busy Tinkers in leather aprons test spring-loaded walking boots and folding umbrellas."
+    },
+    "3,6": {
+      "title": "Eastern River Bend & Waterfront Bazaars",
+      "scene": "The wide river bends gracefully toward the eastern hills. Stilt-supported wooden boardwalks crowd the shore with curlicue merchant stalls selling sparkling bottled elixirs and pom-pom wool. Nineteen river traders in striped turbans unload cargo from long curved canoe-barges."
+    },
+    "4,0": {
+      "title": "The Unicycle Highway & Rolling Green",
+      "scene": "A winding, banked ribbon of smooth pastel brick curving across rolling lime-green hills. Dozens of Oobladites ride outlandish unicycles—tall unicycles with umbrella seats, triple-wheeled unicycles, and unicycles with horns. Twenty riders wave playfully as they zip down the grassy slopes."
+    },
+    "4,1": {
+      "title": "The Teapot Foundry & Kettle Works",
+      "scene": "An eccentric industrial district of leaning bronze workshops shaped like giant teapots, percolators, and whistling kettles. Harmless fragrant steam puffs into the sky from curlicue spouts. Eighteen smiths and tea-brewers in checkered smocks pour glowing herbal tea into barrels on rolling hand-trolleys."
+    },
+    "4,2": {
+      "title": "The Trampoline Courtyard & Bounce Park",
+      "scene": "A joyful public garden where circular striped trampolines are built flush with the grassy turf. Groves of coral-pink pom-pom trees border the grounds. Twenty-two young Bouncers and agile acrobats perform mid-air somersaults, catch flying hoops, and leap onto elevated cushioned perches."
+    },
+    "4,3": {
+      "title": "Central Canal Lock & Paddle-Wheel Mill",
+      "scene": "A vital water-lock system where turquoise riverboats are raised and lowered between valley elevations. Massive wooden gears and striped water-gates turn as water cascades through spillways. Twenty-four dockworkers, captains, and bystanders oversee the passage of ornate river-freighters."
+    },
+    "4,4": {
+      "title": "The Whimsical Automaton Yard",
+      "scene": "A courtyard filled with friendly walking brass robots with teapot torsos, spring legs, and cheerful painted smiles. Inventors adjust winding keys and oil squeaky knee joints. Nineteen eccentric mechanics in striped overalls test self-steering baby-carriages and mechanical dog-contraptions."
+    },
+    "4,5": {
+      "title": "Fiddlehead Farm & Sprout Conservatory",
+      "scene": "A sprawling botanical garden dominated by three leaning glasshouses with scalloped emerald panes and spiral vents. Enormous curling fiddlehead ferns and polka-dot toadstools grow ten feet tall. Eighteen botanists in floppy gardening hats weed raised beds with curly rakes and water-cans."
+    },
+    "4,6": {
+      "title": "Eastern Meadow Trail & Picnic Common",
+      "scene": "Idyllic rolling meadows dotted with multi-colored pom-pom clusters and striped canvas pavilion tents. A serpentine stone footpath leads eastward. Twenty joyful families sit on checkered blankets, enjoy tower sandwiches, play badminton with hoop-rackets, and fly dragon-tail kites."
+    },
+    "5,0": {
+      "title": "Western Estuary Docks & Clam-Boat Yard",
+      "scene": "The western river mouth opens into tidal saltwater flats. Cottages on tall striped timber stilts are connected by wobbling suspension footbridges. Seventeen fisher-folk in yellow sou'westers steer clam-shaped rowboats with spiral oars and mend giant lavender fishing nets."
+    },
+    "5,1": {
+      "title": "The Accordion Bridge & Marsh Market",
+      "scene": "A marvelous expandable wooden bridge that flexes like an accordion across tidal channels. Floating market stalls anchored to bamboo piles sell pickled kelp and sweet river-plums. Nineteen shoppers and street acrobats balance on wooden railings, chatting and laughing above the splashing waters."
+    },
+    "5,2": {
+      "title": "Pelican-Perch Hamlet & Stilt-Walk Commons",
+      "scene": "A picturesque village built entirely over the turquoise estuary on skinny criss-crossing stilts. Giant friendly pelican-birds with striped bills nest on chimney tops. Eighteen villagers walk on five-foot stilts across shallow tidal pools, carrying woven baskets of blue oysters."
+    },
+    "5,3": {
+      "title": "The Great Delta Confluence & Water Gate",
+      "scene": "The three main river channels unite into a grand tidal delta. A monumental stone sea-arch with carved curlicue wave motifs spans the channel. Twenty-four sailors and travelers aboard three double-decker paddleboats wave to crowds gathered on shoreward viewing terraces."
+    },
+    "5,4": {
+      "title": "Coral-Bank Promenade & Shellfish Fair",
+      "scene": "A curving seafront promenade paved with mother-of-pearl mosaics and flanked by leaning gas-lamp posts in turquoise and coral. Open-air stalls sell roasted sunflower seeds and chilled coral-fruit punch. Twenty-one holidaymakers in striped parasols and boaters stroll along the water's edge."
+    },
+    "5,5": {
+      "title": "Lagoon of the Singing Lilies",
+      "scene": "A serene saltwater lagoon crowded with giant floating lily-pads big as dining tables. Pink and saffron bell-blossoms chime melodiously as ripples rock them. Eighteen swimmers and rowers in striped striped swimsuits paddle round canoe-tubs between the giant pads."
+    },
+    "5,6": {
+      "title": "Eastern Promontory & The Spiral Lighthouse",
+      "scene": "A towering, helical stone lighthouse twisting like a narwhal tusk, painted in bold red-and-white candy stripes. At its peak, a rotating brass lantern beams over eastern shoals. Seventeen coast-guards and cliff dwellers hoist signal flags and watch playful porpoises leap in the surf."
+    },
+    "6,0": {
+      "title": "Cape Snood & Western Tidepool Gazebos",
+      "scene": "The southwestern rocky cape where turquoise ocean waves break against candy-striped sea-stacks. Three ornate wooden gazebos with curly pagoda roofs overlook deep tidepools glowing with neon anemones. Sixteen beachcombers in sun-visors collect spiraling seashells and watch sea-turtles."
+    },
+    "6,1": {
+      "title": "Bathtub Steam-Launch Marina",
+      "scene": "A hilarious harbor crowded with motorized floating contraptions crafted from porcelain clawfoot bathtubs, complete with copper shower-head smokestacks and brass paddle-wheels. Nineteen captains in naval caps and polka-dot cravats chug cheerily across the bay in their bubbling vessels."
+    },
+    "6,2": {
+      "title": "Carnival Pier & The Loop-the-Loop Rollercoaster",
+      "scene": "A wooden pleasure pier extending three hundred yards into the turquoise sea. A rickety-looking yet joyous wooden coaster with striped cars loops upside-down over the water. Twenty-two screaming and laughing riders thrill to the dips while spectators eat spun-sugar clouds on sticks."
+    },
+    "6,3": {
+      "title": "Grand Harbor of Oobladore & Flagship Regatta",
+      "scene": "The principal oceanic seaport of the continent. The harbor is packed with whimsical multi-sail galleons with striped sails, paddle-wheel flagships, and dragon-prowed excursion yachts. Twenty-five festive sailors and captains celebrate the annual continental regatta with brass fanfares and bunting."
+    },
+    "6,4": {
+      "title": "The Carousel-on-the-Waves & Musical Pier",
+      "scene": "A round pavilion built on piles over the gentle ocean swells, housing a grand carousel of mythical sea-creatures—striped sea-horses, winged otters, and smiling whales. Twenty-one happy riders bob up and down to the music of a water-powered calliope organ."
+    },
+    "6,5": {
+      "title": "Southern Shell Beach & Kite-Boarding Cove",
+      "scene": "A crescent of pale pink sand scattered with giant pastel spiral shells. Glider-kites in hot pink and lime green pull brave surfers across the turquoise rollers. Eighteen sunbathers and kite-fliers cheer from candy-striped cabanas along the dune ridge."
+    },
+    "6,6": {
+      "title": "Far-South Shoals & The Floating Festival Barge",
+      "scene": "The southeastern ocean limit where a colossal floating wooden barge hosts an open-air carnival with striped pavilions, firework catapults, and dancing troupes. Twenty-two merry revelers celebrate under colorful lantern strings as dolphins leap in the turquoise ocean swells."
+    }
+  }
+}

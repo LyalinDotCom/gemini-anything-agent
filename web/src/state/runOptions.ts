@@ -2,14 +2,16 @@ import { DEFAULT_RUN_OPTIONS, type RunOptions } from "./types";
 
 /** One defaulting layer for every reader: sessions persist only what the user
  *  changed; everything else tracks the live defaults. */
-export function effectiveRunOptions(session: { runOptions?: RunOptions }): RunOptions {
-  return { ...DEFAULT_RUN_OPTIONS, ...(session.runOptions ?? {}) };
+export function effectiveRunOptions(session: { runOptions?: RunOptions; agentMode?: string }): RunOptions {
+  const options = { ...DEFAULT_RUN_OPTIONS, ...(session.runOptions ?? {}) };
+  return (session.agentMode === "object3d" || session.agentMode === "large-image") ? { ...options, store: true, background: true } : options;
 }
 
 // Scalar options the composer badge counts, compared against their defaults.
 // The payload fields behind the override booleans (systemInstruction, toolTypes,
 // environmentId) are represented by their booleans, not their content.
 const COUNTED_KEYS = [
+  "agentModel",
   "store",
   "autoContinue",
   "reuseEnvironment",
@@ -19,6 +21,7 @@ const COUNTED_KEYS = [
   "overrideSystemInstruction",
   "overrideTools",
   "overrideEnvironment",
+  "useCredential",
 ] as const;
 
 export function runOptionCount(options: RunOptions): number {

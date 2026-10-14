@@ -38,9 +38,21 @@ notes/agent-bug-reports/
 !app/src/renderer/assets/sample-prompts/
 !app/src/renderer/assets/sample-prompts/*.png
 !web/public/*.png
+!web/public/examples/
+!web/public/examples/*.jpg
+!web/public/examples/README.txt
+__pycache__/
+*.pyc
 
 # Logs and local state
 *.log
 .DS_Store
 .gemini-anything-agent/
 chats/
+
+# Generated large-image viewer bundle; regenerate or retrieve from Firebase.
+web/public/examples/seuss-world/deepzoom.zip
+
+# Download generated models with npm run samples:sync; never commit large binaries.
+web/public/examples/*.glb
+web/public/examples/*.blend

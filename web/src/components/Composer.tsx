@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { cancelServerTurn, sendTurn, type TurnInput } from "../chat/controller";
+import { credentialBindingError } from "../../../shared/credentialBinding";
+import { cancelServerTurn, recoverPendingTurn, sendTurn, type TurnInput } from "../chat/controller";
 import { sendResearchTurn } from "../gemini/deepResearch";
 import { useStore } from "../state/store";
 import { mediaId as makeMediaId, putMedia, base64ToBlob, getMediaBase64, getMediaUrl } from "../storage/messages";
@@ -13,6 +14,8 @@ import { RunOptionsPanel } from "./RunOptionsPanel";
 import { profileForSession } from "../agentProfiles";
 import { effectiveRunOptions, runOptionCount } from "../state/runOptions";
 import { resizeComposerTextarea, type ComposerScrollAlignment } from "../utils/composerTextarea";
+import { OBJECT3D_METHODS } from "../../../shared/object3dProfile";
+import type { OutputFileRecord } from "../state/types";
 
 interface Draft {
   id: string;
@@ -28,7 +31,17 @@ interface AudioDraft {
 
 type MicState = "idle" | "recording";
 
-export function Composer({ sessionId }: { sessionId: string }) {
+function GenerationProgress({ startedAt, label }: { startedAt: number; label: string }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 5000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const seconds = Math.max(0, Math.floor((now-startedAt)/1000));
+  return <p style={{ margin: "8px 0", color: T.textDim, fontSize: 12 }}>Generating your {label} · {Math.floor(seconds/60)}m {seconds%60}s · This run survives reloads.</p>;
+}
+
+export function Composer({ sessionId }: { sessionId: string; onPreviewModel?: (file: OutputFileRecord) => void }) {
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [audioDraft, setAudioDraft] = useState<AudioDraft | null>(null);
   const [compressing, setCompressing] = useState(false);
@@ -50,9 +63,13 @@ export function Composer({ sessionId }: { sessionId: string }) {
   const sendOnEnter = useStore((s) => s.settings.sendOnEnter);
   const session = useStore((s) => s.sessions[sessionId]);
   const isEmptySession = useStore((s) => (s.messages[sessionId]?.length ?? 0) === 0);
-  const research = profileForSession(session ?? {}).research;
+  const profile = profileForSession(session ?? {});
+  const research = profile.research;
+  const object3d = Boolean(profile.object3dPersona);
+  const largeImage = Boolean(profile.largeImagePersona);
   const options = effectiveRunOptions(session ?? {});
   const optionCount = runOptionCount(options);
+  const connectionError = research ? null : credentialBindingError(options);
 
   // Voice goes INTO the agent chain as an audio part — the container hears it;
   // nothing is transcribed on the client.
@@ -130,14 +147,14 @@ export function Composer({ sessionId }: { sessionId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [retryMessage]);
 
-  const addFiles = async (files: FileList | null) => {
+  const addFiles = async (files: FileList | File[] | null) => {
     if (!files?.length) return;
     setCompressing(true);
     try {
       const next: Draft[] = [];
       for (const file of [...files].slice(0, 4 - drafts.length)) {
         if (!file.type.startsWith("image/")) continue;
-        const dataUrl = await fileToCompressedDataUrl(file);
+        const dataUrl = object3d ? await blobToDataUrl(file) : await fileToCompressedDataUrl(file);
         next.push({ id: uid(), dataUrl, base64: dataUrlToBase64(dataUrl), mimeType: dataUrlMime(dataUrl) });
       }
       setDrafts((d) => [...d, ...next]);
@@ -146,9 +163,33 @@ export function Composer({ sessionId }: { sessionId: string }) {
     }
   };
 
+  const loadSample = async (subject: "rocket" | "person-cat") => {
+    try {
+      const filename = subject === "rocket" ? "toy-rocket.jpg" : "person-cat.jpg";
+      const response = await fetch(`/examples/${filename}`);
+      if (!response.ok) throw new Error("Sample photo unavailable");
+      setDrafts([]);
+      await addFiles([new File([await response.blob()], filename, { type: "image/jpeg" })]);
+      setText(subject === "rocket"
+        ? "Create a full-circle 3D View from this rocket photo. Preserve the actual image textures. Deliver object.blend, object.glb, preview.png and motion.mp4."
+        : "Create one 3D object of this person holding the cat. First isolate the entire person and cat together onto a solid background, preserving their pose and contact. Then create a full-circle 3D View, showing front, both opposite profiles, and back in one continuous direction. Keep the face and fur sharp as photo textures; do not rebuild them as a silhouette mesh. Deliver object.blend, object.glb, preview.png and motion.mp4.");
+    } catch {
+      setMicError("Could not load the sample photo. You can attach your own.");
+    }
+  };
+
+  useEffect(() => {
+    if (!session?.samplePhoto || !object3d) return;
+    const subject = session.samplePhoto;
+    useStore.getState().patchSession(sessionId, { samplePhoto: undefined });
+    void loadSample(subject);
+  }, [session?.samplePhoto, object3d, sessionId]);
+
   const send = async () => {
+    if (session?.pending && !busyHere) { void recoverPendingTurn(sessionId); return; }
     const value = text.trim();
     if ((!value && drafts.length === 0 && !audioDraft) || busyHere) return;
+    if (connectionError) { setShowOptions(true); return; }
 
     if (research) {
       if (!value) return;
@@ -176,7 +217,21 @@ export function Composer({ sessionId }: { sessionId: string }) {
 
   return (
     <div style={{ padding: "0 16px calc(14px + env(safe-area-inset-bottom))" }}>
+      {session?.pending && session.cancelNotice && <p role="status" style={{color:T.textDim,fontSize:12,lineHeight:1.5}}>{session.cancelNotice}</p>}
       <div style={{ maxWidth: 780, margin: "0 auto" }}>
+        {(object3d || largeImage) && busyHere && session?.pending && <GenerationProgress label={profile.label} startedAt={session.pending.startedAt} />}
+        {largeImage && <label style={{ display: "block", color: T.textDim, fontSize: 12, marginBottom: 10 }}>Image context
+          <select aria-label="Large image context" value={session?.largeImageTemplate ?? "generic"} disabled={busyHere}
+            onChange={(event) => useStore.getState().patchSession(sessionId, { largeImageTemplate: event.target.value as "generic" | "seuss-world" })}
+            style={{ marginLeft: 10, padding: 8, color: T.text, background: T.bgInput, border: `1px solid ${T.border}`, borderRadius: 7 }}>
+            <option value="generic">Your image — describe the context</option><option value="seuss-world">Dr. Seuss World — two skills</option>
+          </select>
+        </label>}
+        {object3d && (
+          <div style={{ marginBottom: 10 }}>
+            <p style={{ margin: 0, color: T.textFaint, fontSize: 11.5 }}>{OBJECT3D_METHODS[0].description}</p>
+          </div>
+        )}
         {audioDraft && (
           <div
             style={{
@@ -372,11 +427,13 @@ export function Composer({ sessionId }: { sessionId: string }) {
             >
               <Icon name="stop" size={16} />
             </button>
+          ) : session?.pending ? (
+            <button type="button" title="Resume tracking stored run" onClick={()=>void recoverPendingTurn(sessionId)} style={{padding:'9px 12px',borderRadius:T.radiusSm,border:`1px solid ${T.border}`,background:T.bgElev,color:T.accent,cursor:'pointer'}}>Resume</button>
           ) : (
             <button
               type="button"
               onClick={() => void send()}
-              disabled={(!text.trim() && drafts.length === 0 && !audioDraft) || busyHere}
+              disabled={(!text.trim() && drafts.length === 0 && !audioDraft) || busyHere || Boolean(connectionError)}
               title="Send"
               style={{
                 display: "inline-flex",
@@ -410,10 +467,21 @@ export function Composer({ sessionId }: { sessionId: string }) {
         {(micError || isEmptySession) && (
           <p style={{ margin: "8px 0 0", color: micError ? T.danger : T.textFaint, fontSize: 11.5, textAlign: "center" }}>
             {micError ??
-              (research
+              (object3d
+                ? "Attach a photo to create a full-circle 3D View with Gemini."
+                : research
                 ? "Deep Research mode: long-running background investigation with sources — survives reloads."
                 : "Everything runs in a remote container session — code, search, images — and its files sync down to you.")}
           </p>
+        )}
+        {object3d && isEmptySession && !drafts.length && !text.trim() && (
+          <div style={{ display: "flex", gap: 14, justifyContent: "center", flexWrap: "wrap", marginTop: 8 }}>
+            <button type="button" disabled={busyHere || compressing} onClick={() => void loadSample("rocket")}
+              style={{ border: 0, background: "transparent", color: T.accent, cursor: "pointer", fontSize: 12 }}>Try rocket photo</button>
+            <button type="button" disabled={busyHere || compressing} onClick={() => void loadSample("person-cat")}
+              style={{ border: 0, background: "transparent", color: T.accent, cursor: "pointer", fontSize: 12 }}>Try person + cat photo</button>
+            <a href="/?sample3d=person-cat" style={{ color: T.accent, fontSize: 12 }}>View 3D sample ↗</a>
+          </div>
         )}
       </div>
     </div>

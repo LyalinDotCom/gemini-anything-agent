@@ -20,6 +20,29 @@ export class TarSizeLimitError extends Error {
   }
 }
 
+/** Package downloaded output files when the server has no snapshot archive alias. */
+export function createTarBlob(entries: TarEntry[]): Blob {
+  const parts: BlobPart[] = [];
+  const encode = new TextEncoder();
+  const append = (name: string, data: Uint8Array<ArrayBuffer>, type = "0") => {
+    const header = new Uint8Array(512);
+    header.set(encode.encode(name).subarray(0, 100));
+    const octal = (offset: number, length: number, value: number) => header.set(encode.encode(value.toString(8).padStart(length - 1, "0") + "\0"), offset);
+    octal(100, 8, 0o644); octal(108, 8, 0); octal(116, 8, 0); octal(124, 12, data.byteLength); octal(136, 12, 0);
+    header.fill(32, 148, 156); header[156] = type.charCodeAt(0);
+    header.set(encode.encode("ustar\0"), 257); header.set(encode.encode("00"), 263);
+    header.set(encode.encode(header.reduce((sum, byte) => sum + byte, 0).toString(8).padStart(6, "0") + "\0 "), 148);
+    parts.push(header, data);
+    if (data.byteLength % 512) parts.push(new Uint8Array(512 - data.byteLength % 512));
+  };
+  for (const entry of entries) {
+    if (encode.encode(entry.name).length > 100) append("././@LongLink", encode.encode(entry.name + "\0"), "L");
+    append(entry.name, entry.data);
+  }
+  parts.push(new Uint8Array(1024));
+  return new Blob(parts, { type: "application/x-tar" });
+}
+
 function readString(bytes: Uint8Array, offset: number, length: number): string {
   let end = offset;
   const max = offset + length;

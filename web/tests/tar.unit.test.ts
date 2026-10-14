@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { parseTar, parseTarStream } from "../src/utils/tar";
+import { createTarBlob, parseTar, parseTarStream } from "../src/utils/tar";
 
 function tarOf(entries: Array<{ name: string; content: string; type?: string; linkName?: string }>): ArrayBuffer {
   const blocks: Uint8Array[] = [];
@@ -33,6 +33,12 @@ function tarOf(entries: Array<{ name: string; content: string; type?: string; li
 }
 
 describe("parseTar", () => {
+  test("output archive preserves binary data and long Unicode paths", async () => {
+    const entries = [{ name: `workspace/output/${"写真".repeat(45)}.glb`, size: 5, data: new Uint8Array([0, 255, 137, 80, 0]) }];
+    const blob = createTarBlob(entries);
+    expect(blob.type).toBe("application/x-tar");
+    expect(parseTar(await blob.arrayBuffer())).toEqual(entries);
+  });
   test("reads plain files with sizes and data", () => {
     const buf = tarOf([
       { name: "output/red.png", content: "PNGDATA" },

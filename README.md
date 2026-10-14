@@ -1,3 +1,5 @@
+> Active web workflows now use Google's official [Gemini API CLI](https://github.com/google-gemini/gemini-api-cli) v0.4.2 inside Managed Agents. The `cli/` directory retains the legacy GAI package source; it is not installed or invoked by the web app. See [web/README.md](web/README.md) and [AGENTS.md](AGENTS.md) for the current architecture.
+
 # Gemini Anything Agent
 
 An unofficial, open-source sample for the [Gemini Managed Agents API](https://ai.google.dev/gemini-api/docs/agents): matching Electron and browser chat apps with selectable persistent cloud-agent profiles that can code, research, operate a real headless browser, work with files — and generate images, video, music, and speech.
@@ -36,6 +38,48 @@ The user talks to one app. Each conversation talks to the selected managed-agent
 - Live agent and media calls can cost money.
 
 ## Getting Started
+
+This checkout targets `antigravity-preview-09-2026` and pins `@google/genai` to
+2.27.0 in the CLI and both UIs. The May agent shuts down October 5, 2026;
+older Electron conversations are migrated so their history remains visible.
+See Google's [release notes](https://ai.google.dev/gemini-api/docs/changelog).
+
+## OAuth and stored credentials
+
+Both chat UIs expose **Options → Use stored credential**. Enter a credential ID
+from the same Gemini project and the API hostname it authenticates. The ID is
+attached to the environment's network rule, including follow-up turns in the
+same environment. Switching the option off removes that connection's network
+injection on the next turn; it does not delete the credential or revoke the
+provider grant. Public egress remains available for the published CLI.
+
+For a web sign-in experience, the intended path is: browser consent → authenticated
+backend callback → authorization-code exchange → stored Google credential →
+Anything Agent with that credential ID. Google's service stores OAuth client
+details and the refresh token, validates an initial refresh, and refreshes access
+tokens at the egress proxy. It does not provide the sign-in page or authorization-code
+exchange. See [managed credentials](https://ai.google.dev/gemini-api/docs/agent-credentials).
+
+The server-side handoff in [app/src/sdk/oauth.ts](app/src/sdk/oauth.ts) implements
+state, PKCE, expiry, callback validation, and single-use transactions. Keep its
+transaction on the backend, bound to an authenticated user. Only the authorization
+URL and resulting credential metadata go to the browser. Configure each OAuth
+provider's offline-access request so a refresh token is returned; a short-lived
+access token alone cannot give the credential service automatic refresh.
+
+The existing `web/` app is already the browser frontend. A shared sign-in product
+needs an authenticated backend that owns the Gemini key, credential-to-user mapping,
+callback transactions, and agent calls. Never put an OAuth client secret in Vite
+configuration or let a shared project key give users unrestricted credential access.
+The current hosted demo remains a personal BYOK app; no OAuth callback endpoint or
+provider sign-in UI is deployed by this change. See Google's
+[web-server OAuth guide](https://developers.google.com/identity/protocols/oauth2/web-server).
+
+The existing Gemini media key still uses the repository's separate `/.env` launcher
+contract. Third-party OAuth credentials are kept out of that file and the agent payload.
+For local and live scenario coverage, see [app/README.md](app/README.md#credential-scenario).
+
+## Local setup
 
 **Prerequisites:** Node.js 22+, npm, and a Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey).
 
@@ -161,7 +205,7 @@ When the user refers to an existing artifact, the agent should inspect `/workspa
 
 The composer shows the active agent next to Options; click the small switch icon to change it:
 
-- **Antigravity** (default) — the plain `antigravity-preview-05-2026` agent.
+- **Antigravity** (default) — the plain `antigravity-preview-09-2026` agent.
 - **Anything** — Antigravity plus the shared media and browser payload under `gai-anything-v1`.
 - **Browser** — a dedicated custom profile that prioritizes real headless Playwright navigation, interaction, assertions, and saved evidence.
 - **Deep Research** — Google's `deep-research-preview-04-2026` managed agent.
@@ -183,6 +227,7 @@ cd app
 npm test
 npm run build
 npm run test:browser:live  # real disposable managed-agent + Linux/Chrome smoke test
+npm run test:credentials:live # protected API + published media CLI + same-instance continuation
 ```
 
 Web:

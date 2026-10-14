@@ -1,0 +1,46 @@
+{
+  "generated_in": "managed Linux agent",
+  "size": [
+    13334,
+    7500
+  ],
+  "generated_regions": 49,
+  "zoom_tiles": 555,
+  "files": [
+    {
+      "name": "mosaic.png",
+      "bytes": 193797873,
+      "sha256": "6ae9960adf93ba1b0a4e333ace803ea45c78f6cdaa07182c0a2dc8b87e5decc5"
+    },
+    {
+      "name": "mosaic.jpg",
+      "bytes": 70185028,
+      "sha256": "6c20b7a032c087b0cf207feb307ac55c7a8b8aaf110033533e04f7d7bd1d9472"
+    },
+    {
+      "name": "preview_overview.jpg",
+      "bytes": 1913228,
+      "sha256": "b64bbd5da76b76a5413822ce5c480fda52da7391d2f6789d9e5fb4efb7761da3"
+    },
+    {
+      "name": "deepzoom.zip",
+      "bytes": 69976158,
+      "sha256": "6d2b57ad0b0632a80bb29a25a44e2d9fa71b88ba3d190067a3e72ed914ad6741"
+    },
+    {
+      "name": "world_plan.json",
+      "bytes": 21827,
+      "sha256": "73cad6852c949409746c4cd6b2d62d5e551361c065c2be28b45a72116fddc826"
+    },
+    {
+      "name": "validation.json",
+      "bytes": 17760,
+      "sha256": "a86ee83ff5ba968461aa2379a2be57794f615431243f0d51ce1fdc1bfaf8b246"
+    },
+    {
+      "name": "seam-repair-validation.json",
+      "bytes": 1408,
+      "sha256": "009035f0581637b1b2f3e3413c2b3c6eadf170e1b100698be1d217fb066bdaa1"
+    }
+  ]
+}

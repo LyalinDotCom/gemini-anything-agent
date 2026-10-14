@@ -51,8 +51,8 @@ export function blocksToParts(blocks: MediaStampedBlock[], roundPrefix: string):
         const part: Extract<ContentPart, { kind: "code" }> = {
           kind: "code",
           id,
-          runs: [{ callId: b.id, code: redact(b.code), done: b.done }],
-          done: b.done,
+          runs: [{ callId: b.id, code: redact(b.code), done: false }],
+          done: false,
         };
         parts.push(part);
         if (b.id) codeByCallId.set(b.id, part);

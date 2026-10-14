@@ -1,5 +1,5 @@
 import { memo, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import { T } from "../tokens";
@@ -71,9 +71,10 @@ function escapeMarkdownLabel(label: string): string {
 
 function linkifyOutputPaths(text: string): string {
   return text
-    .split(/(```[\s\S]*?```)/g)
+    .split(/(```[\s\S]*?```|`[^`\n]+`|\[[^\]]*\]\([^)]+\))/g)
     .map((chunk, index) => {
-      if (index % 2 === 1) return chunk;
+      if (index % 2 === 1 && /^`\/workspace\/output\/[^`]+`$/.test(chunk)) { const path = chunk.slice(1, -1); return `[${escapeMarkdownLabel(basename(path))}](resource:${encodeURIComponent(path)})`; }
+      if (index % 2 === 1) return chunk.replace(/\]\((\/workspace\/output\/[^)]+)\)/g, (_, path: string) => `](resource:${encodeURIComponent(path)})`);
       return chunk.replace(OUTPUT_PATH_RE, (match) => {
         const trailing = match.match(TRAILING_PUNCTUATION_RE)?.[0] ?? "";
         const path = trailing ? match.slice(0, -trailing.length) : match;
@@ -93,6 +94,7 @@ export const Markdown = memo(function Markdown({
   return (
     <div className="md" style={{ fontSize: 14.5, lineHeight: 1.65, wordBreak: "break-word" }}>
       <ReactMarkdown
+        urlTransform={(url) => url.startsWith("resource:") ? url : defaultUrlTransform(url)}
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}
         components={{

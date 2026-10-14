@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AGENT_PROFILES, profileForSession, type AgentMode } from "../agentProfiles";
+import { AGENT_PROFILES, LARGE_IMAGE_UI_READY, profileForSession, type AgentMode } from "../agentProfiles";
 import { useStore } from "../state/store";
 import { T } from "../tokens";
 import { Icon } from "./atoms";
@@ -75,7 +75,7 @@ export function AgentPicker({ sessionId, disabled }: { sessionId: string; disabl
             boxShadow: "0 18px 48px rgba(0,0,0,0.48)",
           }}
         >
-          {(Object.keys(AGENT_PROFILES) as AgentMode[]).map((candidate) => {
+          {(Object.keys(AGENT_PROFILES) as AgentMode[]).filter(candidate => candidate !== "large-image" || LARGE_IMAGE_UI_READY).map((candidate) => {
             const profile = AGENT_PROFILES[candidate];
             const active = candidate === mode;
             return (

@@ -1,8 +1,10 @@
+import { MODELS } from "../models";
 import { profileForSession } from "../agentProfiles";
 import { effectiveRunOptions } from "../state/runOptions";
 import { useStore } from "../state/store";
 import type { RunOptions } from "../state/types";
 import { T } from "../tokens";
+import { credentialBindingError } from "../../../shared/credentialBinding";
 
 const row: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, minHeight: 32, fontSize: 12.5 };
 const input: React.CSSProperties = { width: "100%", boxSizing: "border-box", border: `1px solid ${T.border}`, borderRadius: 7, background: T.bg, color: T.text, padding: "7px 8px", fontSize: 12, outline: "none" };
@@ -23,17 +25,20 @@ export function RunOptionsPanel({ sessionId }: { sessionId: string }) {
   const options = effectiveRunOptions(session);
   const profile = profileForSession(session);
   const research = profile.research;
+  const durable = Boolean(profile.object3dPersona || profile.largeImagePersona);
   const set = (patch: Partial<RunOptions>) => patchSession(sessionId, { runOptions: { ...options, ...patch } });
   const tools = ["code_execution", "google_search", "url_context"] as const;
+  const connectionError = credentialBindingError(options);
 
   return (
     <div style={{ marginTop: 8, padding: "10px 12px", border: `1px solid ${T.borderSoft}`, borderRadius: T.radiusSm, background: T.bgElev }}>
       <p style={{ margin: "0 0 7px", color: T.textFaint, fontSize: 11.5 }}>
-        {research ? "Deep Research always stores history and runs in the background." : "Defaults preserve chat context and the remote sandbox."}
+        {research ? "Deep Research always stores history and runs in the background." : durable ? `${profile.label} stores its long run so it can resume after reload.` : "Defaults preserve chat context and the remote sandbox."}
       </p>
-      <Toggle label="Store interaction history" checked={research || options.store} disabled={research} onChange={(store) => set({ store, background: store ? options.background : false, autoContinue: store ? options.autoContinue : false })} />
+      {!research && <label style={{ ...row, flexDirection: "column", alignItems: "flex-start", gap: 4 }}><span>Reasoning model</span><select aria-label="Reasoning model" value={options.agentModel} onChange={(event) => set({agentModel:event.target.value})} style={input}><option value={MODELS.text}>Gemini 3.8 Flash</option><option value={MODELS.reasoning}>Gemini 4 Argon</option></select></label>}
+      <Toggle label="Store interaction history" checked={research || options.store} disabled={research || durable} onChange={(store) => set({ store, background: store ? options.background : false, autoContinue: store ? options.autoContinue : false })} />
       <Toggle label="Continue chat context" checked={research || (options.store && options.autoContinue)} disabled={research || !options.store} onChange={(autoContinue) => set({ autoContinue, previousInteractionId: autoContinue ? "" : options.previousInteractionId })} />
-      <Toggle label="Background execution" checked={research || (options.store && options.background)} disabled={research || !options.store} onChange={(background) => set({ background })} />
+      <Toggle label="Background execution" checked={research || (options.store && options.background)} disabled={research || durable || !options.store} onChange={(background) => set({ background })} />
       <Toggle label="Reuse sandbox environment" checked={options.reuseEnvironment} disabled={research} onChange={(reuseEnvironment) => set({ reuseEnvironment })} />
 
       <label style={{ ...row, alignItems: "flex-start", flexDirection: "column", gap: 4 }}>
@@ -42,15 +47,27 @@ export function RunOptionsPanel({ sessionId }: { sessionId: string }) {
           <option value="standard">Standard</option><option value="flex">Flex</option><option value="priority">Priority</option>
         </select>
       </label>
-      <label style={{ ...row, alignItems: "flex-start", flexDirection: "column", gap: 4, marginTop: 7 }}>
+      {research && <label style={{ ...row, alignItems: "flex-start", flexDirection: "column", gap: 4, marginTop: 7 }}>
         <span style={{ color: T.textDim }}>Thinking summaries</span>
-        <select value={options.thinkingSummaries} onChange={(event) => set({ thinkingSummaries: event.target.value as RunOptions["thinkingSummaries"] })} style={input}>
-          <option value="none">Off</option><option value="auto">Auto</option>
-        </select>
-      </label>
+        <span>Auto</span>
+      </label>}
 
       {!research && (
         <>
+          <Toggle label="Use stored credential" checked={options.useCredential} onChange={(useCredential) => set({ useCredential })} />
+          {options.useCredential && (
+            <div style={{ display: "grid", gap: 7, margin: "3px 0 10px" }}>
+              <label style={{ fontSize: 11.5, color: T.textDim }}>Credential ID
+                <input value={options.credentialId} placeholder="my-service-connection" onChange={(event) => set({ credentialId: event.target.value })} style={{ ...input, marginTop: 4, fontFamily: T.mono }} />
+              </label>
+              <label style={{ fontSize: 11.5, color: T.textDim }}>API domain
+                <input value={options.credentialDomain} placeholder="api.example.com" onChange={(event) => set({ credentialDomain: event.target.value })} style={{ ...input, marginTop: 4, fontFamily: T.mono }} />
+              </label>
+              <p style={{ margin: 0, fontSize: 11.5, color: connectionError ? T.danger : T.textFaint }} role={connectionError ? "alert" : undefined}>
+                {connectionError ?? "Use a credential issued for this Gemini project. Tokens stay in the credential service."}
+              </p>
+            </div>
+          )}
           <Toggle label="Override system instruction" checked={options.overrideSystemInstruction} onChange={(overrideSystemInstruction) => set({ overrideSystemInstruction })} />
           {options.overrideSystemInstruction && <textarea rows={3} value={options.systemInstruction} placeholder="One-off instruction for this conversation…" onChange={(event) => set({ systemInstruction: event.target.value })} style={{ ...input, resize: "vertical" }} />}
           <Toggle label="Override tools" checked={options.overrideTools} onChange={(overrideTools) => set({ overrideTools })} />

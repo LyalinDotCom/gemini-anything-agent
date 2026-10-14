@@ -1,0 +1,814 @@
+{
+  "world_name": "The Whimsical Wonder-Continent of Oobladore",
+  "generation_in_managed_agent": true,
+  "native_finalization_in_managed_agent": true,
+  "compositor_version": "checkpoint-v3-no-ghosts",
+  "targeted_correction_passes": 1,
+  "corrected_regions": [
+    [
+      0,
+      1
+    ],
+    [
+      0,
+      3
+    ],
+    [
+      3,
+      0
+    ],
+    [
+      3,
+      1
+    ]
+  ],
+  "manual_visual_review_required": true,
+  "skills": [
+    "gigapixel-gemini-mosaic",
+    "dr-seuss-world"
+  ],
+  "canvas": {
+    "actual_dimensions": [
+      13334,
+      7500
+    ],
+    "megapixels": 100.005,
+    "requested_dimensions": [
+      13334,
+      7500
+    ],
+    "requested_megapixels": 100.005,
+    "grid": [
+      7,
+      7
+    ],
+    "generated_regions_count": 49
+  },
+  "cli_provenance": {
+    "cli": "gai",
+    "cli_version": "0.1.5",
+    "model": "gemini-3.1-flash-image",
+    "capability": "image",
+    "interaction_ids_returned": false,
+    "response_ids_available": false,
+    "note": "Response IDs omitted as none returned by CLI response payload"
+  },
+  "composition": {
+    "status": "completed",
+    "identity": "50b60477a420c1c12b0666019888c1551a18d5989fa695cf4d1e93ed85249388",
+    "compositor_version": "checkpoint-v3-no-ghosts",
+    "disk_backed_canvas": true,
+    "checkpointed": true,
+    "peak_rss_kib": 979156,
+    "size": [
+      13334,
+      7500
+    ],
+    "generated_tiles": 49,
+    "native_inputs": [
+      {
+        "rc": [
+          0,
+          0
+        ],
+        "sha256": "6e472aeae57cea05e33991cd4f1e0d18be0c1fe9aa5cd3baaf9beb602636473f",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          0,
+          1
+        ],
+        "sha256": "8fb165e2089874c45668e61bf75d06a8d63808917ad2dd23fb3fa6e18632aca6",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          0,
+          2
+        ],
+        "sha256": "fb0bb4c178bf04a4e53de4fba2e4fc57c951c39e3f41c8da82c9ac6fdb7dfdc8",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          0,
+          3
+        ],
+        "sha256": "d392c581e05089a83992c0e8f28fdf3832e64bfd6b287133b0b8b8d07e1e53a7",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          0,
+          4
+        ],
+        "sha256": "6a26a480a40443d065d41bb2c43364e59f9dfa57a3c486542d1d3ff8583080d5",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          0,
+          5
+        ],
+        "sha256": "3c11533f739891a778c264e5a42780cd971d54968f5ec299b72cf89dec39a6b4",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          0,
+          6
+        ],
+        "sha256": "47cb274c13bd96f358435f6ab9bfee6c146f13c642ec67b6b9cb0336498c29be",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          1,
+          0
+        ],
+        "sha256": "a135ceb8e29e74f6d4051c4234fc91c060e8ae378ac59bb5a802f4a0cb116b9e",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          1,
+          1
+        ],
+        "sha256": "c95b4593cf4e02d69bc89cc7a528d2f3e403c9e55eed4befbb5b758ae8cde106",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          1,
+          2
+        ],
+        "sha256": "f9267b455f927ad214c2d3389bf90b0d21c85a5305d8c1d31a15e25f67fb4fd5",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          1,
+          3
+        ],
+        "sha256": "a60b7a78019799dcce9fe7b941cab4db7bf9816e933d6d62aed0dcf477755906",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          1,
+          4
+        ],
+        "sha256": "3f05dae57e8407abd055832019742468a0aa1ee82deb8a1949259691619f37e7",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          1,
+          5
+        ],
+        "sha256": "18ee545ade554d7c212a27802457762c2e19bb1ddfa40eafaee9d426d937f231",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          1,
+          6
+        ],
+        "sha256": "e7277dad820d79636466db537009b59be0abdbd54b28bcbaa92b71bd3ef36c53",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          2,
+          0
+        ],
+        "sha256": "2363869e53cb7b4663c246afa3b0ed0ea4a489dd34885cb2d9bb3792e9d61265",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          2,
+          1
+        ],
+        "sha256": "ca565892abf5b4e196c76c0e2af57d3609cdf285986fcea32208d2c30b591102",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          2,
+          2
+        ],
+        "sha256": "cc0fe572e2e71d969eaebc233893e747541f21bcc73454d6fdc1d6dd449ab443",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          2,
+          3
+        ],
+        "sha256": "f5a192110503cca9fe65bdb14995bd857e30236e38532b781c5251716126cdbb",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          2,
+          4
+        ],
+        "sha256": "70338c78dd8232c9e3e3e42d751171cb4c33c5596f6e60f166eeb677d04cee91",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          2,
+          5
+        ],
+        "sha256": "c8d7b438e42513b6bf374d1ed76bbe366968f29975e621881248c9490aeefb9f",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          2,
+          6
+        ],
+        "sha256": "a78f8520e474e3bb2a3c4322071643006b0174e9b77285737cc9c70fafd6a5ed",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          3,
+          0
+        ],
+        "sha256": "651247397285bec7fd4b0507d8d371df1bebbde6e5ab1ced8433d8bb2f1796a2",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          3,
+          1
+        ],
+        "sha256": "d27560596d00e322ca3b127275fef795522af41004d396a3704e945f2abf5d8d",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          3,
+          2
+        ],
+        "sha256": "c99d0f919f378d968c146a595e93c7db8069ab4748911c878693558445cd75d7",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          3,
+          3
+        ],
+        "sha256": "64930ea522b608681dba65fbe715fecafeb4d89f59ed67f5f5b82510a708c223",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          3,
+          4
+        ],
+        "sha256": "fb4d983f163b47f0ea8a1a411c38ad8d107a07311b28ba49bb352a26674d8b78",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          3,
+          5
+        ],
+        "sha256": "aeaeac589c340b428677f6e5100e28d8df99a0fd1b6b58bba9ca3429b8c20fa8",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          3,
+          6
+        ],
+        "sha256": "7023bf79dd8de2f816113336f092d858e498f04d4bf4a634b9b9c2fce4929857",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          4,
+          0
+        ],
+        "sha256": "84ebf887212397f38acef583c9c991435b22a8842d43ade99e12af50034e76c2",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          4,
+          1
+        ],
+        "sha256": "f73a304849660545b873c72686a115d876116cac1ada2f045b843e747e3670ee",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          4,
+          2
+        ],
+        "sha256": "5a28f10d16608b662c5e1464783768a28ea676368784b5911653db28a066e708",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          4,
+          3
+        ],
+        "sha256": "a4c3add63388e093213d41ce7be72897af75e8720eeeb9955ce003df0428b5c8",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          4,
+          4
+        ],
+        "sha256": "343cad177e04d61a17c3a37974f6d440d604126d3f4f2277587ecfbc16c301f7",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          4,
+          5
+        ],
+        "sha256": "2512991614b1dc80501327926a79cf4b19cb68395c9ff9318cc3a7132c964a3d",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          4,
+          6
+        ],
+        "sha256": "3f3ec44ec17af4e8d3b2603cf1daccfb712584f96c0c68a72aa6e1966e086028",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          5,
+          0
+        ],
+        "sha256": "4fa25d82682f0b7d50f56f7f104e286580a07737c21ba655d3c6e7f21d3e0b37",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          5,
+          1
+        ],
+        "sha256": "2207f14d71273e8bfa95daf963aded05aaf3b577a98a4fe9917b082cf94d8455",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          5,
+          2
+        ],
+        "sha256": "bd4c2805744f7c596e590157cedee72d968dbc39ee7227b789913c15f72c2a84",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          5,
+          3
+        ],
+        "sha256": "6b8dd738d6f6a995bec64281ebee4294085b194633ce494f0b35183aa593d498",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          5,
+          4
+        ],
+        "sha256": "7783137d83fd581de041f57254b9aaf9e466d979b82ea70f407a2be4944733a1",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          5,
+          5
+        ],
+        "sha256": "3ea04cf31c1f039f7d399c468077e20741a18210983ed8ccf755ca559808afde",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          5,
+          6
+        ],
+        "sha256": "a84b7aed369afa41c57d3e8dbf44057b558e6db7590bd4202a08534fced6dd7f",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          6,
+          0
+        ],
+        "sha256": "03052e0dadc58b3c023c1d32f45ed87e4f1c7d8707fb796ce6f4010ed4099641",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          6,
+          1
+        ],
+        "sha256": "64363f4a5f8b91d5ea746ae26eb0989f99913700fef8bd9126e74c23618dd950",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          6,
+          2
+        ],
+        "sha256": "2adca6e551aef0526677563ef38644c110ecea09ea2ed82d4189e740b3a7115a",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          6,
+          3
+        ],
+        "sha256": "2ef40a56017fd78c5d11332a0d616a269506f308838d53f05a2174541fafed44",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          6,
+          4
+        ],
+        "sha256": "6a632446dfb4fc7eba05d4f7a2b28137c868302d22f3f61bc142e2d31b2f6823",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          6,
+          5
+        ],
+        "sha256": "21c7e849c448c2213b1f3bee3c58bef1d4417464ad15c601bb13e7c9dfcc5515",
+        "native_size": [
+          2752,
+          1536
+        ]
+      },
+      {
+        "rc": [
+          6,
+          6
+        ],
+        "sha256": "ed3c4939b882a1c27a12f370300338d40e86aa8aa5198709d9ccab28fa46089c",
+        "native_size": [
+          2752,
+          1536
+        ]
+      }
+    ],
+    "note": "Original composition identity covers base49regions ONLY"
+  },
+  "qa": {
+    "size": [
+      13334,
+      7500
+    ],
+    "mp": 100.005,
+    "roundtrip_psnr_2x": 23.15,
+    "hf_ratio": 0.08294527952407527,
+    "sharpness_lapvar_median": 4843.363897327217,
+    "seam_ratio": {
+      "mean": 0.945,
+      "max": 1.013,
+      "n": 12
+    },
+    "overlap_ncc_mean": 0.44,
+    "overlap_ncc_min": -0.014,
+    "seams": [
+      [
+        "v0",
+        0.88
+      ],
+      [
+        "v1",
+        0.938
+      ],
+      [
+        "v2",
+        0.966
+      ],
+      [
+        "v3",
+        0.983
+      ],
+      [
+        "v4",
+        0.954
+      ],
+      [
+        "v5",
+        0.892
+      ],
+      [
+        "h0",
+        0.984
+      ],
+      [
+        "h1",
+        1.013
+      ],
+      [
+        "h2",
+        0.952
+      ],
+      [
+        "h3",
+        0.928
+      ],
+      [
+        "h4",
+        0.922
+      ],
+      [
+        "h5",
+        0.922
+      ]
+    ],
+    "worst_tiles": [
+      [
+        "3,1",
+        -0.014
+      ],
+      [
+        "3,0",
+        -0.012
+      ],
+      [
+        "0,3",
+        -0.007
+      ],
+      [
+        "0,6",
+        -0.001
+      ],
+      [
+        "4,6",
+        0.124
+      ]
+    ],
+    "checks": {
+      "detail_psnr2x_le_28": true,
+      "seam_mean_le_1.10": true,
+      "seam_max_le_1.35": true
+    },
+    "pass": true,
+    "manual_visual_review_required": true,
+    "metric_scope": "Broad overlap screening; ratios do not prove that every narrow seam or corner is invisible."
+  },
+  "final_artifacts": {
+    "mosaic.png": {
+      "bytes": 193797873,
+      "sha256": "6ae9960adf93ba1b0a4e333ace803ea45c78f6cdaa07182c0a2dc8b87e5decc5"
+    },
+    "mosaic.jpg": {
+      "bytes": 70185028,
+      "sha256": "6c20b7a032c087b0cf207feb307ac55c7a8b8aaf110033533e04f7d7bd1d9472"
+    },
+    "preview_overview.jpg": {
+      "bytes": 1913228,
+      "sha256": "b64bbd5da76b76a5413822ce5c480fda52da7391d2f6789d9e5fb4efb7761da3"
+    },
+    "deepzoom.zip": {
+      "bytes": 69976158,
+      "sha256": "6d2b57ad0b0632a80bb29a25a44e2d9fa71b88ba3d190067a3e72ed914ad6741"
+    }
+  },
+  "deliverables": {
+    "mosaic_png": "mosaic.png",
+    "mosaic_jpg": "mosaic.jpg",
+    "preview_overview_jpg": "preview_overview.jpg",
+    "deepzoom_zip": "deepzoom.zip",
+    "world_plan_json": "world_plan.json",
+    "composition_validation_json": "composition-validation.json",
+    "build_report_json": "build_report.json",
+    "geometry_json": "geometry.json",
+    "validation_json": "validation.json",
+    "qa_reports": [
+      "qa/summary.json",
+      "qa/crop_left_1to1.jpg",
+      "qa/crop_center_1to1.jpg",
+      "qa/crop_right_1to1.jpg",
+      "qa/seam_contact_sheet.jpg",
+      "qa/zoom_ladder.jpg",
+      "qa/mosaic_sharpness_heatmap.png",
+      "qa/mosaic_forensics.json"
+    ],
+    "mosaic_png_bytes": 193797873,
+    "mosaic_png_sha256": "6ae9960adf93ba1b0a4e333ace803ea45c78f6cdaa07182c0a2dc8b87e5decc5",
+    "mosaic_jpg_bytes": 70185028,
+    "mosaic_jpg_sha256": "6c20b7a032c087b0cf207feb307ac55c7a8b8aaf110033533e04f7d7bd1d9472",
+    "preview_overview_jpg_bytes": 1913228,
+    "preview_overview_jpg_sha256": "b64bbd5da76b76a5413822ce5c480fda52da7391d2f6789d9e5fb4efb7761da3",
+    "deepzoom_zip_bytes": 69976158,
+    "deepzoom_zip_sha256": "6d2b57ad0b0632a80bb29a25a44e2d9fa71b88ba3d190067a3e72ed914ad6741",
+    "seam_repair_validation_json": "seam-repair-validation.json"
+  },
+  "seam_repairs": {
+    "method": "Gemini native crop edits, preserved128px context frame and32px boundary blend",
+    "base_sha256": "f72ba7906d51be3cb7f40ad4e8250da338c0764494a2520f70755dd31f83adfe",
+    "size": [
+      13334,
+      7500
+    ],
+    "patches": [
+      {
+        "name": "airships",
+        "box": [
+          4300,
+          0,
+          7052,
+          1536
+        ],
+        "input_sha256": "9c0415391ad13bd5e658084e016305fa6e4c15f659b69fad0cc772c9807e2fba",
+        "edited_sha256": "19c7b206acd78f4659cb0655db1fa799c9151b1496a37d6baa507a1e007ed839",
+        "cli_response_file": "airships-response.json"
+      },
+      {
+        "name": "character",
+        "box": [
+          0,
+          2400,
+          2752,
+          3936
+        ],
+        "input_sha256": "a1cb058e7fd2751393a7a30ec2437f849f89dfccb7a7f2d22676a0941c1564fb",
+        "edited_sha256": "def7ff613e39258fb7ebf4e8cfe9fbf58d699c3498a0b0122460bedebaa2d2f6",
+        "cli_response_file": "character-response.json"
+      },
+      {
+        "name": "bridge",
+        "box": [
+          1400,
+          2900,
+          4152,
+          4436
+        ],
+        "input_sha256": "b725490536fed7d8e571288bddf0e535dc04697bdb7d9bf764ba99709fe1d064",
+        "edited_sha256": "51986f2bb57861622cb76f420efafd647790edc39e3acaa8d39f67c80b3279e8",
+        "cli_response_file": "bridge-response.json"
+      }
+    ],
+    "final_sha256": "6ae9960adf93ba1b0a4e333ace803ea45c78f6cdaa07182c0a2dc8b87e5decc5",
+    "manual_visual_review_required": true,
+    "model": "gemini-3.1-flash-image",
+    "cli_version": "0.1.5"
+  },
+  "seam_repair_model": "gemini-3.1-flash-image",
+  "seam_repair_version": "0.1.5",
+  "postprocessing": {
+    "name": "nativeGemini seamrepair3patches",
+    "base_sha256": "f72ba7906d51be3cb7f40ad4e8250da338c0764494a2520f70755dd31f83adfe",
+    "final_sha256": "6ae9960adf93ba1b0a4e333ace803ea45c78f6cdaa07182c0a2dc8b87e5decc5",
+    "note": "Original composition identity covers base 49 regions ONLY; explicitly labeled postprocessing nativeGemini seamrepair3patches with actual base and final SHA"
+  }
+}

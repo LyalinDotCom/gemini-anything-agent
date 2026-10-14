@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { downloadSnapshot, downloadSnapshotArchive, syncOutputMedia } from "../gemini/envFiles";
+import { downloadOutputFile, listOutputFiles, isLargeImageDeliverable, downloadSnapshot, downloadSnapshotArchive, syncOutputMedia } from "../gemini/envFiles";
 import { toFriendly } from "../gemini/errors";
 import type { OutputFileRecord } from "../state/types";
 import { getMediaUrl } from "../storage/messages";
@@ -7,6 +7,7 @@ import { linkProjectFolder, supportsLocalProjects, syncEntriesToProject, unlinkP
 import { useStore } from "../state/store";
 import { T } from "../tokens";
 import { Icon, IconButton, Spinner } from "./atoms";
+import { isModelFile } from "../utils/modelFiles";
 
 function fmtSize(n: number): string {
   if (n < 1024) return `${n}B`;
@@ -19,6 +20,7 @@ function fileName(file: OutputFileRecord): string {
 }
 
 function iconFor(file: OutputFileRecord): string {
+  if (isModelFile(file)) return "cube";
   if (file.kind === "audio") return "audio";
   if (file.kind === "video") return "video";
   if (file.kind === "image") return "image";
@@ -28,7 +30,12 @@ function iconFor(file: OutputFileRecord): string {
 }
 
 async function downloadFile(file: OutputFileRecord): Promise<void> {
-  const url = await getMediaUrl(file.mediaId);
+  let url: string | null;
+  if (file.remoteOnly && file.environmentId) {
+    const entry = await downloadOutputFile(file.environmentId,file);
+    url = URL.createObjectURL(new Blob([entry.data],{type:file.mimeType}));
+    setTimeout(()=>URL.revokeObjectURL(url!),30_000);
+  } else url = await getMediaUrl(file.mediaId);
   if (!url) return;
   const link = document.createElement("a");
   link.href = url;
@@ -55,6 +62,8 @@ export function WorkspacePanel({
   const [error, setError] = useState<string | null>(null);
   const [projectStatus, setProjectStatus] = useState<string | null>(null);
   const localProjectName = useStore((s) => s.sessions[sessionId]?.localProjectName ?? null);
+  const photographic = useStore((s) => s.sessions[sessionId]?.agentMode === "object3d");
+  const largeImage = useStore((s) => s.sessions[sessionId]?.agentMode === "large-image");
   const patchSession = useStore((s) => s.patchSession);
   const sorted = [...files].sort(
     (a, b) => b.syncedAt - a.syncedAt || a.label.localeCompare(b.label),
@@ -76,6 +85,10 @@ export function WorkspacePanel({
     }
   };
 
+  const downloadOne = async (file: OutputFileRecord) => {
+    setLoading(true);setError(null);
+    try { await downloadFile(file); } catch(error) { setError(toFriendly(error).message); } finally {setLoading(false);}
+  };
   const downloadAll = async () => {
     for (const file of sorted) {
       await downloadFile(file);
@@ -90,7 +103,13 @@ export function WorkspacePanel({
     setLoading(true);
     setError(null);
     try {
-      const blob = await downloadSnapshotArchive(envId);
+      if (largeImage) {
+        const viewer = sorted.find(file => /deepzoom\.zip$/i.test(file.path));
+        if (!viewer) throw new Error('The zoom viewer is still being generated. Check output files when it is ready.');
+        await downloadFile(viewer);
+        return;
+      }
+      const blob = await downloadSnapshotArchive(envId, photographic);
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -127,7 +146,23 @@ export function WorkspacePanel({
         setProjectStatus(`Linked ${name}. Conversation metadata is saved now; files will sync after the first agent run.`);
         return;
       }
-      const entries = await downloadSnapshot(envId);
+      if (largeImage) {
+        let written = 0;
+        const currentFiles=(await listOutputFiles(envId)).filter(file=>isLargeImageDeliverable(file.path));
+        const failed:string[]=[];
+        for (const file of currentFiles) {
+          try {
+          const entry = await downloadOutputFile(envId,file);
+          const result = await syncEntriesToProject(sessionId,[entry],true);
+          if (!result || result.permission !== 'granted') throw new Error('Folder permission was not granted.');
+          written += result.written;
+          } catch(error) { failed.push(`${file.path}: ${error instanceof Error?error.message:String(error)}`); }
+        }
+        if(failed.length) setError(`${failed.length} file(s) could not sync: ${failed.join("; ")}`);
+        setProjectStatus(`Synced ${written} files to ${name}, including full-resolution images.`);
+        return;
+      }
+      const entries = await downloadSnapshot(envId, photographic);
       const result = await syncEntriesToProject(sessionId, entries, true);
       if (!result || result.permission !== "granted") {
         setError("Folder permission was not granted.");
@@ -189,7 +224,7 @@ export function WorkspacePanel({
           }}
         >
           <Icon name="download" size={15} />
-          Download snapshot
+          {largeImage ? 'Download zoom viewer' : 'Download snapshot'}
         </button>
         <IconButton
           name="refresh"
@@ -280,7 +315,7 @@ export function WorkspacePanel({
                 >
                   <button
                     type="button"
-                    onClick={() => onOpenFile(file)}
+                    onClick={() => file.remoteOnly ? void downloadOne(file) : onOpenFile(file)}
                     style={{
                       flex: 1,
                       minWidth: 0,
@@ -341,7 +376,7 @@ export function WorkspacePanel({
                     type="button"
                     title="Download"
                     aria-label={`Download ${file.label}`}
-                    onClick={() => void downloadFile(file)}
+                    onClick={() => void downloadOne(file)}
                     style={{
                       width: 27,
                       height: 27,

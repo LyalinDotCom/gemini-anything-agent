@@ -11,11 +11,13 @@ import { buildEnvSources, payloadFingerprint } from "./envSources";
 import { FriendlyError, toFriendly } from "./errors";
 import type { InlineSource } from "./interactionParams";
 import { tools } from "./interactionParams";
+import { OBJECT3D_AGENT_ID } from "../../../shared/object3dProfile";
 
 export interface AgentInfo {
   /** Empty string in degraded mode (interactions then target the base agent directly). */
   agentId: string;
   baseAgent: string;
+  reasoningModel?: string;
   /** Fingerprint of the payload this agent was created with. */
   payloadFingerprint: string;
   createdAt: number;
@@ -27,7 +29,13 @@ export interface AgentInfo {
 
 const VERIFY_TTL_MS = 24 * 60 * 60 * 1000;
 
-function currentPayload(): { sources: InlineSource[]; fingerprint: string } {
+function agentDefinitionSignature(model: string): string { return `${MODELS.chatAgentBase}\n${model}\ncode_execution\ngoogle_search\nurl_context`; }
+
+export function agentWorkflowFingerprint(model: string, profileId: string): string {
+  return payloadFingerprint([...buildEnvSources(resolveApiKey() ?? "REDACTED"), {type:"inline",target:"@managed-agent-definition",content:agentDefinitionSignature(model)}, {type:"inline",target:"@profile",content:profileId}]);
+}
+
+function currentPayload(model = MODELS.text as string): { sources: InlineSource[]; fingerprint: string } {
   const key = resolveApiKey();
   if (!key) throw new FriendlyError("no-key", "No Gemini API key set.");
   const sources = buildEnvSources(key);
@@ -36,13 +44,13 @@ function currentPayload(): { sources: InlineSource[]; fingerprint: string } {
   const definitionSignature: InlineSource = {
     type: "inline",
     target: "@managed-agent-definition",
-    content: `${MODELS.chatAgentBase}\ncode_execution\ngoogle_search\nurl_context`,
+    content: agentDefinitionSignature(model),
   };
   return { sources, fingerprint: payloadFingerprint([...sources, definitionSignature]) };
 }
 
 function descriptionFor(agentId: string, fingerprint: string): string {
-  const role = agentId.includes("browser") ? "browser testing" : "anything";
+  const role = agentId.startsWith(OBJECT3D_AGENT_ID) ? "photo-to-3D object" : agentId.includes("browser") ? "browser testing" : agentId.includes("large-image") ? "large images" : "anything";
   return `gemini-anything web ${role} managed agent (payload-${fingerprint})`;
 }
 
@@ -56,11 +64,13 @@ function healthy(
   fingerprint: string,
   action: NonNullable<AgentInfo["action"]>,
   createdAt?: number,
+  reasoningModel: string = MODELS.text,
 ): AgentInfo {
   const now = Date.now();
   return {
     agentId,
     baseAgent: MODELS.chatAgentBase,
+    reasoningModel,
     payloadFingerprint: fingerprint,
     createdAt: createdAt ?? now,
     verifiedAt: now,
@@ -82,17 +92,18 @@ function degraded(fingerprint: string): AgentInfo {
   };
 }
 
-async function createAgent(agentId: string, sources: InlineSource[], fingerprint: string): Promise<void> {
+async function createAgent(client: ReturnType<typeof ai>, agentId: string, sources: InlineSource[], fingerprint: string, model: string): Promise<void> {
   // No agent-level system_instruction: it shares ONE slot with request-level
   // instructions (any per-request injection would silently displace it), and the
   // base agent reads /.agents/AGENTS.md on its own — that's the durable layer.
-  await ai().agents.create({
+  await client.agents.create({
     id: agentId,
     base_agent: MODELS.chatAgentBase,
+    agent_config: { type: "antigravity", model },
     description: descriptionFor(agentId, fingerprint),
     tools: [tools.codeExecution, tools.googleSearch, tools.urlContext],
     base_environment: { type: "remote", sources },
-  } as never);
+  } as never, { maxRetries: 0 });
 }
 
 /**
@@ -106,8 +117,9 @@ async function createAgent(agentId: string, sources: InlineSource[], fingerprint
 const RESERVED_AGENT_ID =
   /^(antigravity|veo|omni|lyria|imagen|gemma|gemini|google|youtube|android|chrome|pixel|waze|fitbit|nest|kaggle)-/i;
 
-export async function ensureAgent(agentId: string, current: AgentInfo | null, force = false): Promise<AgentInfo> {
-  const { sources, fingerprint } = currentPayload();
+export async function ensureAgent(agentId: string, current: AgentInfo | null, force = false, model: string = MODELS.text): Promise<AgentInfo> {
+  const { sources, fingerprint } = currentPayload(model);
+  const client = ai();
 
   // Never delete or deploy over an id we cannot recreate.
   if (RESERVED_AGENT_ID.test(agentId.trim())) return degraded(fingerprint);
@@ -126,37 +138,44 @@ export async function ensureAgent(agentId: string, current: AgentInfo | null, fo
   // 1) Look for the existing agent and compare its payload fingerprint.
   let existedBefore = false;
   try {
-    const got = (await ai().agents.get(agentId)) as Record<string, unknown>;
+    const got = (await client.agents.get(agentId)) as Record<string, unknown>;
     if (fingerprintFromDescription(got?.description) === fingerprint) {
-      return healthy(agentId, fingerprint, "reused", current?.createdAt);
+      return healthy(agentId, fingerprint, "reused", current?.createdAt, model);
     }
     // Payload changed (app update or key rotation) → recreate transparently.
     existedBefore = true;
     try {
-      await ai().agents.delete(agentId);
+      await client.agents.delete(agentId);
     } catch (e) {
       if (toFriendly(e).kind !== "not-found") throw e;
     }
   } catch (e) {
     const f = toFriendly(e);
-    if (f.kind === "bad-key" || f.kind === "no-key") throw f;
+    if (f.kind === "bad-key" || f.kind === "no-key" || f.kind === "bad-request") throw f;
     if (f.kind !== "not-found") {
       // Network/server trouble: stale-ok if we have anything, else degrade.
-      if (current && !current.degraded) return { ...current, action: "reused" };
+      if (!existedBefore && current && !current.degraded && current.agentId === agentId && current.payloadFingerprint === fingerprint) return { ...current, action: "reused" };
       return degraded(fingerprint);
     }
   }
 
   // 2) Create (tolerating a concurrent tab winning the race).
   try {
-    await createAgent(agentId, sources, fingerprint);
-    return healthy(agentId, fingerprint, existedBefore ? "recreated" : "created");
+    await createAgent(client, agentId, sources, fingerprint, model);
+    return healthy(agentId, fingerprint, existedBefore ? "recreated" : "created", undefined, model);
   } catch (e) {
     const f = toFriendly(e);
     if (f.kind === "conflict") {
-      return healthy(agentId, fingerprint, "reused", current?.createdAt);
+      try {
+        const winner = await client.agents.get(agentId) as Record<string,unknown>;
+        return fingerprintFromDescription(winner.description) === fingerprint ? healthy(agentId, fingerprint, "reused", current?.createdAt, model) : degraded(fingerprint);
+      } catch (error) {
+        const failure = toFriendly(error);
+        if (["bad-key", "no-key", "bad-request"].includes(failure.kind)) throw failure;
+        return degraded(fingerprint);
+      }
     }
-    if (f.kind === "bad-key" || f.kind === "no-key") throw f;
+    if (f.kind === "bad-key" || f.kind === "no-key" || f.kind === "bad-request") throw f;
     return degraded(fingerprint);
   }
 }
@@ -164,13 +183,20 @@ export async function ensureAgent(agentId: string, current: AgentInfo | null, fo
 const inflight = new Map<string, Promise<AgentInfo>>();
 
 /** Ensure either app-owned custom profile without mixing concurrent profile requests. */
-export function ensureManagedAgent(agentId: string, current: AgentInfo | null, force = false): Promise<AgentInfo> {
-  const existing = inflight.get(agentId);
+export function managedAgentId(agentId: string, model: string = MODELS.text): string {
+  const suffix = model.replace(/^gemini-/, "").toLowerCase().replace(/[^a-z0-9-]+/g,"-");
+  return model === MODELS.text || agentId.endsWith(`-${suffix}`) ? agentId : `${agentId}-${suffix}`;
+}
+
+export async function ensureManagedAgent(baseId: string, current: AgentInfo | null, force = false, model: string = MODELS.text): Promise<AgentInfo> {
+  const agentId = managedAgentId(baseId, model);
+  const inflightKey = `${agentId}:${model}:${currentPayload(model).fingerprint}`;
+  const existing = inflight.get(inflightKey);
   if (existing) return existing;
-  const pending = ensureAgent(agentId, current?.agentId === agentId ? current : null, force).finally(() => {
-    inflight.delete(agentId);
+  const pending = ensureAgent(agentId, current?.agentId === agentId ? current : null, force, model).finally(() => {
+    inflight.delete(inflightKey);
   });
-  inflight.set(agentId, pending);
+  inflight.set(inflightKey, pending);
   return pending;
 }
 
@@ -178,8 +204,9 @@ export function ensureManagedAgent(agentId: string, current: AgentInfo | null, f
 // A user's key may carry agents from entirely different projects — we never
 // enumerate or touch them.
 export async function deleteAgent(agentId: string): Promise<void> {
+  const client = ai();
   try {
-    await ai().agents.delete(agentId);
+    await client.agents.delete(agentId);
   } catch (e) {
     if (toFriendly(e).kind !== "not-found") throw toFriendly(e);
   }

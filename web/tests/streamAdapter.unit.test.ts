@@ -45,6 +45,15 @@ describe("consumeInteractionStream", () => {
     expect(text?.done).toBe(true);
   });
 
+  test("preserves a server failure and its message instead of inferring success", async () => {
+    const outcome = await consumeInteractionStream(events([
+      { event_type: "interaction.created", interaction: { id: "failed-run", status: "in_progress" } },
+      { event_type: "interaction.failed", interaction: { id: "failed-run", status: "failed", error: { message: "Video quota exceeded" } } },
+    ]));
+    expect(outcome.status).toBe("failed");
+    expect(outcome.failureMessage).toBe("Video quota exceeded");
+    expect(blocksFromInteraction({ id: "failed-run", status: "failed", error: { message: "Video quota exceeded" } }).failureMessage).toBe("Video quota exceeded");
+  });
   test("function_call args accumulate via arguments_delta strings and parse at stop", async () => {
     const outcome = await consumeInteractionStream(
       events([

@@ -39,7 +39,9 @@ export interface StreamMeta {
   environmentId: string;
   status: string;
   lastEventId?: string;
+  continuationToken?: string;
   usage?: Usage;
+  failureMessage?: string;
 }
 
 export interface StreamOutcome extends StreamMeta {
@@ -189,6 +191,7 @@ export async function consumeInteractionStream(
     if (it && typeof it === "object") {
       if (it.id) meta.interactionId = it.id;
       if (it.status) meta.status = it.status;
+      if (typeof it.error?.message === "string") meta.failureMessage = it.error.message;
       if (it.environment_id) meta.environmentId = it.environment_id;
       const u = readUsage(it.usage);
       if (u) meta.usage = u;
@@ -196,6 +199,8 @@ export async function consumeInteractionStream(
     if (typeof ev.interaction_id === "string" && ev.interaction_id) meta.interactionId = ev.interaction_id;
     if (typeof ev.environment_id === "string" && ev.environment_id) meta.environmentId = ev.environment_id;
     if (typeof ev.status === "string" && ev.status) meta.status = ev.status;
+    if (typeof ev.error?.message === "string") meta.failureMessage = ev.error.message;
+    if (typeof ev.continuation_token === "string") meta.continuationToken = ev.continuation_token;
     if (typeof ev.event_id === "string" && ev.event_id) meta.lastEventId = ev.event_id;
     const u = readUsage(ev.usage);
     if (u) meta.usage = u;
@@ -291,6 +296,7 @@ export function blocksFromInteraction(interaction: Record<string, any>): StreamO
     interactionId: interaction?.id ?? "",
     environmentId: interaction?.environment_id ?? "",
     status: interaction?.status ?? "",
+    failureMessage: typeof interaction?.error?.message === "string" ? interaction.error.message : undefined,
     usage: readUsage(interaction?.usage),
     blocks,
   };

@@ -9,6 +9,7 @@ import { DEFAULT_AGENT_MODE, type AgentMode } from "../agentProfiles";
 import { deleteSessionData, loadTranscript, saveTranscript } from "../storage/messages";
 import { uid } from "../utils/id";
 import { CHAT_AGENT_ID, BROWSER_AGENT_ID } from "../models";
+import { OBJECT3D_AGENT_ID } from "../../../shared/object3dProfile";
 import type { Message, Session, SessionMode } from "./types";
 
 const safePersistStorage = createJSONStorage(() => {
@@ -278,7 +279,7 @@ export function normalizeLegacySessions(): void {
   }
   const agent = state.agent;
   const staleAgentRecord = Boolean(
-    agent && agent.agentId && agent.agentId !== CHAT_AGENT_ID && agent.agentId !== BROWSER_AGENT_ID,
+    agent && agent.agentId && agent.agentId !== CHAT_AGENT_ID && agent.agentId !== BROWSER_AGENT_ID && agent.agentId !== OBJECT3D_AGENT_ID,
   );
   if (Object.keys(remapped).length > 0 || staleAgentRecord) {
     useStore.setState((s) => ({

@@ -1,42 +1,65 @@
-// The agent payload is SHARED with the Electron app: everything comes from the
-// repo-root agents/ folder — the single source of truth for both UIs. Edit those
-// files to tune the agent everywhere; because the agent's identity is a fingerprint
-// of the whole payload, any edit automatically recreates every agent on its next
-// message. No versions to bump, nothing else to touch.
-//
-// agents/AGENTS.md                       → /.agents/AGENTS.md   (persona & rules)
-// agents/bin/gai                         → /.agents/bin/gai     (launcher → npx -y @lyalindotcom/gai)
-// agents/bin/browser                     → /.agents/bin/browser (launcher → npx -y @playwright/cli)
-// agents/skills/gemini-anything/SKILL.md → /.agents/skills/gemini-anything/SKILL.md
-// agents/skills/browser-testing/SKILL.md  → /.agents/skills/browser-testing/SKILL.md
-// (the user's key)                       → /.env                (GEMINI_API_KEY=…; sourced by the launcher)
-//
-// The key ships as /.env — the same mechanism the Electron app uses — so the shared
-// launcher and instruction files work byte-identically under either UI.
-//
-// There is deliberately NO agent-level system_instruction: the base agent auto-reads
-// AGENTS.md (additive, undisplaceable), while agent-level and request-level
-// system_instruction share ONE slot — any per-request injection would silently knock
-// an agent-level prompt out. The request-level slot carries only fresh per-call
-// context (see controller). All media capability comes from the PUBLISHED CLI
-// @lyalindotcom/gai via the shared launcher — never a local reimplementation
-// (hard rule; see the repo-root AGENTS.md). Browser automation independently
-// comes from the published Playwright agent CLI through its own launcher.
+import largeFinish from "../../../agents/skills/gigapixel-gemini-mosaic/scripts/finish.py?raw";
+import seamPatch from "../../../agents/skills/gigapixel-gemini-mosaic/scripts/seam_patch.py?raw";
+import largeAsset0 from "../../../agents/bin/large-image-setup?raw";
+import largeAsset1 from "../../../agents/skills/gigapixel-gemini-mosaic/SKILL.md?raw";
+import largeAsset2 from "../../../agents/skills/dr-seuss-world/SKILL.md?raw";
+import largeAsset3 from "../../../agents/skills/dr-seuss-world/references/dr-seuss-world-rules.md?raw";
+import largeAsset4 from "../../../agents/skills/gigapixel-gemini-mosaic/scripts/mosaic.py?raw";
+import largeAsset5 from "../../../agents/skills/gigapixel-gemini-mosaic/scripts/qa.py?raw";
+import largeAsset6 from "../../../agents/skills/gigapixel-gemini-mosaic/scripts/forensics.py?raw";
+import largeAsset7 from "../../../agents/skills/gigapixel-gemini-mosaic/scripts/make_deepzoom.py?raw";
+import largeAsset8 from "../../../agents/skills/gigapixel-gemini-mosaic/viewer/index.html?raw";
+import largeAsset9 from "../../../agents/skills/gigapixel-gemini-mosaic/viewer/styles.txt?raw";
+import largeAsset10 from "../../../agents/skills/gigapixel-gemini-mosaic/viewer/deepzoom.js?raw";
+// Shared canonical payload from agents/; the browser and desktop harness
+// mount identical assets. All media uses the official Gemini API CLI.
+// The key is mounted separately at /.env, never included in source control.
 import agentsMd from "../../../agents/AGENTS.md?raw";
 import browserLauncher from "../../../agents/bin/browser?raw";
-import gaiLauncher from "../../../agents/bin/gai?raw";
 import browserSkill from "../../../agents/skills/browser-testing/SKILL.md?raw";
 import geminiSkill from "../../../agents/skills/gemini-anything/SKILL.md?raw";
+import officialCliLauncher from "../../../agents/bin/gemini-api?raw";
+import object3dSetup from "../../../agents/bin/object3d-setup?raw";
+import object3dSkill from "../../../agents/skills/photo-to-3d/SKILL.md?raw";
+import object3dReconstruct from "../../../agents/skills/photo-to-3d/reconstruct.py?raw";
+import object3dFinish from "../../../agents/skills/photo-to-3d/finish_blender.py?raw";
+import photoObjectPrepare from "../../../agents/skills/photo-to-3d/prepare_photo_object.py?raw";
+import photoObjectBlender from "../../../agents/skills/photo-to-3d/photo_object_blender.py?raw";
+import { AGENT_ASSET_PATHS } from "../../../shared/agentAssets";
 import type { InlineSource } from "./interactionParams";
+
+const assets: Record<typeof AGENT_ASSET_PATHS[number], string> = {
+  "AGENTS.md": agentsMd,
+  "bin/large-image-setup": largeAsset0,
+  "skills/gigapixel-gemini-mosaic/SKILL.md": largeAsset1,
+  "skills/dr-seuss-world/SKILL.md": largeAsset2,
+  "skills/dr-seuss-world/references/dr-seuss-world-rules.md": largeAsset3,
+  "skills/gigapixel-gemini-mosaic/scripts/mosaic.py": largeAsset4,
+  "skills/gigapixel-gemini-mosaic/scripts/qa.py": largeAsset5,
+  "skills/gigapixel-gemini-mosaic/scripts/seam_patch.py": seamPatch,
+  "skills/gigapixel-gemini-mosaic/scripts/finish.py": largeFinish,
+  "skills/gigapixel-gemini-mosaic/scripts/forensics.py": largeAsset6,
+  "skills/gigapixel-gemini-mosaic/scripts/make_deepzoom.py": largeAsset7,
+  "skills/gigapixel-gemini-mosaic/viewer/index.html": largeAsset8,
+  "skills/gigapixel-gemini-mosaic/viewer/styles.txt": largeAsset9,
+  "skills/gigapixel-gemini-mosaic/viewer/deepzoom.js": largeAsset10,
+
+  "bin/browser": browserLauncher,
+  "skills/gemini-anything/SKILL.md": geminiSkill,
+  "skills/browser-testing/SKILL.md": browserSkill,
+  "bin/gemini-api": officialCliLauncher,
+  "bin/object3d-setup": object3dSetup,
+  "skills/photo-to-3d/SKILL.md": object3dSkill,
+  "skills/photo-to-3d/reconstruct.py": object3dReconstruct,
+  "skills/photo-to-3d/finish_blender.py": object3dFinish,
+  "skills/photo-to-3d/prepare_photo_object.py": photoObjectPrepare,
+  "skills/photo-to-3d/photo_object_blender.py": photoObjectBlender,
+};
 
 export function buildEnvSources(apiKey: string): InlineSource[] {
   return [
-    { type: "inline", target: "/.agents/AGENTS.md", content: agentsMd },
+    ...AGENT_ASSET_PATHS.map((path) => ({ type: "inline" as const, target: `/.agents/${path}`, content: assets[path] })),
     { type: "inline", target: "/.env", content: `GEMINI_API_KEY=${apiKey}\n` },
-    { type: "inline", target: "/.agents/bin/gai", content: gaiLauncher },
-    { type: "inline", target: "/.agents/skills/gemini-anything/SKILL.md", content: geminiSkill },
-    { type: "inline", target: "/.agents/bin/browser", content: browserLauncher },
-    { type: "inline", target: "/.agents/skills/browser-testing/SKILL.md", content: browserSkill },
   ];
 }
 

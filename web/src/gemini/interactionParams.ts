@@ -1,3 +1,4 @@
+import { MODELS } from "../models";
 // Request-body builder for /interactions calls. Ports the semantics of
 // gemini-api-cli src/lib/api.ts buildInteractionRequest (env auto-"remote" for agents,
 // deep-research auto-config) plus a live-verified API rule: continuation requests MUST
@@ -14,6 +15,7 @@ export type ToolDecl =
   | { type: "code_execution" }
   | { type: "google_search" }
   | { type: "url_context" }
+  | { type: "mcp_server"; name: string; url: string; credential?: string; headers?: Record<string, string>; allowed_tools?: string[] }
   | FunctionToolDecl;
 
 export const tools = {
@@ -35,6 +37,7 @@ export interface InlineSource {
 }
 
 export interface TurnParams {
+  agentModel?: string;
   agent?: string;
   model?: string;
   input: InteractionInput;
@@ -43,8 +46,13 @@ export interface TurnParams {
   previousInteractionId?: string;
   /** Environment id from the previous turn — REQUIRED for continuations. */
   environmentId?: string;
+  /** Credential references and network rules; combined with the existing environment ID on continuation. */
+  environmentConfig?: {
+    network?: "disabled" | { allowlist: Array<{ domain: string; credential?: string; transform?: Record<string, string> }> };
+    env?: Record<string, string | { value: string } | { credential: string }>;
+  };
   systemInstruction?: string;
-  /** Seed a fresh remote environment with files (degraded/no-managed-agent mode). */
+  /** Mount payload or input files, preserving an existing environment when supplied. */
   seedSources?: InlineSource[];
   deepResearch?: boolean;
   store?: boolean;
@@ -60,8 +68,13 @@ export function buildInteractionParams(p: TurnParams): Record<string, unknown> {
   if (p.model) body.model = p.model;
   if (p.agent) body.agent = p.agent;
 
-  if (p.seedSources && p.seedSources.length > 0) {
-    body.environment = { type: "remote", sources: p.seedSources };
+  if ((p.seedSources && p.seedSources.length > 0) || p.environmentConfig) {
+    body.environment = {
+      type: "remote",
+      ...(p.environmentId ? { environment_id: p.environmentId } : {}),
+      ...(p.seedSources?.length ? { sources: p.seedSources } : {}),
+      ...p.environmentConfig,
+    };
   } else if (p.environmentId) {
     body.environment = p.environmentId;
   } else if (p.agent && !p.deepResearch) {
@@ -76,7 +89,9 @@ export function buildInteractionParams(p: TurnParams): Record<string, unknown> {
     if (p.store !== undefined) body.store = p.store;
     if (p.background && p.store !== false) body.background = true;
     if (p.serviceTier && p.serviceTier !== "standard") body.service_tier = p.serviceTier;
-    if (p.thinkingSummaries && p.thinkingSummaries !== "none") {
+    if (p.agent === MODELS.chatAgentBase && p.agentModel) {
+      body.agent_config = { type: "antigravity", model: p.agentModel };
+    } else if (p.agent === MODELS.chatAgentBase && p.thinkingSummaries && p.thinkingSummaries !== "none") {
       body.agent_config = { type: "dynamic", thinking_summaries: p.thinkingSummaries };
     }
   }

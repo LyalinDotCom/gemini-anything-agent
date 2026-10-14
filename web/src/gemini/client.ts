@@ -6,26 +6,18 @@ import { GoogleGenAI } from "@google/genai";
 import { FriendlyError, toFriendly } from "./errors";
 import { getStoredKey, onKeyChange } from "./keyStore";
 
-let shimInstalled = false;
-
-function installCorsShim(): void {
-  if (shimInstalled || typeof window === "undefined") return;
-  shimInstalled = true;
-  const orig = window.fetch.bind(window);
-  const strip = (h: HeadersInit | undefined): Headers => {
-    const hh = new Headers(h ?? {});
-    hh.delete("api-revision");
-    return hh;
-  };
-  window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    if (url.includes("generativelanguage.googleapis.com")) {
-      if (input instanceof Request) input = new Request(input, { headers: strip(input.headers) });
-      if (init?.headers !== undefined) init = { ...init, headers: strip(init.headers) };
-    }
-    return orig(input, init);
-  };
-}
+// Scope the CORS workaround to SDK requests; never mutate window.fetch.
+export const browserApiFetch: typeof fetch = (input, init) => {
+  const address = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  let origin = "";
+  try { origin = new URL(address, typeof location === "undefined" ? undefined : location.href).origin; } catch { /* let fetch handle an unsupported address */ }
+  if (origin === "https://generativelanguage.googleapis.com") {
+    const clean = (headers?: HeadersInit) => { const value = new Headers(headers); value.delete("api-revision"); return value; };
+    if (input instanceof Request) input = new Request(input, { headers: clean(input.headers) });
+    if (init?.headers) init = { ...init, headers: clean(init.headers) };
+  }
+  return globalThis.fetch(input, init);
+};
 
 /** The key the app is currently operating with (stored key, else dev/test fallbacks). */
 export function resolveApiKey(): string | null {
@@ -38,8 +30,8 @@ function resolveKey(): string | null {
   // Dev/test fallbacks only; production users always come through the KeyGate.
   const viteKey =
     typeof import.meta !== "undefined" ? (import.meta.env?.VITE_GEMINI_API_KEY as string | undefined) : undefined;
-  if (viteKey) return viteKey;
-  if (typeof process !== "undefined" && process.env?.GEMINI_API_KEY) return process.env.GEMINI_API_KEY;
+  if ((import.meta.env?.DEV || import.meta.env?.MODE === "test") && viteKey) return viteKey;
+  if (typeof window === "undefined" && typeof process !== "undefined" && process.env?.GEMINI_API_KEY) return process.env.GEMINI_API_KEY;
   return null;
 }
 
@@ -48,11 +40,11 @@ let cachedKey = "";
 
 /** The shared client for the current key. Throws FriendlyError("no-key") when unset. */
 export function ai(): GoogleGenAI {
-  installCorsShim();
   const key = resolveKey();
   if (!key) throw new FriendlyError("no-key", "No Gemini API key set.");
   if (cached && cachedKey === key) return cached;
-  cached = new GoogleGenAI({ apiKey: key });
+  // Never silently replay agent or credential creation after an uncertain POST.
+  cached = new GoogleGenAI({ apiKey: key, httpOptions: { fetch: browserApiFetch, retryOptions: { attempts: 1 } } });
   cachedKey = key;
   return cached;
 }
@@ -65,9 +57,8 @@ onKeyChange(() => {
 /** Live probe used by the KeyGate before accepting a key. Deliberately hits the
  *  AGENTS surface — this app never touches the models API family, even for pings. */
 export async function validateKey(key: string): Promise<{ ok: true } | { ok: false; message: string }> {
-  installCorsShim();
   try {
-    const probe = new GoogleGenAI({ apiKey: key.trim() });
+    const probe = new GoogleGenAI({ apiKey: key.trim(), httpOptions: { fetch: browserApiFetch, retryOptions: { attempts: 1 } } });
     await probe.agents.list();
     return { ok: true };
   } catch (e) {

@@ -21,6 +21,10 @@ describe("blocksToParts", () => {
     expect(code.done).toBe(true);
   });
 
+  test("a submitted code call stays running until its execution result arrives", () => {
+    const pending = blocksToParts([{ index: 0, type: "code_execution_call", done: true, id: "video-call", code: "generate video" }], "r0");
+    expect(pending[0]).toMatchObject({ kind: "code", done: false, runs: [{ done: false }] });
+  });
   test("search call renders a running chip; its result marks it done", () => {
     const running = blocksToParts([{ index: 0, type: "google_search_call", done: false, query: "news" }], "r0");
     expect(running[0]).toMatchObject({ kind: "tool", activity: { tool: "google_search", status: "running" } });
@@ -139,15 +143,15 @@ describe("groupParts", () => {
 
   test("code runs do not merge across file/tool chips, preserving visible step order", () => {
     const grouped = groupParts([
-      codePart("a", "bash gai --help"),
+      codePart("a", "bash /.agents/bin/gemini-api --help"),
       toolPart("write", "other", "Writing files…"),
       { kind: "text", id: "n", text: "Creating the script." },
-      codePart("b", "bash gai tts --script-file /workspace/output/script.txt"),
+      codePart("b", "bash /.agents/bin/gemini-api tts --file /workspace/output/script.txt"),
     ]);
     expect(grouped.map((p) => p.kind)).toEqual(["code", "tool", "text", "code"]);
-    expect((grouped[0] as Extract<ContentPart, { kind: "code" }>).runs.map((r) => r.code)).toEqual(["bash gai --help"]);
+    expect((grouped[0] as Extract<ContentPart, { kind: "code" }>).runs.map((r) => r.code)).toEqual(["bash /.agents/bin/gemini-api --help"]);
     expect((grouped[3] as Extract<ContentPart, { kind: "code" }>).runs.map((r) => r.code)).toEqual([
-      "bash gai tts --script-file /workspace/output/script.txt",
+      "bash /.agents/bin/gemini-api tts --file /workspace/output/script.txt",
     ]);
   });
 

@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Native artifact processing only: model calls always go through a published CLI.
+[ "$(uname -s)" = Linux ] || { echo "Run 3D setup inside the managed Linux sandbox." >&2; exit 1; }
+# Keep native dependency caches out of the persisted output snapshot.
+root="${TMPDIR:-/tmp}/gai-photo-to-3d"
+mkdir -p "$root"
+# Avoid feeding package installation transcripts back through every agent turn.
+setup_log="$root/setup.log"
+exec 3>&2
+exec 2>>"$setup_log"
+trap 'code=$?; if [ "$code" -ne 0 ]; then tail -n 30 "$setup_log" >&3; fi' EXIT
+if ! command -v blender >/dev/null || ! command -v ffmpeg >/dev/null || ! python3 -m venv --help >/dev/null 2>&1; then
+  [ "$(id -u)" = 0 ] && command -v apt-get >/dev/null || { echo "Blender, ffmpeg, and Python venv must be installed in this sandbox." >&2; exit 1; }
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update >>"$setup_log"
+  apt-get install -y --no-install-recommends blender ffmpeg python3-venv >>"$setup_log"
+fi
+mkdir -p "$root"
+if [ ! -x "$root/venv/bin/python" ]; then python3 -m venv "$root/venv"; fi
+if ! "$root/venv/bin/python" -c 'import numpy, scipy, skimage, PIL, trimesh' >/dev/null 2>&1; then
+  "$root/venv/bin/pip" install --disable-pip-version-check numpy scipy scikit-image pillow trimesh >>"$setup_log"
+fi
+blender --version | sed -n 1p >&3
+printf '%s\n' "$root/venv/bin/python"

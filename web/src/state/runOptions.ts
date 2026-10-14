@@ -17,7 +17,7 @@ const COUNTED_KEYS = [
   "reuseEnvironment",
   "background",
   "serviceTier",
-  "thinkingSummaries",
+
   "overrideSystemInstruction",
   "overrideTools",
   "overrideEnvironment",

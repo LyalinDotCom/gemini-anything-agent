@@ -181,6 +181,7 @@ export async function ensureAgent(agentId: string, current: AgentInfo | null, fo
 }
 
 const inflight = new Map<string, Promise<AgentInfo>>();
+const verifiedAgents = new Map<string, AgentInfo>();
 
 /** Ensure either app-owned custom profile without mixing concurrent profile requests. */
 export function managedAgentId(agentId: string, model: string = MODELS.text): string {
@@ -193,7 +194,7 @@ export async function ensureManagedAgent(baseId: string, current: AgentInfo | nu
   const inflightKey = `${agentId}:${model}:${currentPayload(model).fingerprint}`;
   const existing = inflight.get(inflightKey);
   if (existing) return existing;
-  const pending = ensureAgent(agentId, current?.agentId === agentId ? current : null, force, model).finally(() => {
+  const pending = ensureAgent(agentId, current?.agentId === agentId ? current : verifiedAgents.get(inflightKey) ?? null, force, model).then(info => { if (!info.degraded) verifiedAgents.set(inflightKey, info); return info; }).finally(() => {
     inflight.delete(inflightKey);
   });
   inflight.set(inflightKey, pending);

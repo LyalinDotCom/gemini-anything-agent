@@ -59,7 +59,7 @@ function Pre({ children }: { children?: React.ReactNode }) {
 }
 
 const OUTPUT_PATH_RE = /\/workspace\/output\/[^\s<>"'`]+/g;
-const TRAILING_PUNCTUATION_RE = /[.,;:!?)}\]]+$/;
+const TRAILING_PUNCTUATION_RE = /[.,;:!?)}\]*_~]+$/;
 
 function basename(path: string): string {
   return path.split("/").filter(Boolean).pop() || path;
@@ -73,7 +73,9 @@ function linkifyOutputPaths(text: string): string {
   return text
     .split(/(```[\s\S]*?```|`[^`\n]+`|\[[^\]]*\]\([^)]+\))/g)
     .map((chunk, index) => {
+      if (chunk.startsWith("```")) return chunk;
       if (index % 2 === 1 && /^`\/workspace\/output\/[^`]+`$/.test(chunk)) { const path = chunk.slice(1, -1); return `[${escapeMarkdownLabel(basename(path))}](resource:${encodeURIComponent(path)})`; }
+      if (index % 2 === 1 && chunk.startsWith("`")) return chunk;
       if (index % 2 === 1) return chunk.replace(/\]\((\/workspace\/output\/[^)]+)\)/g, (_, path: string) => `](resource:${encodeURIComponent(path)})`);
       return chunk.replace(OUTPUT_PATH_RE, (match) => {
         const trailing = match.match(TRAILING_PUNCTUATION_RE)?.[0] ?? "";
@@ -100,7 +102,11 @@ export const Markdown = memo(function Markdown({
         components={{
           pre: Pre,
           a: ({ href, children }) => {
-            const resourcePath = href?.startsWith("resource:") ? decodeURIComponent(href.slice("resource:".length)) : null;
+            let resourcePath: string | null = null;
+            if (href?.startsWith("resource:")) {
+              try { const decoded = decodeURIComponent(href.slice("resource:".length)); if (decoded.startsWith("/workspace/output/")) resourcePath = decoded; } catch { /* malformed model output stays plain text */ }
+              if (!resourcePath) return <span>{children}</span>;
+            }
             return resourcePath ? (
               <button
                 type="button"

@@ -344,7 +344,7 @@ export async function sendTurn(sessionId: string, turn: TurnInput): Promise<void
       ? (agentInfo?.degraded ? agentInfo.baseAgent : (agentInfo?.agentId ?? profile.agentId))
       : profile.agentId;
     const degraded = Boolean(profile.managed && agentInfo && agentName === agentInfo.baseAgent);
-    if (degraded && (lastInteractionId || environmentId)) throw new FriendlyError("network", "Your managed agent is temporarily unavailable. Retry this turn to keep the current workspace.");
+    if (degraded && (lastInteractionId || environmentId || session.migrationContext)) throw new FriendlyError("network", "Your managed agent is temporarily unavailable. Retry this turn to keep the current workspace.");
     contextPrefix += session.migrationContext ?? "";
     const workflowChanged = session.agentPayloadFingerprint !== workflowFingerprint;
     const agentChanged = Boolean(previousAgent && previousAgent !== agentName);
@@ -353,7 +353,7 @@ export async function sendTurn(sessionId: string, turn: TurnInput): Promise<void
       const beforeMigration = contextPrefix.length;
       const recap = condenseTranscript(useStore.getState().messages[sessionId]?.slice(0, -2) ?? []);
       if (recap) contextPrefix += `[Conversation recap before upgrading the agent]\n${recap}\n[End recap]\n\n`;
-      if (oldEnvironment) contextPrefix += `The previous workspace ${oldEnvironment} remains available with its artifacts and working inputs. Before regenerating prior work, discover the official CLI environments files commands and download only the files needed into this current workspace. Never download or print /.env or private configuration.\n\n`;
+      if (oldEnvironment) contextPrefix += `The previous workspace ${oldEnvironment} remains available with its artifacts and working inputs. Recover prior files only when the current user task requires them. For an unrelated new task, do not discover or download old files. When recovering prior work, discover the official CLI environments files commands and download only the needed files into this current workspace. Never download or print /.env or private configuration.\n\n`;
       if (options.overrideEnvironment) throw new FriendlyError("bad-request", "This selected workspace uses an older workflow. Turn off the specific environment override to start the upgraded CLI workflow; your previous files remain available.");
       const migrationContext = (session.migrationContext ?? "") + contextPrefix.slice(beforeMigration);
       lastInteractionId = undefined; environmentId = undefined;

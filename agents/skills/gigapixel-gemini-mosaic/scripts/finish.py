@@ -64,7 +64,7 @@ def main():
  if not repair.exists() and final['mosaic.png']['sha256']!=composition.get('mosaic_sha256'):raise ValueError('PNG differs from native composition; rebuild with current helper')
  output.parent.mkdir(parents=True,exist_ok=True)
  backup=None
- staged=Path(tempfile.mkdtemp(prefix='.'+output.name+'.delivery-',dir=output.parent))
+ staged=Path(tempfile.mkdtemp(prefix='.'+output.name+'.delivery-',dir=run))
  try:
   for name in list(final)+['world_plan.json','composition-validation.json','geometry.json','build_report.json','seam-repair-validation.json']:
    source=run/name

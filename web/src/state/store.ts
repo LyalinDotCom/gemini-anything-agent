@@ -29,6 +29,11 @@ const safePersistStorage = createJSONStorage(() => {
     },
   };
 });
+const TAB_SELECTION_KEY = "gaa.activeChat.v1";
+function tabSelection(): string | null {
+  try { return sessionStorage.getItem(TAB_SELECTION_KEY); } catch { return null; }
+}
+
 const hydrationReads = new Map<string, number>();
 const unsavedTranscripts = new Map<string, Message[]>();
 const transcriptWrites = new Map<string, number>();
@@ -274,7 +279,7 @@ export const useStore = create<AppState>()(
       // previously persisted state (zustand drops mismatched versions).
       version: 1,
       storage: safePersistStorage,
-      merge: mergeChatState,
+      merge: (saved, current) => mergeChatState(saved, { ...current, activeSessionId: current.activeSessionId ?? tabSelection() }),
       partialize: (s) => ({
         sessions: s.sessions,
         sessionOrder: s.sessionOrder,
@@ -288,12 +293,22 @@ export const useStore = create<AppState>()(
   ),
 );
 
+// Selection survives reload in this tab without taking another tab's selection.
+useStore.subscribe((state, previous) => {
+  if (state.activeSessionId === previous.activeSessionId) return;
+  try {
+    if (state.activeSessionId) sessionStorage.setItem(TAB_SELECTION_KEY, state.activeSessionId);
+    else sessionStorage.removeItem(TAB_SELECTION_KEY);
+  } catch { /* private mode can disable session storage */ }
+});
+
 // Cross-tab convergence: when another tab writes the persisted slice, rehydrate it
 // here instead of later clobbering it with this tab's stale copy (last-writer-wins
 // on the whole blob was silently discarding sessions created elsewhere).
 if (typeof window !== "undefined") {
   window.addEventListener("storage", (e) => {
     if (e.key === "gaa-store") {
+      if (e.newValue === null && e.oldValue !== null) { location.reload(); return; }
       void Promise.resolve(useStore.persist.rehydrate()).then(() => {
         const id = useStore.getState().activeSessionId;
         if (id) void useStore.getState().hydrateSession(id).catch(() => undefined);

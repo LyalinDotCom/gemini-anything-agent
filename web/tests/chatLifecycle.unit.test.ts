@@ -141,3 +141,13 @@ test("a failed final save preserves the completed reply in this tab and can retr
  expect(useStore.getState().messages[id].at(-1)?.status).toBe('complete');
  failures.write=false;await useStore.getState().persistTranscript(id);expect(useStore.getState().sessions[id].historySaveError).toBe(false);expect(saved.get(id)).toHaveLength(2);
 });
+
+test("rehydration restores this tab's selected chat instead of another tab's selection",()=>{
+ const values=new Map<string,string>();vi.stubGlobal('sessionStorage',{getItem:(key:string)=>values.get(key)??null,setItem:(key:string,value:string)=>{values.set(key,value);},removeItem:(key:string)=>{values.delete(key);}});
+ try {
+  const first=useStore.getState().createSession();const second=useStore.getState().createSession();useStore.getState().setActiveSession(first);
+  const saved={...useStore.getState(),activeSessionId:second};
+  const restored=useStore.persist.getOptions().merge!(saved,{...useStore.getState(),activeSessionId:null,sessions:{},sessionOrder:[]});
+  expect(restored.activeSessionId).toBe(first);expect(restored.sessionOrder).toEqual([second,first]);
+ }finally{vi.unstubAllGlobals();}
+});

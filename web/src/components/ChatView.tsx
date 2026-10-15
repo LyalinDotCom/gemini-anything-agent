@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { useStore } from "../state/store";
 import type { Message } from "../state/types";
 import { T } from "../tokens";
-import { Icon } from "./atoms";
+import { Icon, Spinner } from "./atoms";
 import { MessageBubble } from "./MessageBubble";
 import { SamplePromptGallery } from "./SamplePromptGallery";
 
@@ -16,6 +16,7 @@ export function ChatView({
   onOpenResourcePath?: (path: string) => void;
 }) {
   const messages = useStore((s) => s.messages[sessionId] ?? EMPTY);
+  const hydrated = useStore(s => Boolean(s.hydrated[sessionId]));
   const queueRetry = useStore((s) => s.queueRetry);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
@@ -38,7 +39,7 @@ export function ChatView({
       style={{ flex: 1, overflowY: "auto", overscrollBehavior: "contain" }}
     >
       <div style={{ maxWidth: 780, margin: "0 auto", padding: "10px 18px 24px" }}>
-        {messages.length === 0 ? (
+        {!hydrated ? <div role="status" style={{display:"flex",alignItems:"center",gap:8,padding:"24px 0",fontSize:13,color:T.textDim}}><Spinner size={14} /> Loading saved chat…</div> : messages.length === 0 ? (
           <div
             style={{
               display: "flex",

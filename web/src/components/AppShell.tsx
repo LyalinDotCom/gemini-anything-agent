@@ -69,10 +69,10 @@ function PanelTabButton({
 
 function useIsMobile(): boolean {
   const [mobile, setMobile] = useState(() =>
-    typeof window !== "undefined" ? window.innerWidth < 768 : false,
+    typeof window !== "undefined" ? window.innerWidth < 1024 : false,
   );
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 767px)");
+    const mq = window.matchMedia("(max-width: 1023px)");
     const onChange = () => setMobile(mq.matches);
     mq.addEventListener("change", onChange);
     onChange(); // The viewport can change between initial render and subscribing.

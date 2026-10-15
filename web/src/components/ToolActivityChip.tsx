@@ -25,6 +25,8 @@ export function ToolActivityChip({ activity }: { activity: ToolActivity }) {
         onClick={hasDetail ? () => setOpen(!open) : undefined}
         style={{
           display: "inline-flex",
+          maxWidth: "100%",
+          minWidth: 0,
           alignItems: "center",
           gap: 7,
           padding: "5px 11px",
@@ -37,7 +39,7 @@ export function ToolActivityChip({ activity }: { activity: ToolActivity }) {
         }}
       >
         {activity.status === "running" ? <Spinner size={12} color={T.accent} /> : <Icon name={ICONS[activity.tool]} size={13} />}
-        <span style={{ maxWidth: 380, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        <span style={{ minWidth: 0, maxWidth: 380, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {activity.label}
           {(activity.count ?? 1) > 1 ? ` ×${activity.count}` : ""}
         </span>

@@ -35,6 +35,7 @@ function tabSelection(): string | null {
 }
 
 const hydrationReads = new Map<string, number>();
+const hydrationSnapshots = new Map<string, Map<string, Message>>();
 const unsavedTranscripts = new Map<string, Message[]>();
 const transcriptWrites = new Map<string, number>();
 
@@ -72,7 +73,7 @@ export interface AppState {
   setActiveSession(id: string | null): void;
   patchSession(id: string, patch: Partial<Session>): void;
 
-  hydrateSession(id: string): Promise<void>;
+  hydrateSession(id: string, refresh?: boolean): Promise<void>;
   setMessages(sessionId: string, messages: Message[]): void;
   appendMessage(sessionId: string, message: Message): void;
   patchMessage(sessionId: string, messageId: string, patch: Partial<Message>): void;
@@ -181,22 +182,31 @@ export const useStore = create<AppState>()(
         });
       },
 
-      async hydrateSession(id) {
-        if (get().hydrated[id] || !get().sessions[id]) return;
+      async hydrateSession(id, refresh = false) {
+        if ((!refresh && get().hydrated[id]) || !get().sessions[id]) return;
+        const before = hydrationSnapshots.get(id) ?? new Map((get().messages[id] ?? []).map(message => [message.id, message]));
+        hydrationSnapshots.set(id, before);
         const generation = (hydrationReads.get(id) ?? 0) + 1;
         hydrationReads.set(id, generation);
-        const loaded = unsavedTranscripts.get(id) ?? await loadTranscript(id);
-        set((s) => {
-          if (s.hydrated[id] || !s.sessions[id] || hydrationReads.get(id) !== generation) return s;
-          // MERGE with anything appended while the IDB read was in flight — never
-          // clobber live messages with the loaded snapshot.
-          const inFlight = s.messages[id] ?? [];
-          const loadedIds = new Set(loaded.map((m) => m.id));
-          return {
-            messages: { ...s.messages, [id]: [...loaded, ...inFlight.filter((m) => !loadedIds.has(m.id))] },
-            hydrated: { ...s.hydrated, [id]: true },
-          };
-        });
+        try {
+          const loaded = unsavedTranscripts.get(id) ?? await loadTranscript(id);
+          set((s) => {
+            if ((!refresh && s.hydrated[id]) || !s.sessions[id] || hydrationReads.get(id) !== generation) return s;
+            // MERGE with anything appended while the IDB read was in flight — never
+            // clobber live messages with the loaded snapshot.
+            const inFlight = s.messages[id] ?? [];
+            const loadedIds = new Set(loaded.map((m) => m.id));
+            return {
+              messages: { ...s.messages, [id]: [...loaded.map(message => {
+                const live = inFlight.find(candidate => candidate.id === message.id);
+                return live && live !== before.get(message.id) ? live : message;
+              }), ...inFlight.filter((m) => !loadedIds.has(m.id) && (!refresh || !before.has(m.id)))] },
+              hydrated: { ...s.hydrated, [id]: true },
+            };
+          });
+        } finally {
+          if (hydrationReads.get(id) === generation) hydrationSnapshots.delete(id);
+        }
       },
 
       setMessages(sessionId, list) {

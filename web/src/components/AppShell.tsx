@@ -1,7 +1,9 @@
 import { isModelFile } from "../utils/modelFiles";
 import { useEffect, useRef, useState } from "react";
-import { cancelServerTurn, recoverPendingTurn } from "../chat/controller";
-import { cancelResearchTurn, resumeResearchIfNeeded } from "../gemini/deepResearch";
+import { cancelServerTurn } from "../chat/controller";
+import { listenForAppReturn, refreshActiveSession, resumeStoredSession } from "../chat/sessionRefresh";
+import { wakeStoredRun } from "../gemini/storedRunWake";
+import { cancelResearchTurn } from "../gemini/deepResearch";
 import { outputFileMatchesPath, syncOutputMedia } from "../gemini/envFiles";
 import { useStore } from "../state/store";
 import type { OutputFileRecord } from "../state/types";
@@ -82,6 +84,7 @@ function useIsMobile(): boolean {
 }
 
 export function AppShell() {
+  useEffect(() => listenForAppReturn(refreshActiveSession, window, document), []);
   const isMobile = useIsMobile();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -186,8 +189,8 @@ export function AppShell() {
   useEffect(() => {
     if (!activeSessionId) return;
     void hydrateSession(activeSessionId).then(() => {
-      void resumeResearchIfNeeded(activeSessionId).catch(() => undefined);
-      void recoverPendingTurn(activeSessionId);
+      wakeStoredRun(activeSessionId);
+      void resumeStoredSession(activeSessionId).catch(() => undefined);
     }).catch(() => useStore.getState().patchSession(activeSessionId, { cancelNotice: "Could not read saved chat history. Reload and try again; no new turn has replaced it." }));
   }, [activeSessionId, hydrateSession]);
 

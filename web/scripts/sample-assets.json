@@ -34,5 +34,17 @@
   {
     "path": "seuss-world/overview.jpg",
     "sha256": "4100618beb16a9fa240b8b96dfd688d5895c8caf65731cf0d14802c4bb5b1d5d"
+  },
+  {
+    "path": "continuity-check/mosaic.jpg",
+    "sha256": "713018735f3f96a20d95440c978687bd9a46c213b7c1f38c4450670e9faf5e1c"
+  },
+  {
+    "path": "continuity-check/validation.json",
+    "sha256": "375200ac1f90689916bfe053b1e26dcbeb8e3909f5a76bd05f4ca4277f7d7861"
+  },
+  {
+    "path": "continuity-check/preflight_report.md",
+    "sha256": "f829e900187eec9d6902c5e053584a60d559c05d8f55bedb1d05b75382df204a"
   }
 ]

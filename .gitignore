@@ -56,3 +56,6 @@ web/public/examples/seuss-world/deepzoom.zip
 # Download generated models with npm run samples:sync; never commit large binaries.
 web/public/examples/*.glb
 web/public/examples/*.blend
+
+# Generated continuity proof; retrieve checksum-verified assets from Firebase.
+web/public/examples/continuity-check/

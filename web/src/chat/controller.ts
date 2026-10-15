@@ -1,3 +1,4 @@
+import { StoredRunWakeError, withStoredStream, waitForStoredPoll } from "../gemini/storedRunWake";
 import { withChatTurnLock } from "./turnLock";
 import { LARGE_IMAGE_INVOCATION, largeImageTemplateInstruction } from "../../../shared/largeImageProfile";
 // sendTurn: the whole life of one chat turn.
@@ -502,22 +503,19 @@ async function sendTurnUnlocked(sessionId: string, turn: TurnInput): Promise<voi
       };
 
       let outcome!: Awaited<ReturnType<typeof consumeInteractionStream>>;
-      const streamController = new AbortController();
-      const abortStream = () => streamController.abort();
-      controller.signal.addEventListener("abort", abortStream, { once: true });
-      if (controller.signal.aborted) abortStream();
       try {
         // retries "none": an auto-retried POST /interactions would create a DUPLICATE
         // run server-side. Failures route through our own recovery instead.
-        const created = await turnClient.interactions.create(params as never, {
-          maxRetries: 0,
-          signal: streamController.signal,
-          retries: { strategy: "none" },
-          timeout_ms: 60 * 60 * 1000,
-        } as never);
-        outcome = await consumeInteractionStream(asEventStream(created), onUpdate, { acknowledgedStallMs: options.store ? STORED_STREAM_STALL_MS : undefined });
+        outcome = await withStoredStream(sessionId, controller.signal, () => Boolean(options.store && pendingMarkedFor && acknowledgedThisRound), async (signal, touch) => {
+          const created = await turnClient.interactions.create(params as never, {
+            maxRetries: 0,
+            signal,
+            retries: { strategy: "none" },
+            timeout_ms: 60 * 60 * 1000,
+          } as never);
+          return await consumeInteractionStream(asEventStream(created), (blocks, meta) => { touch(); onUpdate(blocks, meta); }, { acknowledgedStallMs: options.store ? STORED_STREAM_STALL_MS : undefined });
+        });
       } catch (e) {
-        streamController.abort();
         // Server-side state can expire (interaction chain or environment gone) even
         // though we persist the ids. Self-heal ONCE, inside this same turn: start a
         // fresh container, replay a condensed recap, and rerun the request.
@@ -574,19 +572,16 @@ async function sendTurnUnlocked(sessionId: string, turn: TurnInput): Promise<voi
             },
           });
           patchAssistant();
-          outcome = await awaitInteractionOutcome(pendingMarkedFor, controller.signal, (current) => onUpdate(current.blocks, current), turnClient);
+          outcome = await awaitInteractionOutcome(pendingMarkedFor, controller.signal, (current) => onUpdate(current.blocks, current), turnClient, sessionId);
           liveParts = blocksToParts(outcome.blocks as MediaStampedBlock[], `r${round}`);
         } else {
           throw e;
         }
-      } finally {
-        controller.signal.removeEventListener("abort", abortStream);
-        streamController.abort();
       }
       if (!interactionStatusIsTerminal(outcome.status)) {
         const runningId = outcome.interactionId || (acknowledgedThisRound ? pendingMarkedFor : "");
         if (!runningId) throw new FriendlyError("server", "The connection ended before a stored interaction was acknowledged. Check the server run before starting another generation.");
-        outcome = await awaitInteractionOutcome(runningId, controller.signal, (current) => onUpdate(current.blocks, current), turnClient);
+        outcome = await awaitInteractionOutcome(runningId, controller.signal, (current) => onUpdate(current.blocks, current), turnClient, sessionId);
       }
       roundBlocks = outcome.blocks;
       if (outcome.interactionId) lastInteractionId = outcome.interactionId;
@@ -752,15 +747,20 @@ async function awaitInteractionOutcome(
   signal?: AbortSignal,
   onPoll?: (outcome: StreamOutcome) => void,
   client: ReturnType<typeof ai> = ai(),
+  sessionId?: string,
 ): Promise<StreamOutcome> {
   if (!interactionId) throw new FriendlyError("server", "The server did not return an interaction ID.");
   let lastSuccessfulPoll = Date.now();
+  let lastLoop = Date.now();
   let lastDigest = "";
   let lastUpdate = 0;
   for (;;) {
     if (signal?.aborted) throw new FriendlyError("aborted", "Stopped.");
+    if (Date.now() - lastLoop > RECOVER_POLL_MS + 60_000) lastSuccessfulPoll = Date.now();
+    lastLoop = Date.now();
     try {
-      const interaction = (await client.interactions.get(interactionId, {}, { signal, timeout_ms: 30_000, maxRetries: 0 } as never)) as Record<string, unknown>;
+      const read = (signal?: AbortSignal) => client.interactions.get(interactionId, {}, { signal, timeout_ms: 30_000, maxRetries: 0 } as never);
+      const interaction = (sessionId && signal ? await withStoredStream(sessionId, signal, () => true, read, 2_000) : await read(signal)) as Record<string, unknown>;
       const outcome = blocksFromInteraction(interaction);
       lastSuccessfulPoll = Date.now();
       // Skip the parts rebuild + store patch (and the re-render they cause) when
@@ -776,16 +776,20 @@ async function awaitInteractionOutcome(
       }
       if (interactionStatusIsTerminal(outcome.status)) return outcome;
     } catch (e) {
+      if (e instanceof StoredRunWakeError) continue;
       const f = toFriendly(e);
       if (f.kind !== "network" && f.kind !== "server" && f.kind !== "rate-limit" && !(f.kind === "aborted" && !signal?.aborted)) {
         throw f;
       }
       // network/server trouble: keep polling — that's the whole point
     }
+    // A request timeout may itself resume after a long system sleep.
+    if (Date.now() - lastLoop > RECOVER_POLL_MS + 60_000) lastSuccessfulPoll = Date.now();
     if (Date.now() - lastSuccessfulPoll > RECOVER_MAX_MS) {
       throw new FriendlyError("unknown", "The server has been unreachable for an hour. The stored run can be recovered when the connection returns.");
     }
-    await new Promise((r) => setTimeout(r, RECOVER_POLL_MS));
+    if (sessionId) await waitForStoredPoll(sessionId, RECOVER_POLL_MS, signal);
+    else await new Promise((r) => setTimeout(r, RECOVER_POLL_MS));
   }
 }
 
@@ -885,15 +889,17 @@ async function recoverPendingTurnUnlocked(sessionId: string): Promise<void> {
     let outcome: StreamOutcome | undefined;
     if (profileForSession(session).object3dPersona || profileForSession(session).largeImagePersona) {
       try {
-        const resumed = await turnClient.interactions.get(pending.interactionId, { stream: true }, { signal: controller.signal, timeout_ms: RECOVER_MAX_MS } as never);
-        outcome = await consumeInteractionStream(asEventStream(resumed), (blocks, meta) => onRecovery({ ...meta, blocks }));
+        outcome = await withStoredStream(sessionId, controller.signal, () => true, async (signal, touch) => {
+          const resumed = await turnClient.interactions.get(pending.interactionId, { stream: true }, { signal, timeout_ms: RECOVER_MAX_MS } as never);
+          return await consumeInteractionStream(asEventStream(resumed), (blocks, meta) => { touch(); onRecovery({ ...meta, blocks }); }, { stallMs: STORED_STREAM_STALL_MS });
+        });
       } catch (error) {
         if (controller.signal.aborted) throw error;
         // The known stored ID is safe to poll after any streaming protocol error.
       }
     }
     if (!outcome || !interactionStatusIsTerminal(outcome.status)) {
-      outcome = await awaitInteractionOutcome(pending.interactionId, controller.signal, onRecovery, turnClient);
+      outcome = await awaitInteractionOutcome(pending.interactionId, controller.signal, onRecovery, turnClient, sessionId);
     }
 
     for (const block of outcome.blocks as MediaStampedBlock[]) {

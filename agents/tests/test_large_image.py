@@ -7,6 +7,34 @@ from PIL import Image
 script=Path(__file__).resolve().parents[1]/'skills/gigapixel-gemini-mosaic/scripts/mosaic.py'
 spec=importlib.util.spec_from_file_location('mosaic',script);mosaic=importlib.util.module_from_spec(spec);spec.loader.exec_module(mosaic)
 class LargeImageTests(unittest.TestCase):
+ def test_master_and_regions_share_the_exact_render_contract_and_explicit_model(self):
+  with tempfile.TemporaryDirectory() as root:
+   root=Path(root);Image.new('RGB',(256,144),'orange').save(root/'master.png')
+   contract={'camera':'constant elevated view','subject_scale':'120-210px','regional_detail':'10-18 buildings','composition':'one continuous daylight scene'}
+   plan={'style':'ink','macro_map_prompt':'whole world','render_contract':contract,'districts':{'0,0':{'title':'West','scene':'one continuous town'}}}
+   (root/'plan.json').write_text(json.dumps(plan))
+   args=SimpleNamespace(grid='2x2',canvas='2200x1200',tier='1K',tile='0,0',run=str(root),plan=str(root/'plan.json'),master=str(root/'master.png'),inset=(0,0))
+   mosaic.cmd_master_request(args);mosaic.cmd_reference(args)
+   master=json.loads((root/'master-request.json').read_text());region=json.loads((root/'tiles/request_r0_c0.json').read_text())
+   self.assertEqual(master['model'],'gemini-nano-banana-2.1');self.assertEqual(region['model'],master['model'])
+   self.assertEqual(region['render_contract'],contract)
+   for key,value in contract.items():
+    self.assertIn(value,region['prompt'])
+    if key not in ('subject_scale','regional_detail'):self.assertIn(value,master['prompt'])
+    else:self.assertNotIn(value,master['prompt'])
+   self.assertNotIn(contract['subject_scale'],master['prompt']);self.assertGreater(master['master_to_canvas_scale'],0)
+   self.assertIn('never independently zoom',region['prompt'])
+ def test_master_crop_preserves_aspect_instead_of_stretching_generic_panorama(self):
+  with tempfile.TemporaryDirectory() as root:
+   path=Path(root)/'master.png';Image.new('RGB',(1000,1000),'orange').save(path)
+   master=mosaic.load_master(path,(0,0),(3000,1000))
+   self.assertAlmostEqual(master.width/master.height,3,delta=.01)
+  with self.assertRaises(ValueError):mosaic.image_model({'image_model':None})
+ def test_macro_guide_removes_fine_master_outlines_before_regional_generation(self):
+  with tempfile.TemporaryDirectory() as root, patch.object(mosaic,'REF_W',256):
+   stripes=np.tile(((np.arange(256)//8)%2*255).astype(np.uint8)[None,:,None],(144,1,3))
+   guide,bands=mosaic.composite_reference(Image.fromarray(stripes),{(0,0):(0,0,256,144)},(0,0),Path(root),256,144,256,144)
+   self.assertEqual(bands,[]);self.assertLess(np.asarray(guide)[:,64:-64].std(),2)
  def test_default_exposure_matching_cannot_imprint_another_subject(self):
   tile=np.full((64,64,3),255,dtype=np.uint8);reference=tile.copy();reference[16:48,16:48]=0
   np.testing.assert_array_equal(mosaic.match_luminance_lowpass(tile,reference),tile)

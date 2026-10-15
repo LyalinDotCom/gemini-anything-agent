@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Native composition adapted from LyalinDotCom/sergey-image. All model calls stay in published CLIs."""
-import argparse, fcntl, hashlib, json, os, resource, sys, time
+import argparse, fcntl, hashlib, json, math, os, resource, sys, time
 from pathlib import Path
 import numpy as np, cv2
 from PIL import Image
@@ -8,8 +8,15 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 Image.MAX_IMAGE_PIXELS = None
-COMPOSITION_VERSION = "checkpoint-v3.1-narrow-corners"
+COMPOSITION_VERSION = "checkpoint-v3.2-aspect-preserving"
 TIER_SIZE = {"4K": (5504, 3072), "2K": (2752, 1536), "1K": (1376, 768)}
+DEFAULT_IMAGE_MODEL = "gemini-nano-banana-2.1"
+MACRO_GUIDE_SIGMA = 24.0  # Local source: terrain guidance without enlarged master outlines.
+# https://ai.google.dev/gemini-api/docs/image-generation (2026-10-09), native 4K sizes.
+MASTER_SIZES = {"1:1": (4096,4096), "1:4": (2048,8192), "1:8": (1536,12288),
+ "2:3": (3392,5056), "3:2": (5056,3392), "3:4": (3584,4800), "4:1": (8192,2048),
+ "4:3": (4800,3584), "4:5": (3712,4608), "5:4": (4608,3712), "8:1": (12288,1536),
+ "9:16": (3072,5504), "16:9": (5504,3072), "21:9": (6336,2688)}
 REF_W = 1376
 L_STRENGTH = 0.35         # Luminance lock toward regional guide (prevents sequential left-to-right exposure drift)
 CHROMA_STRENGTH = 0.10    # Gentle global hue anchor (preserves 100% of vibrant local pinks, teals, oranges, stripes!)
@@ -31,10 +38,19 @@ def grid_boxes(cols, rows, tw, th, cw, ch):
     return {(r, c): (xs[c], ys[r], xs[c] + tw, ys[r] + th) for r in range(rows) for c in range(cols)}
 
 
-def load_master(path, inset):
+def load_master(path, inset, canvas=None):
     m = Image.open(path).convert("RGB")
     ix, iy = round(m.width * inset[0]), round(m.height * inset[1])
-    return m.crop((ix, iy, m.width - ix, m.height - iy))
+    m = m.crop((ix, iy, m.width - ix, m.height - iy))
+    if canvas:
+        ratio = canvas[0] / canvas[1]
+        if m.width / m.height > ratio:
+            width = round(m.height * ratio); left = (m.width - width) // 2
+            m = m.crop((left, 0, left + width, m.height))
+        else:
+            height = round(m.width / ratio); top = (m.height - height) // 2
+            m = m.crop((0, top, m.width, top + height))
+    return m
 
 
 def master_crop(master, box, cw, ch):
@@ -116,7 +132,7 @@ def composite_reference(master, boxes, rc, d, tw, th, cw, ch):
     rw, rh = REF_W, round(REF_W * th / tw)
     # Keep the guide readable without baking a broad blurred stripe into it.
     macro = np.asarray(master_crop(master, boxes[rc], cw, ch).resize((rw, rh), Image.Resampling.LANCZOS), np.float32)
-    macro_soft = cv2.GaussianBlur(macro, (0, 0), 4.0)
+    macro_soft = cv2.GaussianBlur(macro, (0, 0), MACRO_GUIDE_SIGMA)
     base = macro_soft.copy()
     sx, sy = rw / tw, rh / th
     used = []
@@ -289,7 +305,7 @@ def _cmd_build_unlocked(args):
             canvas[y0:y1,x0:x1] = np.load(work/'undo.npy')
             canvas.flush()
         pending.unlink()
-    master = load_master(args.master, args.inset)
+    master = load_master(args.master, args.inset, (cw,ch))
     batch = getattr(args, 'batch_tiles', 4)
     if not 1 <= batch <= 8: raise ValueError('Composition batches must contain 1 to 8 tiles.')
     processed = 0
@@ -405,6 +421,42 @@ def validate_geometry(cols,rows,tw,th,cw,ch):
         raise ValueError('Tiles need at least 128 pixels of overlap per seam for seamless assembly.')
 
 
+def image_model(plan):
+    model = plan.get('image_model', DEFAULT_IMAGE_MODEL)
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError('image_model must be an explicit nonempty model ID')
+    return model
+
+
+def render_contract(plan, master=False):
+    contract = plan.get('render_contract', {})
+    if not isinstance(contract, dict):
+        raise ValueError('render_contract must be an object')
+    # Pixel counts in subject_scale are final-canvas units, not master units.
+    def words(value):
+        return "; ".join(map(str,value)) if isinstance(value,list) else str(value).rstrip(". ")
+    return " ".join(f"{key}: {words(value)}." for key, value in contract.items() if not (master and key in ('subject_scale','regional_detail')))
+
+
+def cmd_master_request(args):
+    plan = json.loads(Path(args.plan).read_text())
+    d = Path(args.run); d.mkdir(parents=True, exist_ok=True)
+    cw,ch=map(int,args.canvas.split('x'))
+    aspect=min(MASTER_SIZES, key=lambda name: abs(math.log((MASTER_SIZES[name][0]/MASTER_SIZES[name][1])/(cw/ch))))
+    mw,mh=MASTER_SIZES[aspect]
+    scale=min(mw*(1-2*args.inset[0])/cw,mh*(1-2*args.inset[1])/ch)
+    prompt = (f"{plan['macro_map_prompt']} Style and palette: {plan['style']}. "
+              f"{plan.get('style_rules', '')} {render_contract(plan, master=True)} "
+              f"This is the full-canvas master guide, not a regional close-up. ALL pixel sizes quoted in the plan or visual rules refer to the FINAL canvas, never this master. Render those subject dimensions at {scale:.3f} times their final-canvas pixel size here. "
+              f"Frame the geography within a centered {cw}:{ch} composition safe area; excess margins will be cropped without stretching. "
+              "Any regional density requirements in the style rules apply to later region renders only. This master follows macro_map_prompt as a broad layout guide. Establish the entire canvas composition, continuous geography and consistent camera before regional detail. "
+              "No region borders, captions or watermarks.")
+    record = {'prompt': prompt, 'output': args.master, 'model': image_model(plan),
+              'tier': '4K', 'aspect_ratio': aspect, 'expected_size': [mw,mh], 'master_to_canvas_scale': scale, 'render_contract': plan.get('render_contract', {})}
+    (d/'master-request.json').write_text(json.dumps(record, indent=2))
+    print(json.dumps(record))
+
+
 def cmd_reference(args):
     cols,rows=map(int,args.grid.split('x'));cw,ch=map(int,args.canvas.split('x'));tw,th=TIER_SIZE[args.tier]
     validate_geometry(cols,rows,tw,th,cw,ch)
@@ -415,24 +467,25 @@ def cmd_reference(args):
     for nr,nc in [(r-1,c),(r,c-1)]:
         if nr>=0 and nc>=0 and not tile_path(d,nr,nc).exists():
             raise ValueError('Generate top and left neighbours before this reference.')
-    reference,bands=composite_reference(load_master(args.master,args.inset),boxes,(r,c),d,tw,th,cw,ch)
+    reference,bands=composite_reference(load_master(args.master,args.inset,(cw,ch)),boxes,(r,c),d,tw,th,cw,ch)
     path=d/'tiles'/f'ref_r{r}_c{c}.png';reference.save(path)
     scene=plan['districts'][f'{r},{c}']
     continuity = (f"The {' and '.join(bands)} portions contain finished neighbouring artwork: continue every line, landscape feature, lighting and subject scale across those boundaries. " if bands else "This first region has a soft composition guide; render it with crisp native detail. ")
     prompt=(f"Image 1 is the regional composition and neighbour continuity guide for '{scene['title']}'. "
       f"Render this region with crisp native detail: {scene['scene']} "
       f"Match this style and palette exactly: {plan['style']}. {plan.get('style_rules','')} "
-      f"{continuity}"
-      "Soft areas are layout guides only: redraw them with crisp native detail. Never reproduce reference blur, fades, ghosted outlines or a sharp-to-soft transition. "
-      "Keep the depicted geographic region and camera perspective; do not replace the crop with the whole composition. No tile border, captions, watermark or extra text.")
-    record={'rc':[r,c],'box':boxes[(r,c)],'reference':str(path),'output':str(tile_path(d,r,c)),'prompt':prompt,'bands':bands,'tier':args.tier,'expected_size':[tw,th],'aspect_ratio':'16:9'}
+      f"{render_contract(plan)} {continuity}"
+      "Soft areas describe ONLY broad terrain, river routing and colour zones. Create the planned new regional scene there with crisp native detail; do not copy enlarged master outlines, title banners, lettering or labels. Preserve the sharp finished neighbour strips. Never reproduce reference blur, fades, ghosted outlines or a sharp-to-soft transition. "
+      f"This is region ({r},{c}) of a {cols} by {rows} canvas, covering pixels {boxes[(r,c)]} of {cw} by {ch}. "
+      "Keep the depicted geographic region, camera perspective and neighbour subject scale; never independently zoom or reframe a district. Add detail within the existing layout, not oversized replacement landmarks. Do not replace the crop with the whole composition. No tile border, captions, watermark or extra text.")
+    record={'rc':[r,c],'box':boxes[(r,c)],'reference':str(path),'output':str(tile_path(d,r,c)),'prompt':prompt,'bands':bands,'tier':args.tier,'expected_size':[tw,th],'aspect_ratio':'16:9','model':image_model(plan),'render_contract':plan.get('render_contract',{})}
     (d/'tiles'/f'request_r{r}_c{c}.json').write_text(json.dumps(record,indent=2))
     print(json.dumps(record))
 
 
 def main():
     ap=argparse.ArgumentParser(description='Native references and seamless composition from existing images; no model calls.')
-    ap.add_argument('cmd',choices=['reference','build'])
+    ap.add_argument('cmd',choices=['master-request','reference','build'])
     ap.add_argument('--run',required=True);ap.add_argument('--plan');ap.add_argument('--master',required=True)
     ap.add_argument('--canvas',default='13334x7500');ap.add_argument('--grid',default='7x7');ap.add_argument('--tier',default='2K',choices=list(TIER_SIZE))
     ap.add_argument('--batch-tiles',type=int,default=4,help='At most this many composition regions per invocation; repeat the command to resume.')
@@ -441,7 +494,10 @@ def main():
     args=ap.parse_args()
     cols,rows=map(int,args.grid.split('x'));cw,ch=map(int,args.canvas.split('x'));tw,th=TIER_SIZE[args.tier]
     validate_geometry(cols,rows,tw,th,cw,ch)
-    if args.cmd=='reference':
+    if args.cmd=='master-request':
+        if not args.plan:ap.error('master-request requires --plan')
+        cmd_master_request(args)
+    elif args.cmd=='reference':
         if not args.plan or not args.tile:ap.error('reference requires --plan and --tile')
         cmd_reference(args)
     else:cmd_build(args)

@@ -1,3 +1,4 @@
+import { StoredRunWakeError, withStoredStream, waitForStoredPoll } from "./storedRunWake";
 import { withChatTurnLock } from "../chat/turnLock";
 // Deep Research sessions: background interactions that outlive the tab.
 //   start → interaction id persisted on the session → watch via streaming reattach
@@ -68,20 +69,23 @@ async function watch(sessionId: string, messageId: string, interactionId: string
     while (!controller.signal.aborted && store().sessions[sessionId]?.research?.interactionId === interactionId) {
       // Preferred: live reattach stream (thinking summaries render as they happen).
       try {
-        const stream = await client.interactions.get(interactionId, {
-          stream: true,
-          last_event_id: lastEventId,
-        } as never, { signal: controller.signal } as never);
-        const outcome = await consumeInteractionStream(asEventStream(stream), (blocks, meta) => {
-          if (controller.signal.aborted || store().sessions[sessionId]?.research?.interactionId !== interactionId) throw new DOMException("Tracking stopped", "AbortError");
-          lastEventId = meta.lastEventId ?? lastEventId;
-          renderOutcome(
-            sessionId,
-            messageId,
-            { ...meta, interactionId: meta.interactionId || interactionId, blocks: [...blocks] },
-            false,
-          );
-        }, { stallMs: STORED_STREAM_STALL_MS });
+        const outcome = await withStoredStream(sessionId, controller.signal, () => true, async (signal, touch) => {
+          const stream = await client.interactions.get(interactionId, {
+            stream: true,
+            last_event_id: lastEventId,
+          } as never, { signal } as never);
+          return await consumeInteractionStream(asEventStream(stream), (blocks, meta) => {
+            touch();
+            if (controller.signal.aborted || store().sessions[sessionId]?.research?.interactionId !== interactionId) throw new DOMException("Tracking stopped", "AbortError");
+            lastEventId = meta.lastEventId ?? lastEventId;
+            renderOutcome(
+              sessionId,
+              messageId,
+              { ...meta, interactionId: meta.interactionId || interactionId, blocks: [...blocks] },
+              false,
+            );
+          }, { stallMs: STORED_STREAM_STALL_MS });
+        });
         if (controller.signal.aborted || !store().sessions[sessionId]?.research) return;
         if (outcome.lastEventId) lastEventId = outcome.lastEventId;
         store().patchSession(sessionId, {
@@ -100,11 +104,12 @@ async function watch(sessionId: string, messageId: string, interactionId: string
       // Fallback: poll until terminal or until a fresh reattach succeeds.
       if (controller.signal.aborted || !store().sessions[sessionId]?.research) return;
       let outcome: StreamOutcome;
-      try { outcome = await pollOnce(interactionId, client, controller.signal); }
+      try { outcome = await withStoredStream(sessionId, controller.signal, () => true, signal => pollOnce(interactionId, client, signal), 2_000); }
       catch (error) {
         if (controller.signal.aborted) return;
+        if (error instanceof StoredRunWakeError) continue;
         const kind = toFriendly(error).kind;
-        if (["network", "server", "rate-limit", "unknown"].includes(kind)) { await new Promise(r => setTimeout(r, POLL_INTERVAL_MS)); continue; }
+        if (["network", "server", "rate-limit", "unknown"].includes(kind)) { await waitForStoredPoll(sessionId, POLL_INTERVAL_MS, controller.signal); continue; }
         throw error;
       }
       if (controller.signal.aborted || store().sessions[sessionId]?.research?.interactionId !== interactionId) return;
@@ -113,7 +118,7 @@ async function watch(sessionId: string, messageId: string, interactionId: string
         return;
       }
       renderOutcome(sessionId, messageId, outcome, false);
-      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+      await waitForStoredPoll(sessionId, POLL_INTERVAL_MS, controller.signal);
     }
   } catch (e) {
     if (controller.signal.aborted || !store().sessions[sessionId]?.research) return;

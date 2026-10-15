@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { blocksFromInteraction, consumeInteractionStream } from "../src/gemini/streamAdapter";
 
 async function* events(list: Array<Record<string, unknown>>) {
@@ -160,4 +160,21 @@ describe("blocksFromInteraction", () => {
     expect(outcome.blocks[3].text).toBe("Nine.");
     expect(outcome.blocks[4].data).toBe("QUJD");
   });
+});
+
+test("a terminal event completes immediately even if the server never closes its stream",async()=>{
+ const next=vi.fn().mockResolvedValueOnce({done:false,value:{event_type:'interaction.completed',interaction:{id:'done-run',status:'completed'}}}).mockImplementation(()=>new Promise(()=>{}));
+ const close=vi.fn().mockResolvedValue({done:true});const stream={ [Symbol.asyncIterator]:()=>({next,return:close}) };
+ const result=await consumeInteractionStream(stream);expect(result.status).toBe('completed');expect(next).toHaveBeenCalledOnce();expect(close).toHaveBeenCalledOnce();
+});
+
+test("a terminal status update cannot discard the following complete resource",async()=>{
+ const outcome=await consumeInteractionStream(events([{event_type:'interaction.status_update',interaction:{id:'ordered',status:'completed'}},{event_type:'interaction.completed',interaction:{id:'ordered',status:'completed',environment_id:'final-env',steps:[{type:'model_output',content:[{type:'text',text:'Final content'}]}]}}]));
+ expect(outcome.environmentId).toBe('final-env');expect(outcome.blocks).toContainEqual(expect.objectContaining({text:'Final content'}));
+});
+test("the shorter stored idle watchdog does not cut off a cold start before acknowledgement",async()=>{
+ vi.useFakeTimers();const settle=vi.fn();
+ const stream={ [Symbol.asyncIterator]:()=>({next:()=>new Promise<IteratorResult<any>>(()=>{}),return:async()=>({done:true as const,value:undefined})}) };
+ const pending=consumeInteractionStream(stream,undefined,{acknowledgedStallMs:30_000});pending.then(settle,settle);
+ try {await vi.advanceTimersByTimeAsync(30_000);expect(settle).not.toHaveBeenCalled();await vi.advanceTimersByTimeAsync(150_000);await expect(pending).rejects.toThrow('stalled');}finally{vi.useRealTimers();}
 });

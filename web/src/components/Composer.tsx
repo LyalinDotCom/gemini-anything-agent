@@ -1,7 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { credentialBindingError } from "../../../shared/credentialBinding";
 import { cancelServerTurn, recoverPendingTurn, sendTurn, type TurnInput } from "../chat/controller";
-import { sendResearchTurn } from "../gemini/deepResearch";
+import { cancelResearchTurn, resumeResearchIfNeeded, sendResearchTurn } from "../gemini/deepResearch";
 import { useStore } from "../state/store";
 import { mediaId as makeMediaId, putMedia, base64ToBlob, getMediaBase64, getMediaUrl } from "../storage/messages";
 import { T } from "../tokens";
@@ -19,6 +19,7 @@ import { OBJECT3D_METHODS } from "../../../shared/object3dProfile";
 import type { OutputFileRecord } from "../state/types";
 
 interface Draft {
+  originalFile?: File;
   id: string;
   dataUrl: string;
   base64: string;
@@ -39,20 +40,24 @@ function GenerationProgress({ startedAt, label }: { startedAt: number; label: st
     return () => window.clearInterval(timer);
   }, []);
   const seconds = Math.max(0, Math.floor((now-startedAt)/1000));
-  return <p style={{ margin: "8px 0", color: T.textDim, fontSize: 12 }}>Generating your {label} · {Math.floor(seconds/60)}m {seconds%60}s · This run survives reloads.</p>;
+  return <p role="status" style={{ position: "absolute", bottom: "100%", left: 0, right: 0, margin: "0 0 8px", padding: "8px 12px", borderRadius: T.radiusSm, background: T.bgElev, color: T.textDim, fontSize: 12, pointerEvents: "none" }}>Generating your {label}<span aria-hidden="true"> · {Math.floor(seconds/60)}m {seconds%60}s</span> · This run survives reloads.</p>;
 }
 
 export function Composer({ sessionId }: { sessionId: string; onPreviewModel?: (file: OutputFileRecord) => void }) {
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [audioDraft, setAudioDraft] = useState<AudioDraft | null>(null);
   const [compressing, setCompressing] = useState(false);
+  const [preparing, setPreparing] = useState(false);
+  const submittingRef = useRef(false);
   const [micState, setMicState] = useState<MicState>("idle");
   const [micError, setMicError] = useState<string | null>(null);
   const [showOptions, setShowOptions] = useState(false);
   const recorderRef = useRef<VoiceRecorder | null>(null);
+  useEffect(() => () => { const recorder = recorderRef.current; recorderRef.current = null; recorder?.cancel(); }, []);
   const retryMessage = useStore((s) => s.retryMessages[sessionId]);
   const queueRetry = useStore((s) => s.queueRetry);
   const areaRef = useRef<HTMLTextAreaElement>(null);
+  const workingLabelId = useId();
   const lastInputEventRef = useRef<{ sessionId: string; value: string; alignment: ComposerScrollAlignment } | null>(null);
   const pasteTextPendingRef = useRef(false);
   const inputResizeTimerRef = useRef<number | undefined>(undefined);
@@ -63,6 +68,7 @@ export function Composer({ sessionId }: { sessionId: string; onPreviewModel?: (f
   const busyHere = useStore((s) => !!s.streaming[sessionId]);
   const sendOnEnter = useStore((s) => s.settings.sendOnEnter);
   const session = useStore((s) => s.sessions[sessionId]);
+  const resumable = Boolean(session?.pending || session?.research);
   const isEmptySession = useStore((s) => (s.messages[sessionId]?.length ?? 0) === 0);
   const profile = profileForSession(session ?? {});
   const research = profile.research;
@@ -93,8 +99,9 @@ export function Composer({ sessionId }: { sessionId: string; onPreviewModel?: (f
     }
     try {
       const rec = new VoiceRecorder();
-      await rec.start();
       recorderRef.current = rec;
+      await rec.start();
+      if (recorderRef.current !== rec) { rec.cancel(); return; }
       setMicState("recording");
     } catch {
       setMicError("Microphone unavailable or permission denied.");
@@ -104,7 +111,7 @@ export function Composer({ sessionId }: { sessionId: string; onPreviewModel?: (f
 
   useLayoutEffect(() => {
     const lastInput = lastInputEventRef.current;
-    const alignment = lastInput?.sessionId === sessionId ? lastInput.alignment : "start";
+    const alignment = lastInput?.sessionId === sessionId && lastInput.value === text ? lastInput.alignment : "start";
     const textarea = areaRef.current;
     if (textarea) resizeComposerTextarea(textarea, alignment);
     if (!textarea) return;
@@ -156,7 +163,7 @@ export function Composer({ sessionId }: { sessionId: string; onPreviewModel?: (f
       for (const file of [...files].slice(0, 4 - drafts.length)) {
         if (!file.type.startsWith("image/")) continue;
         const dataUrl = object3d ? await blobToDataUrl(file) : await fileToCompressedDataUrl(file);
-        next.push({ id: uid(), dataUrl, base64: dataUrlToBase64(dataUrl), mimeType: dataUrlMime(dataUrl) });
+        next.push({ id: uid(), originalFile: file, dataUrl, base64: dataUrlToBase64(dataUrl), mimeType: dataUrlMime(dataUrl) });
       }
       setDrafts((d) => [...d, ...next]);
     } finally {
@@ -187,23 +194,30 @@ export function Composer({ sessionId }: { sessionId: string; onPreviewModel?: (f
   }, [session?.samplePhoto, object3d, sessionId]);
 
   const send = async () => {
-    if (session?.pending && !busyHere) { void recoverPendingTurn(sessionId); return; }
+    if (submittingRef.current || compressing) return;
+    if (resumable && !busyHere) { if (research) void resumeResearchIfNeeded(sessionId); else void recoverPendingTurn(sessionId); return; }
     const value = text.trim();
-    if ((!value && drafts.length === 0 && !audioDraft) || busyHere) return;
+    if ((!value && drafts.length === 0 && !audioDraft) || busyHere || micState === "recording") return;
     if (connectionError) { setShowOptions(true); return; }
 
+    submittingRef.current = true;
+    setPreparing(true);
+    try {
     if (research) {
       if (!value) return;
+      if (drafts.length || audioDraft) { setMicError("Deep Research accepts text. Remove attachments or choose another agent."); return; }
       setText("");
-      void sendResearchTurn(sessionId, value);
+      await sendResearchTurn(sessionId, value);
       return;
     }
 
     const attachments: NonNullable<TurnInput["attachments"]> = [];
     for (const draft of drafts) {
+      const original = object3d && draft.originalFile ? await blobToDataUrl(draft.originalFile) : draft.dataUrl;
+      const base64 = dataUrlToBase64(original); const mimeType = dataUrlMime(original);
       const mid = makeMediaId(sessionId, `up-${draft.id}`);
-      await putMedia(mid, sessionId, base64ToBlob(draft.base64, draft.mimeType), draft.mimeType);
-      attachments.push({ kind: "image", mediaId: mid, mimeType: draft.mimeType, base64: draft.base64 });
+      await putMedia(mid, sessionId, base64ToBlob(base64, mimeType), mimeType);
+      attachments.push({ kind: "image", mediaId: mid, mimeType, base64 });
     }
     if (audioDraft) {
       const mid = makeMediaId(sessionId, `voice-${uid()}`);
@@ -213,13 +227,22 @@ export function Composer({ sessionId }: { sessionId: string; onPreviewModel?: (f
     setText("");
     setDrafts([]);
     setAudioDraft(null);
-    void sendTurn(sessionId, { text: value, attachments });
+    await sendTurn(sessionId, { text: value, attachments });
+    } catch (error) {
+      if (!useStore.getState().draftText[sessionId]) setText(value);
+      setDrafts(drafts); setAudioDraft(audioDraft);
+      setMicError(error instanceof Error ? error.message : "Could not send this message. Please try again.");
+    } finally {
+      submittingRef.current = false;
+      setPreparing(false);
+    }
   };
 
   return (
     <div style={{ padding: "0 16px calc(14px + env(safe-area-inset-bottom))" }}>
-      {session?.pending && session.cancelNotice && <p role="status" style={{color:T.textDim,fontSize:12,lineHeight:1.5}}>{session.cancelNotice}</p>}
-      <div style={{ maxWidth: 780, margin: "0 auto" }}>
+      {session?.historySaveError && <p role="alert" style={{color:T.textDim,fontSize:12,lineHeight:1.5}}>Chat could not be saved on this device. Keep this tab open, free browser storage, then <button type="button" onClick={() => void useStore.getState().persistTranscript(sessionId)} style={{background:"transparent",border:0,color:T.accent,cursor:"pointer",padding:0}}>retry saving</button>.</p>}
+      {session?.cancelNotice && <p role="status" style={{color:T.textDim,fontSize:12,lineHeight:1.5}}>{session.cancelNotice}</p>}
+      <div style={{ maxWidth: 780, margin: "0 auto", position: "relative" }}>
         {(object3d || largeImage) && busyHere && session?.pending && <GenerationProgress label={profile.label} startedAt={session.pending.startedAt} />}
         {largeImage && <label style={{ display: "block", color: T.textDim, fontSize: 12, marginBottom: 10 }}>Image context
           <select aria-label="Large image context" value={session?.largeImageTemplate ?? "generic"} disabled={busyHere}
@@ -303,6 +326,8 @@ export function Composer({ sessionId }: { sessionId: string; onPreviewModel?: (f
         )}
 
         <div
+          role="group"
+          aria-label="Message composer"
           style={{
             display: "flex",
             alignItems: "flex-end",
@@ -329,7 +354,8 @@ export function Composer({ sessionId }: { sessionId: string; onPreviewModel?: (f
               name="image"
               label="Attach image"
               onClick={() => fileRef.current?.click()}
-              disabled={busyHere || drafts.length >= 4}
+              disabled={busyHere || preparing || drafts.length >= 4}
+              style={{ flexShrink: 0 }}
             />
           )}
           {!research && (
@@ -337,13 +363,14 @@ export function Composer({ sessionId }: { sessionId: string; onPreviewModel?: (f
               type="button"
               title={micState === "recording" ? "Stop recording" : "Record a voice message"}
               onClick={() => void toggleMic()}
-              disabled={busyHere}
+              disabled={busyHere || preparing}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
                 width: 32,
                 height: 32,
+                flexShrink: 0,
                 borderRadius: T.radiusSm,
                 border: "none",
                 background: micState === "recording" ? T.dangerSoft : "transparent",
@@ -355,11 +382,15 @@ export function Composer({ sessionId }: { sessionId: string; onPreviewModel?: (f
               <Icon name="mic" size={17} />
             </button>
           )}
+          <div style={{ position: "relative", flex: "1 1 0", minWidth: 0 }}>
           <textarea
+            aria-label="Message"
+            aria-describedby={busyHere && !text ? workingLabelId : undefined}
             ref={areaRef}
             rows={1}
+            readOnly={preparing && !busyHere}
             value={text}
-            placeholder={busyHere ? "Working…" : "Message… (code, research, images — just ask)"}
+            placeholder={busyHere ? "" : "Message…"}
             onChange={(e) => {
               const alignment: ComposerScrollAlignment = pasteTextPendingRef.current ? "start" : "end";
               lastInputEventRef.current = {
@@ -377,6 +408,7 @@ export function Composer({ sessionId }: { sessionId: string; onPreviewModel?: (f
               }, 32);
             }}
             onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing || e.keyCode === 229) return;
               if (e.key === "Enter" && !e.shiftKey && sendOnEnter) {
                 e.preventDefault();
                 void send();
@@ -395,7 +427,10 @@ export function Composer({ sessionId }: { sessionId: string; onPreviewModel?: (f
               }
             }}
             style={{
-              flex: 1,
+              display: "block",
+              width: "100%",
+              minWidth: 0,
+              minHeight: 38,
               resize: "none",
               border: "none",
               outline: "none",
@@ -405,53 +440,30 @@ export function Composer({ sessionId }: { sessionId: string; onPreviewModel?: (f
               lineHeight: 1.5,
               boxSizing: "border-box",
               overflowY: "hidden",
-              padding: "4px 0",
+              padding: "8px 0",
             }}
           />
-          {busyHere ? (
-            <button
-              type="button"
-              onClick={() => void cancelServerTurn(sessionId)}
-              title="Cancel server turn"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 38,
-                height: 38,
-                borderRadius: T.radiusSm,
-                border: `1px solid ${T.border}`,
-                background: T.bgElev,
-                color: T.danger,
-                cursor: "pointer",
-              }}
-            >
-              <Icon name="stop" size={16} />
-            </button>
-          ) : session?.pending ? (
-            <button type="button" title="Resume tracking stored run" onClick={()=>void recoverPendingTurn(sessionId)} style={{padding:'9px 12px',borderRadius:T.radiusSm,border:`1px solid ${T.border}`,background:T.bgElev,color:T.accent,cursor:'pointer'}}>Resume</button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => void send()}
-              disabled={(!text.trim() && drafts.length === 0 && !audioDraft) || busyHere || Boolean(connectionError)}
-              title="Send"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 38,
-                height: 38,
-                borderRadius: T.radiusSm,
-                border: "none",
-                background: (text.trim() || drafts.length || audioDraft) && !busyHere ? T.accent : T.bgHover,
-                color: (text.trim() || drafts.length || audioDraft) && !busyHere ? "#0B0B0D" : T.textFaint,
-                cursor: (text.trim() || drafts.length || audioDraft) && !busyHere ? "pointer" : "default",
-              }}
-            >
-              <Icon name="send" size={16} />
-            </button>
-          )}
+          {busyHere && !text && <span id={workingLabelId} role="status" style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", gap: 8, color: T.textFaint, fontSize: 14.5, pointerEvents: "none" }}>
+            <Spinner size={12} /> Working…
+          </span>}
+          </div>
+          <button
+            type="button"
+            aria-label={busyHere ? "Cancel server turn" : resumable ? "Resume tracking stored run" : "Send"}
+            title={busyHere ? "Cancel server turn" : resumable ? "Resume tracking stored run" : "Send"}
+            onClick={() => { if (busyHere) { if (research) void cancelResearchTurn(sessionId); else void cancelServerTurn(sessionId); } else if (resumable) { if (research) void resumeResearchIfNeeded(sessionId); else void recoverPendingTurn(sessionId); } else void send(); }}
+            disabled={!busyHere && !resumable && ((!text.trim() && drafts.length === 0 && !audioDraft) || Boolean(connectionError) || micState === "recording" || preparing || compressing)}
+            style={{
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+              width: 38, height: 38, flexShrink: 0, boxSizing: "border-box",
+              borderRadius: T.radiusSm, border: `1px solid ${busyHere || resumable ? T.border : "transparent"}`,
+              background: busyHere || resumable ? T.bgElev : (text.trim() || drafts.length || audioDraft) ? T.accent : T.bgHover,
+              color: busyHere ? T.danger : resumable ? T.accent : (text.trim() || drafts.length || audioDraft) ? "#0B0B0D" : T.textFaint,
+              cursor: busyHere || resumable || text.trim() || drafts.length || audioDraft ? "pointer" : "default",
+            }}
+          >
+            <Icon name={busyHere ? "stop" : resumable ? "refresh" : "send"} size={16} />
+          </button>
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 7, marginTop: 7 }}>
           <AgentPicker sessionId={sessionId} disabled={busyHere} />
@@ -468,7 +480,6 @@ export function Composer({ sessionId }: { sessionId: string; onPreviewModel?: (f
           </button>
         </div>
         {showOptions && <RunOptionsPanel sessionId={sessionId} />}
-        {(micError || isEmptySession) && (
           <p style={{ margin: "8px 0 0", color: micError ? T.danger : T.textFaint, fontSize: 11.5, textAlign: "center" }}>
             {micError ??
               (object3d
@@ -477,7 +488,6 @@ export function Composer({ sessionId }: { sessionId: string; onPreviewModel?: (f
                 ? "Deep Research mode: long-running background investigation with sources — survives reloads."
                 : "Everything runs in a remote container session — code, search, images — and its files sync down to you.")}
           </p>
-        )}
         {object3d && isEmptySession && !drafts.length && !text.trim() && (
           <div style={{ display: "flex", gap: 14, justifyContent: "center", flexWrap: "wrap", marginTop: 8 }}>
             <button type="button" disabled={busyHere || compressing} onClick={() => void loadSample("rocket")}

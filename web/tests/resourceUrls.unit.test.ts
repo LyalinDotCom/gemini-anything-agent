@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, test } from "vitest";
 import type { OutputFileRecord } from "../src/state/types";
 import { buildResourceUrlMap, resolveResourceUrl, rewriteHtmlResourceUrls } from "../src/components/resourceUrls";
 
@@ -64,4 +64,9 @@ describe("HTML resource URL rewriting", () => {
     expect(rewritten).toContain('fetch("blob:hero")');
     expect(rewritten).toContain('href="#chapter"');
   });
+});
+
+test("SVG data resources preserve a requested view fragment",()=>{
+ const assets=new Map([["icons.svg","data:image/svg+xml;base64,PHN2Zz4="]]);
+ expect(resolveResourceUrl("icons.svg#star","index.html",assets)).toBe("data:image/svg+xml;base64,PHN2Zz4=#star");
 });

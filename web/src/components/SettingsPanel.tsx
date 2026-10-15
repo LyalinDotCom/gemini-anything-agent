@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { deleteAgent, ensureManagedAgent } from "../gemini/agents";
+import { deleteAgent, ensureManagedAgent, managedAgentId } from "../gemini/agents";
 import { validateKey } from "../gemini/client";
 import { toFriendly } from "../gemini/errors";
 import { clearStoredKey, setStoredKey } from "../gemini/keyStore";
-import { BROWSER_AGENT_ID, CHAT_AGENT_ID, MODELS } from "../models";
-import { OBJECT3D_AGENT_ID } from "../../../shared/object3dProfile";
+import { CHAT_AGENT_ID, MODELS } from "../models";
+import { profileForSession } from "../agentProfiles";
+import { effectiveRunOptions } from "../state/runOptions";
 import { useStore } from "../state/store";
 import { idbWipe } from "../storage/db";
 import { T } from "../tokens";
@@ -31,17 +32,19 @@ function GhostButton({
   onClick,
   danger,
   busy,
+  disabled,
 }: {
   children: React.ReactNode;
   onClick?: () => void;
   danger?: boolean;
   busy?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      disabled={busy}
+      disabled={busy || disabled}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -62,7 +65,14 @@ function GhostButton({
 }
 
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
-  const agent = useStore((s) => s.agent);
+  const savedAgent = useStore((s) => s.agent);
+  const session = useStore(s => s.activeSessionId ? s.sessions[s.activeSessionId] : undefined);
+  const profile = profileForSession(session ?? {});
+  const selectedModel = profile.managed ? effectiveRunOptions(session ?? {}).agentModel : savedAgent?.reasoningModel ?? MODELS.text;
+  const targetId = managedAgentId(profile.managed ? profile.agentId : savedAgent?.agentId ?? CHAT_AGENT_ID, selectedModel);
+  const agent = savedAgent?.agentId === targetId ? savedAgent : null;
+  const activeConnections = useStore(s => Object.values(s.streaming).some(Boolean));
+  const running = useStore(s => Object.values(s.streaming).some(Boolean) || Object.values(s.sessions).some(chat => Boolean(chat.pending || chat.research)));
   const setAgent = useStore((s) => s.setAgent);
   const settings = useStore((s) => s.settings);
   const updateSettings = useStore((s) => s.updateSettings);
@@ -147,15 +157,17 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 outline: "none",
               }}
             />
-            <PrimaryButton onClick={() => void replaceKey()} disabled={!newKey.trim()} busy={keyBusy}>
+            <PrimaryButton onClick={() => void replaceKey()} disabled={!newKey.trim() || activeConnections} busy={keyBusy}>
               Replace
             </PrimaryButton>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
             <GhostButton
               danger
+              disabled={activeConnections}
               onClick={() => {
                 if (window.confirm("Remove the stored key from this browser? You'll see the key screen again.")) {
+                  setAgent(null);
                   clearStoredKey();
                   onClose();
                 }
@@ -170,7 +182,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         <h3 style={sectionTitle}>Managed agent</h3>
         <div style={card}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-            <span style={{ fontFamily: T.mono, fontSize: 13.5 }}>{agent?.agentId || `${CHAT_AGENT_ID} / ${BROWSER_AGENT_ID} / ${OBJECT3D_AGENT_ID}`}</span>
+            <span style={{ fontFamily: T.mono, fontSize: 13.5 }}>{targetId}</span>
             <span
               style={{
                 fontSize: 11.5,
@@ -192,19 +204,21 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <GhostButton
               busy={agentBusy}
+              disabled={running}
               onClick={() =>
-                void runAgentAction(async () => setAgent(await ensureManagedAgent(agent?.agentId || CHAT_AGENT_ID, agent, true, agent?.reasoningModel)), "Agent verified.")
+                void runAgentAction(async () => setAgent(await ensureManagedAgent(targetId, agent, true, selectedModel)), "Agent verified.")
               }
             >
               Verify now
             </GhostButton>
             <GhostButton
               busy={agentBusy}
+              disabled={running}
               onClick={() =>
                 void runAgentAction(async () => {
-                  const id = agent?.agentId || CHAT_AGENT_ID;
+                  const id = targetId;
                   await deleteAgent(id);
-                  setAgent(await ensureManagedAgent(id, null, true, agent?.reasoningModel));
+                  setAgent(await ensureManagedAgent(id, null, true, selectedModel));
                 }, "Agent recreated fresh.")
               }
             >
@@ -213,9 +227,10 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             <GhostButton
               danger
               busy={agentBusy}
+              disabled={running}
               onClick={() =>
                 void runAgentAction(async () => {
-                  await deleteAgent(agent?.agentId || CHAT_AGENT_ID);
+                  await deleteAgent(targetId);
                   setAgent(null);
                 }, "Agent deleted — it will be recreated on your next message.")
               }
@@ -247,9 +262,11 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         <div style={{ ...card, marginBottom: 4 }}>
           <GhostButton
             danger
+            disabled={running}
             onClick={() => {
               if (window.confirm("Wipe ALL local data — every conversation, image, and setting on this device?")) {
                 void idbWipe().then(() => {
+                  clearStoredKey();
                   try {
                     localStorage.removeItem("gaa-store");
                   } catch {

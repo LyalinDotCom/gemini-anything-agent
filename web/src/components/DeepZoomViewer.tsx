@@ -47,7 +47,9 @@ export default function DeepZoomViewer({ url }: { url: string }) {
       return r.arrayBuffer();
     }).then(buffer => {
       const files = deepZoomEntries(new Uint8Array(buffer));
-      const manifest = validateDeepZoomManifest(JSON.parse(new TextDecoder().decode(files.get('manifest.json'))));
+      const manifestBytes = files.get('manifest.json');
+        if (!manifestBytes) throw new Error('The zoom archive is missing manifest.json.');
+        const manifest = validateDeepZoomManifest(JSON.parse(new TextDecoder().decode(manifestBytes)));
       validateDeepZoomTiles(files,manifest);
       const images: Array<[string, [number,number]]> = [];
       for (const [name, data] of files) if (name.endsWith('.jpg')) images.push([name, [data.byteOffset,data.byteLength]]);

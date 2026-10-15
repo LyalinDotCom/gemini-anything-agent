@@ -1,6 +1,6 @@
 import { expect, test, vi } from 'vitest';
-const mock = vi.hoisted(() => ({ ensure:vi.fn(), create: vi.fn().mockRejectedValue({status:503,message:'fixture outage'}) }));
-vi.mock('../src/gemini/client', () => ({ ai: () => ({interactions:{create:mock.create}}), resolveApiKey: () => 'fixture-key' }));
+const mock = vi.hoisted(() => ({ ensure:vi.fn(), get:vi.fn().mockRejectedValue({status:404}), create: vi.fn().mockRejectedValue({status:503,message:'fixture outage'}) }));
+vi.mock('../src/gemini/client', () => ({ ai: () => ({interactions:{create:mock.create,get:mock.get}}), resolveApiKey: () => 'fixture-key' }));
 vi.mock('../src/gemini/agents', () => ({ agentWorkflowFingerprint: (model:string) => model, ensureManagedAgent: mock.ensure }));
 vi.mock('../src/storage/messages', () => ({loadTranscript:async()=>[],putMedia:vi.fn(),mediaId:()=>'',listMessages:async()=>[],saveMessages:async()=>{},saveTranscript:async()=>{}}));
 import { useStore } from '../src/state/store';
@@ -44,4 +44,53 @@ test('the pinned model survives the actual Zustand persistence and rehydration p
  localStorage.setItem('gaa-store',snapshot);
  await useStore.persist.rehydrate();
  expect(useStore.getState().sessions[sid].modelUsed).toBe(MODELS.reasoning);
+});
+
+test('an acknowledged failed first turn keeps its workflow and workspace on retry',async()=>{
+ mock.create.mockClear();
+ mock.create.mockImplementation(async()=> (async function*(){
+  yield {event_type:'interaction.created',interaction:{id:'failed-first',status:'in_progress',environment_id:'kept-workspace'}};
+  yield {event_type:'interaction.failed',interaction:{id:'failed-first',status:'failed',environment_id:'kept-workspace',error:{message:'Fixture failure'}}};
+ })());
+ const id=useStore.getState().createSession('chat','antigravity');await sendTurn(id,{text:'First turn'});
+ expect(useStore.getState().sessions[id].agentPayloadFingerprint).toBe(MODELS.text);
+ expect(useStore.getState().sessions[id].environmentId).toBe('kept-workspace');
+ mock.create.mockRejectedValue({status:503});await sendTurn(id,{text:'Retry in the same workspace'});
+ const body=mock.create.mock.calls.at(-1)![0];expect(body.environment).toBe('kept-workspace');
+ expect(useStore.getState().sessions[id].migrationContext).toBeFalsy();
+});
+
+test('recovering an existing run preserves a newly submitted prompt as a draft retry',async()=>{
+ mock.create.mockClear();const id=useStore.getState().createSession('chat','antigravity');
+ useStore.getState().patchSession(id,{pending:{interactionId:'previous-run',messageId:'previous-reply',startedAt:Date.now()}});
+ await sendTurn(id,{text:'Do not discard this next request',attachments:[{kind:'image',mediaId:'uploaded-image',mimeType:'image/png',base64:'AAAA'}]});
+ const retry=useStore.getState().retryMessages[id];expect(retry?.parts).toContainEqual(expect.objectContaining({kind:'text',text:'Do not discard this next request'}));
+ expect(retry?.parts).toContainEqual(expect.objectContaining({kind:'image',mediaId:'uploaded-image'}));expect(mock.create).not.toHaveBeenCalled();
+});
+
+test('a delayed animation frame cannot overwrite a finished reply',async()=>{
+ const frames:FrameRequestCallback[]=[];
+ vi.stubGlobal('requestAnimationFrame',(callback:FrameRequestCallback)=>{frames.push(callback);return frames.length;});
+ mock.create.mockImplementation(async()=> (async function*(){
+  yield {event_type:'interaction.created',interaction:{id:'frame-run',status:'in_progress'}};
+  yield {event_type:'step.start',index:0,step:{type:'code_execution_call',id:'call',code:'print(42)'}};
+  yield {event_type:'interaction.failed',interaction:{id:'frame-run',status:'failed',error:{message:'Fixture failure'}}};
+ })());
+ try {
+  const id=useStore.getState().createSession('chat','antigravity');await sendTurn(id,{text:'Test the hidden-tab frame'});
+  const before=useStore.getState().messages[id].at(-1)!;expect(before.status).toBe('error');
+  const parts=structuredClone(before.parts);for(const callback of frames)callback(0);
+  expect(useStore.getState().messages[id].at(-1)!.parts).toEqual(parts);
+ } finally {vi.unstubAllGlobals();}
+});
+
+test('a silent stored stream polls the existing run instead of creating a duplicate',async()=>{
+ vi.useFakeTimers();mock.create.mockClear();mock.get.mockResolvedValue({id:'silent-run',status:'completed',steps:[{type:'model_output',content:[{type:'text',text:'Recovered answer'}]}]});
+ mock.create.mockImplementation(async()=>({[Symbol.asyncIterator]:()=>{let first=true;return{next:async()=>{if(first){first=false;return{done:false,value:{event_type:'interaction.created',interaction:{id:'silent-run',status:'in_progress'}}};}return new Promise(()=>{});},return:async()=>({done:true})};}}));
+ try {
+  const id=useStore.getState().createSession('chat','antigravity');const run=sendTurn(id,{text:'Track the existing run'});
+  await vi.advanceTimersByTimeAsync(0);await vi.advanceTimersByTimeAsync(30_000);await run;
+  expect(mock.create).toHaveBeenCalledOnce();expect(useStore.getState().streaming[id]).toBe(false);
+  expect(useStore.getState().messages[id].at(-1)?.parts).toContainEqual(expect.objectContaining({kind:'text',text:'Recovered answer'}));
+ } finally {vi.useRealTimers();}
 });

@@ -1,7 +1,7 @@
 import { isModelFile } from "../utils/modelFiles";
 import { useEffect, useRef, useState } from "react";
 import { cancelServerTurn, recoverPendingTurn } from "../chat/controller";
-import { resumeResearchIfNeeded } from "../gemini/deepResearch";
+import { cancelResearchTurn, resumeResearchIfNeeded } from "../gemini/deepResearch";
 import { outputFileMatchesPath, syncOutputMedia } from "../gemini/envFiles";
 import { useStore } from "../state/store";
 import type { OutputFileRecord } from "../state/types";
@@ -75,6 +75,7 @@ function useIsMobile(): boolean {
     const mq = window.matchMedia("(max-width: 767px)");
     const onChange = () => setMobile(mq.matches);
     mq.addEventListener("change", onChange);
+    onChange(); // The viewport can change between initial render and subscribing.
     return () => mq.removeEventListener("change", onChange);
   }, []);
   return mobile;
@@ -185,9 +186,9 @@ export function AppShell() {
   useEffect(() => {
     if (!activeSessionId) return;
     void hydrateSession(activeSessionId).then(() => {
-      resumeResearchIfNeeded(activeSessionId);
+      void resumeResearchIfNeeded(activeSessionId).catch(() => undefined);
       void recoverPendingTurn(activeSessionId);
-    });
+    }).catch(() => useStore.getState().patchSession(activeSessionId, { cancelNotice: "Could not read saved chat history. Reload and try again; no new turn has replaced it." }));
   }, [activeSessionId, hydrateSession]);
 
   useEffect(() => {
@@ -199,7 +200,7 @@ export function AppShell() {
         resourceCount > 0 &&
         !resourcePanelClosed.current.has(activeSessionId)
       ) {
-        setPanelTab("files");
+        if (!isMobile) setPanelTab("files");
       }
       return;
     }
@@ -217,10 +218,10 @@ export function AppShell() {
         }));
       }
       resourcePanelClosed.current.delete(activeSessionId);
-      setPanelTab("files");
+      if (!isMobile) setPanelTab("files");
     }
     outputSignatures.current[activeSessionId] = outputSignature;
-  }, [activeSessionId, outputSignature, resourceCount, activeFiles]);
+  }, [activeSessionId, outputSignature, resourceCount, activeFiles, isMobile]);
 
   useEffect(() => {
     pauseAllMedia();
@@ -232,12 +233,12 @@ export function AppShell() {
       return;
     }
     if (
-      resourceCount > 0 &&
+      !isMobile && resourceCount > 0 &&
       !resourcePanelClosed.current.has(activeSessionId)
     ) {
       setPanelTab("files");
     }
-  }, [activeSessionId, resourceCount]);
+  }, [activeSessionId]);
 
   useEffect(() => {
     if (
@@ -287,7 +288,7 @@ export function AppShell() {
     if (!activeSessionId || cancelingServer) return;
     setCancelingServer(true);
     try {
-      await cancelServerTurn(activeSessionId);
+      if (activeProfile?.research) await cancelResearchTurn(activeSessionId); else await cancelServerTurn(activeSessionId);
     } finally {
       setCancelingServer(false);
     }
@@ -306,6 +307,14 @@ export function AppShell() {
   }, [drawerOpen]);
 
   useEffect(() => { if (!isMobile) setDrawerOpen(false); }, [isMobile]);
+
+  useEffect(() => {
+    if (!isMobile || !panelTab) return;
+    document.querySelector<HTMLElement>('[aria-label="Close panel"]')?.focus();
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") closePanel(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [isMobile, panelTab, activeSessionId]);
 
   const sidebar = (
     <Sidebar
@@ -357,7 +366,7 @@ export function AppShell() {
       )}
 
       <div
-        inert={isMobile && drawerOpen}
+        inert={isMobile && (drawerOpen || Boolean(panelTab))}
         style={{
           flex: 1,
           minWidth: 0,
@@ -515,14 +524,19 @@ export function AppShell() {
       {panelTab && activeSessionId && active && (
         <aside
           style={{
-            width: "min(390px, 100vw)",
-            flex: "0 0 min(390px, 100vw)",
+            position: isMobile ? "fixed" : undefined,
+            inset: isMobile ? 0 : undefined,
+            zIndex: isMobile ? 45 : undefined,
+            width: isMobile ? "100%" : "min(390px, 100vw)",
+            flex: isMobile ? undefined : "0 0 min(390px, 100vw)",
             borderLeft: `1px solid ${T.border}`,
             background: T.bgElev,
             display: "flex",
             flexDirection: "column",
             minHeight: 0,
           }}
+          role={isMobile ? "dialog" : undefined}
+          aria-modal={isMobile ? true : undefined}
           aria-label="Chat side panel"
         >
           <header

@@ -65,6 +65,7 @@ export interface Session {
   title: string;
   titleManuallySet?: boolean;
   titleUpdatedAt?: number;
+  historySaveError?: boolean;
   createdAt: number;
   updatedAt: number;
   mode: SessionMode;

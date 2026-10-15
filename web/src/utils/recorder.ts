@@ -11,9 +11,13 @@ export class VoiceRecorder {
   private stream: MediaStream | null = null;
   private recorder: MediaRecorder | null = null;
   private chunks: Blob[] = [];
+  private cancelled = false;
 
   async start(): Promise<void> {
-    this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    if (this.cancelled) { stream.getTracks().forEach(track => track.stop()); throw new DOMException("Recording cancelled", "AbortError"); }
+    this.stream = stream;
+    try {
     const mime = pickAudioMime();
     this.recorder = new MediaRecorder(this.stream, mime ? { mimeType: mime } : undefined);
     this.chunks = [];
@@ -21,6 +25,7 @@ export class VoiceRecorder {
       if (e.data.size > 0) this.chunks.push(e.data);
     };
     this.recorder.start(250);
+    } catch (error) { this.cleanup(); throw error; }
   }
 
   stop(): Promise<Blob> {
@@ -37,6 +42,7 @@ export class VoiceRecorder {
   }
 
   cancel(): void {
+    this.cancelled = true;
     try {
       this.recorder?.stop();
     } catch {

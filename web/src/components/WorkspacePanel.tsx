@@ -3,7 +3,7 @@ import { downloadOutputFile, listOutputFiles, isLargeImageDeliverable, downloadS
 import { toFriendly } from "../gemini/errors";
 import type { OutputFileRecord } from "../state/types";
 import { getMediaUrl } from "../storage/messages";
-import { linkProjectFolder, supportsLocalProjects, syncEntriesToProject, unlinkProjectFolder } from "../storage/localProjects";
+import { getProjectHandle, linkProjectFolder, supportsLocalProjects, syncEntriesToProject, unlinkProjectFolder } from "../storage/localProjects";
 import { useStore } from "../state/store";
 import { T } from "../tokens";
 import { Icon, IconButton, Spinner } from "./atoms";
@@ -96,13 +96,10 @@ export function WorkspacePanel({
   };
 
   const downloadArchive = async () => {
-    if (!envId) {
-      await downloadAll();
-      return;
-    }
     setLoading(true);
     setError(null);
     try {
+      if (!envId) { await downloadAll(); return; }
       if (largeImage) {
         const viewer = sorted.find(file => /deepzoom\.zip$/i.test(file.path));
         if (!viewer) throw new Error('The zoom viewer is still being generated. Check output files when it is ready.');
@@ -136,7 +133,7 @@ export function WorkspacePanel({
     setProjectStatus(null);
     try {
       let name = localProjectName;
-      if (!name) {
+      if (!name || !await getProjectHandle(sessionId)) {
         const handle = await linkProjectFolder(sessionId);
         name = handle.name;
         patchSession(sessionId, { localProjectName: name });
@@ -146,6 +143,8 @@ export function WorkspacePanel({
         setProjectStatus(`Linked ${name}. Conversation metadata is saved now; files will sync after the first agent run.`);
         return;
       }
+      const folder = await syncEntriesToProject(sessionId, [], true);
+      if (!folder || folder.permission !== "granted") throw new Error("Folder permission was not granted.");
       if (largeImage) {
         let written = 0;
         const currentFiles=(await listOutputFiles(envId)).filter(file=>isLargeImageDeliverable(file.path));

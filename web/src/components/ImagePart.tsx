@@ -17,11 +17,12 @@ export function ImagePart({
 
   useEffect(() => {
     let alive = true;
+    setUrl(null); setMissing(false);
     void getMediaUrl(mediaId).then((u) => {
       if (!alive) return;
       if (u) setUrl(u);
       else setMissing(true);
-    });
+    }).catch(() => { if (alive) setMissing(true); });
     return () => {
       alive = false;
     };

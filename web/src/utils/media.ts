@@ -36,7 +36,7 @@ export async function fileToCompressedDataUrl(file: File, maxEdge = 1280, qualit
     const ctx = canvas.getContext("2d");
     if (!ctx) return original;
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL("image/jpeg", quality);
+    return canvas.toDataURL(file.type === "image/png" || file.type === "image/webp" ? "image/webp" : "image/jpeg", quality);
   } catch {
     return original; // non-decodable (e.g. exotic format): send as-is
   }

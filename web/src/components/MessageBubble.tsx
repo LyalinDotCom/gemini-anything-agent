@@ -340,7 +340,7 @@ export const MessageBubble = memo(function MessageBubble({
           case "tool":
             return <ToolActivityChip key={part.id} activity={part.activity} />;
           case "image":
-            if (part.origin === "agent") {
+            if (part.origin === "agent" && part.prompt) {
               return (
                 <OutputLink
                   key={part.id}

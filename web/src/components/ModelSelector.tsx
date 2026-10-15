@@ -25,5 +25,5 @@ export function ModelSelector({ value, disabled, locked = false, onChange }: {
       fontSize: 12.5, cursor: disabled || locked ? "default" : "pointer", opacity: disabled || locked ? 0.55 : 1 }}
   >
     {HARNESS_MODELS.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
-  </select>{locked && <span id={hintId} style={{fontSize:11,color:T.textFaint}}>New chat to change model</span>}</>;
+  </select>{locked && <span id={hintId} style={{position:"absolute",width:1,height:1,padding:0,margin:-1,overflow:"hidden",clipPath:"inset(50%)",whiteSpace:"nowrap",border:0}}>New chat to change model</span>}</>;
 }

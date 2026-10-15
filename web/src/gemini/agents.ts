@@ -27,7 +27,8 @@ export interface AgentInfo {
   action?: "created" | "recreated" | "reused" | "degraded";
 }
 
-const VERIFY_TTL_MS = 24 * 60 * 60 * 1000;
+// Cached metadata cannot prove an agent still exists after deletion in another tab.
+const VERIFY_TTL_MS = 0;
 
 function agentDefinitionSignature(model: string): string { return `${MODELS.chatAgentBase}\n${model}\ncode_execution\ngoogle_search\nurl_context`; }
 

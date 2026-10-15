@@ -155,10 +155,8 @@ export function downloadSnapshot(envId: string, preferNativeFiles = false): Prom
     try {
       const streamed = await parseTarStream(response.body, include, MAX_SNAPSHOT_BYTES);
       if (streamed.unresolvedLinks.length === 0) return streamed.entries;
-      // Rare: an output file is stored as a hard link to a body outside
-      // /workspace/output. Only a full parse can resolve it — refetch buffered
-      // (bounded by the same size cap the pre-streaming code enforced).
-      return bufferedSnapshot(await (await fetchSnapshotResponse(envId)).arrayBuffer(), include);
+      // Fetch output files individually rather than buffering unrelated caches.
+      return downloadOutputFiles(envId);
     } catch (e) {
       if (e instanceof TarSizeLimitError) throw snapshotTooLarge();
       throw e;
@@ -258,6 +256,7 @@ export async function syncOutputMedia(sessionId: string, envId: string): Promise
     }
     const record: OutputFileRecord = {
       fingerprint,
+      environmentId: envId,
       path: normalized,
       label: outputLabel(normalized),
       kind,

@@ -1,8 +1,9 @@
 import { beforeEach, expect, test, vi } from 'vitest';
+const failures = vi.hoisted(() => ({ write: false }));
 const saved = vi.hoisted(() => new Map<string, unknown[]>());
 vi.mock('../src/storage/messages', () => ({
   loadTranscript: async (id:string) => saved.get(id) ?? [],
-  saveTranscript: async (id:string, messages:unknown[]) => { saved.set(id, messages); },
+  saveTranscript: async (id:string, messages:unknown[]) => { if(failures.write) throw new Error("Quota"); saved.set(id, messages); },
   deleteSessionData: async (id:string) => { saved.delete(id); },
 }));
 import { useStore } from '../src/state/store';
@@ -11,7 +12,7 @@ import { mergeChatState } from '../src/state/merge';
 import { chatTitle } from '../src/utils/chatTitle';
 const prompt = (text:string): Message => ({id:crypto.randomUUID(),role:'user',status:'complete',createdAt:Date.now(),parts:[{kind:'text',id:'text',text}]});
 beforeEach(() => {
-  saved.clear(); localStorage.clear();
+  failures.write=false; saved.clear(); localStorage.clear();
   useStore.setState({sessions:{},sessionOrder:[],deletedSessionIds:[],activeSessionId:null,messages:{},hydrated:{},streaming:{},draftText:{}});
 });
 test('every New chat opens a fresh draft and preserves previous drafts', () => {
@@ -123,4 +124,20 @@ test("an explicitly chosen New chat title is not overwritten automatically",()=>
   expect(merged.sessions[id].updatedAt).toBe(100);
   const reverse=mergeChatState({sessions:local.sessions},{...merged,streaming:{}});
   expect(reverse.sessions[id].title).toBe('Chosen name');
+});
+
+test("localStorage quota failures do not break chat creation or discard the in-page draft",async()=>{
+ vi.spyOn(localStorage,"setItem").mockImplementation(()=>{throw new Error("Quota full");});
+ const id=useStore.getState().createSession();useStore.getState().setDraftText(id,"Keep this draft");
+ await useStore.persist.rehydrate();expect(useStore.getState().draftText[id]).toBe("Keep this draft");
+ useStore.persist.clearStorage();vi.restoreAllMocks();
+});
+
+test("a failed final save preserves the completed reply in this tab and can retry saving without a model call",async()=>{
+ const id=useStore.getState().createSession();useStore.getState().appendMessage(id,prompt("Keep this answer"));
+ useStore.getState().appendMessage(id,{id:'reply',role:'assistant',status:'complete',createdAt:Date.now(),parts:[{kind:'text',id:'answer',text:'Saved in memory'}]});
+ failures.write=true;await useStore.getState().persistTranscript(id);expect(useStore.getState().sessions[id].historySaveError).toBe(true);
+ useStore.setState(s=>({hydrated:{...s.hydrated,[id]:false}}));await useStore.getState().hydrateSession(id);
+ expect(useStore.getState().messages[id].at(-1)?.status).toBe('complete');
+ failures.write=false;await useStore.getState().persistTranscript(id);expect(useStore.getState().sessions[id].historySaveError).toBe(false);expect(saved.get(id)).toHaveLength(2);
 });

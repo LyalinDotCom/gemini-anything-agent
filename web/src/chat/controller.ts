@@ -20,7 +20,7 @@ import { FriendlyError, toFriendly } from "../gemini/errors";
 import type { InteractionInput } from "../gemini/interactionParams";
 import { buildInteractionParams, functionResultPart } from "../gemini/interactionParams";
 import type { StreamBlock, StreamMeta, StreamOutcome, Usage } from "../gemini/streamAdapter";
-import { asEventStream, blocksFromInteraction, consumeInteractionStream } from "../gemini/streamAdapter";
+import { asEventStream, blocksFromInteraction, consumeInteractionStream, STORED_STREAM_STALL_MS } from "../gemini/streamAdapter";
 import { effectiveRunOptions } from "../state/runOptions";
 import { useStore } from "../state/store";
 import type { ContentPart, Message, ToolActivity } from "../state/types";
@@ -33,6 +33,8 @@ import { chatToolset, getFulfiller } from "./functionTools";
 const MAX_FUNCTION_ROUNDS = 4;
 
 const aborters = new Map<string, AbortController>();
+const turnClients = new Map<string, ReturnType<typeof ai>>();
+const confirmedTerminalMessages = new Set<string>();
 
 export function abortTurn(sessionId: string): void {
   aborters.get(sessionId)?.abort();
@@ -47,7 +49,7 @@ export async function cancelServerTurn(sessionId: string): Promise<void> {
   const session = store.sessions[sessionId];
   const interactionId = session?.pending?.interactionId;
   const messageId = session?.pending?.messageId ?? latestAssistantMessageId(sessionId);
-  if (!session) return;
+  if (!session || (!store.streaming[sessionId] && !session.pending)) return;
   useStore.getState().patchSession(sessionId, { cancelNotice: undefined });
   if (!interactionId) {
     abortTurn(sessionId);
@@ -62,6 +64,7 @@ export async function cancelServerTurn(sessionId: string): Promise<void> {
     }
     useStore.getState().patchSession(sessionId, { pending: null });
     useStore.getState().setStreaming(sessionId, false);
+    await useStore.getState().persistTranscript(sessionId);
     return;
   }
 
@@ -92,19 +95,22 @@ export async function cancelServerTurn(sessionId: string): Promise<void> {
   }
 
   let serverStopped = false;
+  let serverTerminated = false;
   try {
-    const interaction = (await ai().interactions.cancel(interactionId)) as Record<string, unknown>;
+    const interaction = (await (turnClients.get(sessionId) ?? ai()).interactions.cancel(interactionId)) as Record<string, unknown>;
     const outcome = blocksFromInteraction(interaction);
-    const status = outcome.status;
+    const status = outcome.status.toLowerCase();
     if (!interactionStatusIsTerminal(status)) throw new FriendlyError('unknown', 'Cancellation has not reached a confirmed terminal state.');
     serverStopped = status === 'cancelled' || status === 'canceled';
-    if (serverStopped) abortTurn(sessionId);
+    serverTerminated = true;
+    if (messageId && aborters.has(sessionId)) confirmedTerminalMessages.add(messageId);
+    abortTurn(sessionId);
     if (messageId) {
       const msg = (useStore.getState().messages[sessionId] ?? []).find((m) => m.id === messageId);
       if (msg) {
         useStore.getState().patchMessage(sessionId, messageId, {
           parts: [
-            ...msg.parts.filter((p) => !(p.kind === "tool" && p.activity.label === "Cancelling server turn…")),
+            ...settleParts(msg.parts.filter((p) => p.id !== "recover-note" && !(p.kind === "tool" && p.activity.label === "Cancelling server turn…")), !SUCCESS_INTERACTION_STATUS.has(status) && !serverStopped),
             cancelChip(
               "done",
               `Server turn ${status}`,
@@ -154,7 +160,7 @@ export async function cancelServerTurn(sessionId: string): Promise<void> {
     }
     useStore.getState().patchSession(sessionId, { pending: useStore.getState().sessions[sessionId]?.pending ?? null, cancelNotice: "Server cancellation was not confirmed. The stored run may continue; keep tracking it or resume after reloading." });
   } finally {
-    if (serverStopped) {
+    if (serverTerminated) {
       aborters.delete(sessionId);
       useStore.getState().setStreaming(sessionId, false);
     }
@@ -207,8 +213,8 @@ function freshCallContext(browserMode: boolean, override?: string, object3dMode 
 
 /** Pull /workspace/output files produced by a turn down into this chat's file index. Best-effort. */
 function syncOutputMediaBestEffort(sessionId: string, environmentId: string): void {
+  const messageId = latestAssistantMessageId(sessionId);
   void syncOutputMedia(sessionId, environmentId).catch((error) => {
-    const messageId = latestAssistantMessageId(sessionId);
     const message = useStore.getState().messages[sessionId]?.find((entry) => entry.id === messageId);
     if (!message || !messageId) return;
     useStore.getState().patchMessage(sessionId, messageId, { parts: [...message.parts, {
@@ -253,7 +259,19 @@ async function sendTurnUnlocked(sessionId: string, turn: TurnInput): Promise<voi
   if (store.streaming[sessionId]) return; // one turn per session; other sessions run independently
   const session = store.sessions[sessionId];
   if (!session || (!turn.text.trim() && !turn.attachments?.length)) return;
-  if (session.pending) { await recoverPendingTurnUnlocked(sessionId); return; }
+  if (session.pending) {
+    // Tracking an existing run never consumes a new unsent prompt or its uploads.
+    store.queueRetry(sessionId, {
+      id: uid(), role: "user", status: "complete", createdAt: Date.now(),
+      parts: [
+        ...(turn.text ? [{ kind: "text" as const, id: uid(), text: turn.text }] : []),
+        ...(turn.attachments ?? []).map(attachment => attachment.kind === "audio"
+          ? { kind: "audio" as const, id: uid(), mediaId: attachment.mediaId, mimeType: attachment.mimeType, label: "voice message" }
+          : { kind: "image" as const, id: uid(), mediaId: attachment.mediaId, mimeType: attachment.mimeType, origin: "uploaded" as const }),
+      ],
+    });
+    await recoverPendingTurnUnlocked(sessionId); return;
+  }
   store.patchSession(sessionId, {cancelNotice:undefined});
 
   // ---- user message
@@ -282,6 +300,9 @@ async function sendTurnUnlocked(sessionId: string, turn: TurnInput): Promise<voi
   store.setStreaming(sessionId, true);
 
   const controller = new AbortController();
+  const turnClient = ai();
+  const turnKey = resolveApiKey() ?? "";
+  turnClients.set(sessionId, turnClient);
   aborters.set(sessionId, controller);
 
   // Chain-expiry reseed: previous server session died, rebuild context inline.
@@ -307,7 +328,9 @@ async function sendTurnUnlocked(sessionId: string, turn: TurnInput): Promise<voi
   if (!isHarnessModel(session.modelUsed)) store.patchSession(sessionId, { modelUsed: options.agentModel });
   const profile = profileForSession(session);
 
+  let finalized = false;
   const patchAssistant = (extra?: Partial<Message>) => {
+    if (finalized || confirmedTerminalMessages.has(assistantId)) return;
     // Raw parts only — grouping happens at render time in MessageBubble.
     useStore.getState().patchMessage(sessionId, assistantId, { parts: [...settledParts, ...liveParts], ...extra });
   };
@@ -340,6 +363,7 @@ async function sendTurnUnlocked(sessionId: string, turn: TurnInput): Promise<voi
     workflowFingerprint = agentWorkflowFingerprint(options.agentModel, profile.agentId);
     const previousAgent = useStore.getState().sessions[sessionId]?.agentUsed;
     let agentInfo = useStore.getState().agent;
+    if (controller.signal.aborted) throw new FriendlyError("aborted", "Stopped.");
     if (profile.managed) {
       agentInfo = await ensureManagedAgent(profile.agentId, agentInfo, false, options.agentModel);
       useStore.getState().setAgent(agentInfo);
@@ -386,6 +410,7 @@ async function sendTurnUnlocked(sessionId: string, turn: TurnInput): Promise<voi
       flush();
     }
 
+    if (controller.signal.aborted) throw new FriendlyError("aborted", "Stopped.");
     const userText = contextPrefix + turn.text.trim();
     let input: InteractionInput = turn.attachments?.length
       ? [
@@ -411,12 +436,12 @@ async function sendTurnUnlocked(sessionId: string, turn: TurnInput): Promise<voi
           : options.reuseEnvironment ? environmentId : undefined;
         narrate("setup-photo", "Uploading your original photo into the 3D workspace…");
         flush();
-        const prepared = await prepareObject3dPhotos(input, chosenEnvironment, credentialNetwork);
+        const prepared = await prepareObject3dPhotos(input, chosenEnvironment, credentialNetwork, turnClient, turnKey);
         photoEnvironmentId = prepared.environmentId;
         photoSources = prepared.sources;
         photoReferences = prepared.photos;
         environmentId = photoEnvironmentId;
-        useStore.getState().patchSession(sessionId, { environmentId, object3dPayloadFingerprint: agentInfo?.payloadFingerprint });
+        useStore.getState().patchSession(sessionId, { environmentId, agentPayloadFingerprint: workflowFingerprint, object3dPayloadFingerprint: agentInfo?.payloadFingerprint });
         setNarration("setup-photo", { status: "done", label: "Original photo ready in the 3D workspace" });
       }
       const params = buildInteractionParams({
@@ -446,7 +471,7 @@ async function sendTurnUnlocked(sessionId: string, turn: TurnInput): Promise<voi
           options.overrideSystemInstruction ? options.systemInstruction : undefined,
           profile.object3dPersona,
         ), profile.object3dPersona ? object3dMethodInstruction(session.object3dMethod) : "", profile.largeImagePersona ? [LARGE_IMAGE_INVOCATION, largeImageTemplateInstruction(session.largeImageTemplate)].join("\n") : "", object3dPhotoContext(photoReferences)].filter(Boolean).join("\n\n"),
-        seedSources: [...((!profile.managed || degraded) && !lastInteractionId && !photoEnvironmentId ? buildEnvSources(resolveApiKey() ?? "") : []), ...photoSources],
+        seedSources: [...((!profile.managed || degraded) && !lastInteractionId && !photoEnvironmentId ? buildEnvSources(turnKey) : []), ...photoSources],
         environmentConfig: credentialNetwork ? { network: credentialNetwork } : undefined,
         store: options.store,
         background: options.background,
@@ -468,6 +493,7 @@ async function sendTurnUnlocked(sessionId: string, turn: TurnInput): Promise<voi
           setNarration("setup-session", { status: "done", label: profile.object3dPersona ? "3D View agent running in Linux — progress appears below" : "Container session ready" });
           useStore.getState().patchSession(sessionId, {
             pending: { interactionId: meta.interactionId, messageId: assistantId, startedAt: Date.now(), workflowFingerprint },
+            agentPayloadFingerprint: workflowFingerprint,
           });
           useStore.getState().persistTranscript(sessionId);
         }
@@ -476,17 +502,22 @@ async function sendTurnUnlocked(sessionId: string, turn: TurnInput): Promise<voi
       };
 
       let outcome!: Awaited<ReturnType<typeof consumeInteractionStream>>;
+      const streamController = new AbortController();
+      const abortStream = () => streamController.abort();
+      controller.signal.addEventListener("abort", abortStream, { once: true });
+      if (controller.signal.aborted) abortStream();
       try {
         // retries "none": an auto-retried POST /interactions would create a DUPLICATE
         // run server-side. Failures route through our own recovery instead.
-        const created = await ai().interactions.create(params as never, {
+        const created = await turnClient.interactions.create(params as never, {
           maxRetries: 0,
-          signal: controller.signal,
+          signal: streamController.signal,
           retries: { strategy: "none" },
           timeout_ms: 60 * 60 * 1000,
         } as never);
-        outcome = await consumeInteractionStream(asEventStream(created), onUpdate);
+        outcome = await consumeInteractionStream(asEventStream(created), onUpdate, { acknowledgedStallMs: options.store ? STORED_STREAM_STALL_MS : undefined });
       } catch (e) {
+        streamController.abort();
         // Server-side state can expire (interaction chain or environment gone) even
         // though we persist the ids. Self-heal ONCE, inside this same turn: start a
         // fresh container, replay a condensed recap, and rerun the request.
@@ -537,22 +568,25 @@ async function sendTurnUnlocked(sessionId: string, turn: TurnInput): Promise<voi
             id: `net-heal-${round}`,
             activity: {
               tool: "setup",
-              label: "Connection interrupted — reattached to the running turn",
+              label: "Following the stored run — checking server progress",
               status: "done",
-              detail: "The stream dropped but the interaction kept running server-side; fetched its final state.",
+              detail: "Live updates paused; following the existing run on the server.",
             },
           });
           patchAssistant();
-          outcome = await awaitInteractionOutcome(pendingMarkedFor, controller.signal, (current) => onUpdate(current.blocks, current));
+          outcome = await awaitInteractionOutcome(pendingMarkedFor, controller.signal, (current) => onUpdate(current.blocks, current), turnClient);
           liveParts = blocksToParts(outcome.blocks as MediaStampedBlock[], `r${round}`);
         } else {
           throw e;
         }
+      } finally {
+        controller.signal.removeEventListener("abort", abortStream);
+        streamController.abort();
       }
       if (!interactionStatusIsTerminal(outcome.status)) {
         const runningId = outcome.interactionId || (acknowledgedThisRound ? pendingMarkedFor : "");
         if (!runningId) throw new FriendlyError("server", "The connection ended before a stored interaction was acknowledged. Check the server run before starting another generation.");
-        outcome = await awaitInteractionOutcome(runningId, controller.signal, (current) => onUpdate(current.blocks, current));
+        outcome = await awaitInteractionOutcome(runningId, controller.signal, (current) => onUpdate(current.blocks, current), turnClient);
       }
       roundBlocks = outcome.blocks;
       if (outcome.interactionId) lastInteractionId = outcome.interactionId;
@@ -648,26 +682,31 @@ async function sendTurnUnlocked(sessionId: string, turn: TurnInput): Promise<voi
 
   // ---- settle
   aborters.delete(sessionId);
+  turnClients.delete(sessionId);
   const friendly = sawError ? toFriendly(sawError) : null;
   const aborted = controller.signal.aborted;
-  const finalParts = settleParts([...settledParts, ...liveParts], !!sawError && !aborted);
+  const confirmedMessage = confirmedTerminalMessages.has(assistantId)
+    ? useStore.getState().messages[sessionId]?.find(message => message.id === assistantId) : undefined;
+  confirmedTerminalMessages.delete(assistantId);
+  const finalParts = confirmedMessage?.parts ?? settleParts([...settledParts, ...liveParts], !!sawError && !aborted);
 
   // Server-side chain expired underneath us: recover by reseeding on the next turn.
   const chainExpired =
     friendly?.kind === "not-found" && !!(session.lastInteractionId || session.environmentId);
 
+  finalized = true;
   useStore.getState().patchMessage(sessionId, assistantId, {
     parts: finalParts,
-    status: aborted ? "stopped" : sawError ? "error" : "complete",
+    status: confirmedMessage?.status ?? (aborted ? "stopped" : sawError ? "error" : "complete"),
     interactionId: lastInteractionId,
     usage,
     completedAt: Date.now(),
     errorMessage:
-      sawError && !aborted
+      confirmedMessage?.errorMessage ?? (sawError && !aborted
         ? chainExpired
           ? "The server-side session expired. Send your message again — I'll rebuild the context automatically."
           : friendly?.message
-        : undefined,
+        : undefined),
   });
   useStore.getState().patchSession(
     sessionId,
@@ -691,7 +730,7 @@ async function sendTurnUnlocked(sessionId: string, turn: TurnInput): Promise<voi
 
   // Pull whatever the agent saved under /workspace/output down to this device (the
   // media handoff contract): snapshot → tar → IndexedDB → parts on this message.
-  if (!aborted && environmentId) syncOutputMediaBestEffort(sessionId, environmentId);
+  if ((!aborted || confirmedMessage?.status === "complete") && environmentId) syncOutputMediaBestEffort(sessionId, environmentId);
 }
 
 // ---- reload / connection recovery ------------------------------------------
@@ -712,6 +751,7 @@ async function awaitInteractionOutcome(
   interactionId: string,
   signal?: AbortSignal,
   onPoll?: (outcome: StreamOutcome) => void,
+  client: ReturnType<typeof ai> = ai(),
 ): Promise<StreamOutcome> {
   if (!interactionId) throw new FriendlyError("server", "The server did not return an interaction ID.");
   let lastSuccessfulPoll = Date.now();
@@ -720,7 +760,7 @@ async function awaitInteractionOutcome(
   for (;;) {
     if (signal?.aborted) throw new FriendlyError("aborted", "Stopped.");
     try {
-      const interaction = (await ai().interactions.get(interactionId, {}, { signal, timeout_ms: 30_000, maxRetries: 0 } as never)) as Record<string, unknown>;
+      const interaction = (await client.interactions.get(interactionId, {}, { signal, timeout_ms: 30_000, maxRetries: 0 } as never)) as Record<string, unknown>;
       const outcome = blocksFromInteraction(interaction);
       lastSuccessfulPoll = Date.now();
       // Skip the parts rebuild + store patch (and the re-render they cause) when
@@ -762,6 +802,7 @@ export async function recoverPendingTurn(sessionId: string): Promise<void> {
 }
 
 async function recoverPendingTurnUnlocked(sessionId: string): Promise<void> {
+  await useStore.getState().hydrateSession(sessionId);
   const store = useStore.getState();
   const session = store.sessions[sessionId];
   const pending = session?.pending;
@@ -795,6 +836,8 @@ async function recoverPendingTurnUnlocked(sessionId: string): Promise<void> {
   }
   useStore.getState().setStreaming(sessionId, true);
   const controller = new AbortController();
+  const turnClient = ai();
+  turnClients.set(sessionId, turnClient);
   aborters.set(sessionId, controller);
   const terminalRecoveryChip = (status: ToolActivity["status"], label: string, detail: string): ContentPart => ({
     ...chip,
@@ -830,6 +873,7 @@ async function recoverPendingTurnUnlocked(sessionId: string): Promise<void> {
       };
     };
     const onRecovery = (current: StreamOutcome) => {
+    if (controller.signal.aborted) return;
       const cachedParts = existing?.parts.filter((part) => part.id !== "recover-note") ?? [];
       useStore.getState().patchMessage(sessionId, pending.messageId, {
         status: "streaming",
@@ -841,7 +885,7 @@ async function recoverPendingTurnUnlocked(sessionId: string): Promise<void> {
     let outcome: StreamOutcome | undefined;
     if (profileForSession(session).object3dPersona || profileForSession(session).largeImagePersona) {
       try {
-        const resumed = await ai().interactions.get(pending.interactionId, { stream: true }, { signal: controller.signal, timeout_ms: RECOVER_MAX_MS } as never);
+        const resumed = await turnClient.interactions.get(pending.interactionId, { stream: true }, { signal: controller.signal, timeout_ms: RECOVER_MAX_MS } as never);
         outcome = await consumeInteractionStream(asEventStream(resumed), (blocks, meta) => onRecovery({ ...meta, blocks }));
       } catch (error) {
         if (controller.signal.aborted) throw error;
@@ -849,7 +893,7 @@ async function recoverPendingTurnUnlocked(sessionId: string): Promise<void> {
       }
     }
     if (!outcome || !interactionStatusIsTerminal(outcome.status)) {
-      outcome = await awaitInteractionOutcome(pending.interactionId, controller.signal, onRecovery);
+      outcome = await awaitInteractionOutcome(pending.interactionId, controller.signal, onRecovery, turnClient);
     }
 
     for (const block of outcome.blocks as MediaStampedBlock[]) {
@@ -894,7 +938,7 @@ async function recoverPendingTurnUnlocked(sessionId: string): Promise<void> {
       lastInteractionId: outcome.interactionId || pending.interactionId,
       environmentId: outcome.environmentId || session.environmentId,
       pending: null,
-      ...(SUCCESS_INTERACTION_STATUS.has(outcome.status) && pending.workflowFingerprint ? {agentPayloadFingerprint:pending.workflowFingerprint,migrationContext:null} : {}),
+      ...(ok && pending.workflowFingerprint ? {agentPayloadFingerprint:pending.workflowFingerprint,migrationContext:null} : {}),
       ...(outcome.status === "requires_action" ? {chainBroken:true} : {}),
     });
 
@@ -919,7 +963,7 @@ async function recoverPendingTurnUnlocked(sessionId: string): Promise<void> {
       (message?.parts ?? [chip]).map((part) => (part.id === "recover-note" ? recoveryEndedChip : part)),
       !aborted,
     );
-    useStore.getState().patchMessage(sessionId, pending.messageId, {
+    if (!confirmedTerminalMessages.has(pending.messageId)) useStore.getState().patchMessage(sessionId, pending.messageId, {
       status: aborted ? "stopped" : "error",
       parts: nextParts,
       errorMessage: aborted
@@ -935,8 +979,10 @@ async function recoverPendingTurnUnlocked(sessionId: string): Promise<void> {
       useStore.getState().patchSession(sessionId, { pending: null });
     }
   } finally {
+    confirmedTerminalMessages.delete(pending.messageId);
     recovering.delete(pending.interactionId);
     aborters.delete(sessionId);
+    turnClients.delete(sessionId);
     useStore.getState().setStreaming(sessionId, false);
     await useStore.getState().persistTranscript(sessionId);
   }

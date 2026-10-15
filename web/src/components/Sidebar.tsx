@@ -196,7 +196,7 @@ export function Sidebar({
                     {displayTitle}
                   </button>
                 )}
-                {streaming[id] || session.pending ? (
+                {streaming[id] || session.pending || session.research ? (
                   <Spinner size={11} color={T.accent} />
                 ) : (
                   <span style={{ fontSize: 11.5, color: T.textFaint }}>{relativeTime(session.updatedAt)}</span>
@@ -205,8 +205,8 @@ export function Sidebar({
                 <IconButton name="edit" label="Rename chat" size={14} onClick={() => { cancelledEdit.current = false; setEditingId(id); setDraftTitle(session.title); }} style={{width:28,height:32}} />
                 <IconButton
                   name="trash"
-                  label={streaming[id] || session.pending ? "Stop this run before deleting" : "Delete chat"}
-                  disabled={Boolean(streaming[id] || session.pending)}
+                  label={streaming[id] || session.pending || session.research ? "Stop this run before deleting" : "Delete chat"}
+                  disabled={Boolean(streaming[id] || session.pending || session.research)}
                   size={14}
                   onClick={() => {
                     if (window.confirm(`Delete "${session.title}"?`)) deleteSession(id);

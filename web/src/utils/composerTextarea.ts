@@ -16,11 +16,11 @@ export function resizeComposerTextarea(
     pixels(style.paddingBottom) +
     pixels(style.borderTopWidth) +
     pixels(style.borderBottomWidth);
-  const minHeight = Math.ceil(lineHeight + chrome);
+  const minHeight = Math.max(pixels(style.minHeight), Math.ceil(lineHeight + chrome));
   const maxHeight = Math.ceil(lineHeight * COMPOSER_MAX_VISIBLE_LINES + chrome);
 
   textarea.style.height = "auto";
-  const naturalHeight = textarea.scrollHeight + pixels(style.borderTopWidth) + pixels(style.borderBottomWidth);
+  const naturalHeight = textarea.value ? textarea.scrollHeight + pixels(style.borderTopWidth) + pixels(style.borderBottomWidth) : minHeight;
   textarea.style.height = `${Math.max(minHeight, Math.min(naturalHeight, maxHeight))}px`;
   textarea.style.overflowY = naturalHeight > maxHeight ? "auto" : "hidden";
   // Read clientHeight after applying the cap so layout is resolved before we

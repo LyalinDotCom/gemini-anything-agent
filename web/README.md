@@ -213,3 +213,7 @@ The model is selected before the first submitted turn and then pinned for that c
 The Gemini Anywhere Agent rename intentionally starts fresh browser storage (`gaa-store`, IndexedDB `gaa`, key `gaa.geminiApiKey.v1`) and managed-agent IDs. There are no old-name aliases or migrations. Re-enter your API key after upgrading; earlier browser data is not imported. History stays local to each browser/device.
 
 Navigation validation: 142 web unit tests, TypeScript/production build, 34 native processing tests, live concurrent baseline/Anywhere requests, a real container artifact confirming official CLI 0.4.2 and the renamed skill path, reload recovery, and desktop/mobile history/rename/draft checks. Peer review used Opus 5.5 High and Gemini 4 Argon Medium.
+
+## Composer and health review
+
+The empty composer keeps its geometry while a run works: the working indicator overlays the input and Send/Stop/Resume share one fixed-size control. Actual typed multiline content can still expand the textarea. See [BUG_BASH.md](BUG_BASH.md) for the peer-review decisions, resilience fixes and live verification from the October 14 web health pass.

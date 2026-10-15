@@ -74,7 +74,7 @@ export function resolveResourceUrl(
 
   for (const candidate of candidates) {
     const url = assets.get(candidate);
-    if (url) return url.startsWith("data:") ? url : `${url}${suffix}`;
+    if (url) return url.startsWith("data:") ? `${url}${/^data:(?:image\/svg\+xml|text\/html)[;,]/i.test(url) && suffix.includes("#") ? suffix.slice(suffix.indexOf("#")) : ""}` : `${url}${suffix}`;
   }
   return null;
 }

@@ -1,3 +1,4 @@
+import { withChatTurnLock } from "../chat/turnLock";
 // Deep Research sessions: background interactions that outlive the tab.
 //   start → interaction id persisted on the session → watch via streaming reattach
 //   (interactions.get(id, {stream:true, last_event_id})) with a 10s poll fallback
@@ -16,13 +17,15 @@ import {
   asEventStream,
   blocksFromInteraction,
   consumeInteractionStream,
+  STORED_STREAM_STALL_MS,
   type StreamOutcome,
 } from "./streamAdapter";
 
 const POLL_INTERVAL_MS = 10_000;
-const TERMINAL = new Set(["completed", "failed", "cancelled", "incomplete", "budget_exceeded"]);
+const TERMINAL = new Set(["completed", "failed", "cancelled", "canceled", "incomplete", "budget_exceeded", "requires_action"]);
 
 const watching = new Set<string>();
+const watchers = new Map<string, AbortController>();
 
 function statusPart(label: string): ContentPart {
   return { kind: "tool", id: "research-status", activity: { tool: "other", label, status: "running" } };
@@ -30,12 +33,13 @@ function statusPart(label: string): ContentPart {
 
 function renderOutcome(sessionId: string, messageId: string, outcome: StreamOutcome, done: boolean): void {
   const parts = blocksToParts(outcome.blocks as MediaStampedBlock[], "dr");
-  const status = outcome.status || "in_progress";
-  const display = done ? settleParts(parts, status !== "completed") : [statusPart(researchLabel(status)), ...parts];
+  const status = (outcome.status || "in_progress").toLowerCase();
+  const cancelled = status === "cancelled" || status === "canceled";
+  const display = done ? settleParts(parts, status !== "completed" && !cancelled) : [statusPart(researchLabel(status)), ...parts];
   useStore.getState().patchMessage(sessionId, messageId, {
     parts: display,
-    status: done ? (status === "completed" ? "complete" : "error") : "streaming",
-    errorMessage: done && status !== "completed" ? `Research ended: ${status}.` : undefined,
+    status: done ? (status === "completed" ? "complete" : cancelled ? "stopped" : "error") : "streaming",
+    errorMessage: done && status !== "completed" && !cancelled ? (outcome.failureMessage || `Research ended: ${status}.`) : undefined,
     interactionId: outcome.interactionId || undefined,
     usage: outcome.usage,
     completedAt: done ? Date.now() : undefined,
@@ -47,26 +51,29 @@ function researchLabel(status: string): string {
   return status === "in_progress" ? "Researching… this can take several minutes" : `Research: ${status}`;
 }
 
-async function pollOnce(interactionId: string): Promise<StreamOutcome> {
-  const interaction = (await ai().interactions.get(interactionId)) as Record<string, unknown>;
+async function pollOnce(interactionId: string, client: ReturnType<typeof ai>, signal: AbortSignal): Promise<StreamOutcome> {
+  const interaction = (await client.interactions.get(interactionId, {}, { signal } as never)) as Record<string, unknown>;
   return blocksFromInteraction(interaction);
 }
 
-async function watch(sessionId: string, messageId: string, interactionId: string): Promise<void> {
+async function watch(sessionId: string, messageId: string, interactionId: string, client: ReturnType<typeof ai> = ai()): Promise<void> {
   if (watching.has(interactionId)) return;
   watching.add(interactionId);
+  const controller = new AbortController();
+  watchers.set(sessionId, controller);
   const store = () => useStore.getState();
   let lastEventId: string | undefined = store().sessions[sessionId]?.research?.lastEventId;
 
   try {
-    for (;;) {
+    while (!controller.signal.aborted && store().sessions[sessionId]?.research?.interactionId === interactionId) {
       // Preferred: live reattach stream (thinking summaries render as they happen).
       try {
-        const stream = await ai().interactions.get(interactionId, {
+        const stream = await client.interactions.get(interactionId, {
           stream: true,
           last_event_id: lastEventId,
-        } as never);
+        } as never, { signal: controller.signal } as never);
         const outcome = await consumeInteractionStream(asEventStream(stream), (blocks, meta) => {
+          if (controller.signal.aborted || store().sessions[sessionId]?.research?.interactionId !== interactionId) throw new DOMException("Tracking stopped", "AbortError");
           lastEventId = meta.lastEventId ?? lastEventId;
           renderOutcome(
             sessionId,
@@ -74,14 +81,15 @@ async function watch(sessionId: string, messageId: string, interactionId: string
             { ...meta, interactionId: meta.interactionId || interactionId, blocks: [...blocks] },
             false,
           );
-        });
+        }, { stallMs: STORED_STREAM_STALL_MS });
+        if (controller.signal.aborted || !store().sessions[sessionId]?.research) return;
         if (outcome.lastEventId) lastEventId = outcome.lastEventId;
         store().patchSession(sessionId, {
           research: { interactionId, startedAt: store().sessions[sessionId]?.research?.startedAt ?? Date.now(), lastEventId },
         });
-        if (TERMINAL.has(outcome.status)) {
-          const full = await pollOnce(interactionId); // final resource has complete steps
-          finish(sessionId, messageId, full);
+        if (TERMINAL.has(outcome.status.toLowerCase())) {
+          const full = await pollOnce(interactionId, client, controller.signal); // final resource has complete steps
+          await finish(sessionId, messageId, full);
           return;
         }
       } catch (e) {
@@ -90,47 +98,72 @@ async function watch(sessionId: string, messageId: string, interactionId: string
       }
 
       // Fallback: poll until terminal or until a fresh reattach succeeds.
-      const outcome = await pollOnce(interactionId);
-      if (TERMINAL.has(outcome.status)) {
-        finish(sessionId, messageId, outcome);
+      if (controller.signal.aborted || !store().sessions[sessionId]?.research) return;
+      let outcome: StreamOutcome;
+      try { outcome = await pollOnce(interactionId, client, controller.signal); }
+      catch (error) {
+        if (controller.signal.aborted) return;
+        const kind = toFriendly(error).kind;
+        if (["network", "server", "rate-limit", "unknown"].includes(kind)) { await new Promise(r => setTimeout(r, POLL_INTERVAL_MS)); continue; }
+        throw error;
+      }
+      if (controller.signal.aborted || store().sessions[sessionId]?.research?.interactionId !== interactionId) return;
+      if (TERMINAL.has(outcome.status.toLowerCase())) {
+        await finish(sessionId, messageId, outcome);
         return;
       }
       renderOutcome(sessionId, messageId, outcome, false);
       await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
     }
   } catch (e) {
+    if (controller.signal.aborted || !store().sessions[sessionId]?.research) return;
     useStore.getState().patchMessage(sessionId, messageId, {
       status: "error",
+      interactionId,
       errorMessage: toFriendly(e).message,
       completedAt: Date.now(),
     });
-    useStore.getState().patchSession(sessionId, { research: null });
-    useStore.getState().setStreaming(sessionId, false);
-    useStore.getState().persistTranscript(sessionId);
+    if (!["network", "server", "rate-limit", "unknown"].includes(toFriendly(e).kind)) useStore.getState().patchSession(sessionId, { research: null });
   } finally {
+    watchers.delete(sessionId);
     watching.delete(interactionId);
+    useStore.getState().setStreaming(sessionId, false);
+    await useStore.getState().persistTranscript(sessionId);
   }
 }
 
-function finish(sessionId: string, messageId: string, outcome: StreamOutcome): void {
+async function finish(sessionId: string, messageId: string, outcome: StreamOutcome): Promise<void> {
+  const previous = useStore.getState().sessions[sessionId];
   renderOutcome(sessionId, messageId, outcome, true);
   useStore.getState().patchSession(sessionId, {
     research: null,
-    lastInteractionId: outcome.interactionId || null,
-    environmentId: outcome.environmentId || null,
+    cancelNotice: undefined,
+    lastInteractionId: outcome.status.toLowerCase() === "completed" ? outcome.interactionId || previous?.lastInteractionId || null : previous?.lastInteractionId ?? null,
+    environmentId: outcome.environmentId || previous?.environmentId || null,
   });
   useStore.getState().setStreaming(sessionId, false);
-  useStore.getState().persistTranscript(sessionId);
+  await useStore.getState().persistTranscript(sessionId);
 }
 
 /** Start a research turn (also used for follow-ups: chains via previous ids). */
 export async function sendResearchTurn(sessionId: string, text: string): Promise<void> {
+  await withChatTurnLock(sessionId, false, async () => {
+    await useStore.persist.rehydrate();
+    useStore.setState(s => ({ hydrated: { ...s.hydrated, [sessionId]: false } }));
+    await sendResearchTurnUnlocked(sessionId, text);
+  });
+}
+
+async function sendResearchTurnUnlocked(sessionId: string, text: string): Promise<void> {
   await useStore.getState().hydrateSession(sessionId); // never append onto an un-hydrated transcript
   const store = useStore.getState();
   if (store.streaming[sessionId] || !text.trim()) return;
   const session = store.sessions[sessionId];
   if (!session) return;
+  if (session.research) { await resumeResearchUnlocked(sessionId); return; }
+  store.patchSession(sessionId, { cancelNotice: undefined });
 
+  const client = ai();
   const userMessage: Message = {
     id: uid(),
     role: "user",
@@ -163,7 +196,7 @@ export async function sendResearchTurn(sessionId: string, text: string): Promise
       stream: false,
     });
     // retries "none": an auto-retried POST would start a duplicate research run.
-    const created = (await ai().interactions.create(params as never, {
+    const created = (await client.interactions.create(params as never, {
       maxRetries: 0,
       retries: { strategy: "none" },
     } as never)) as Record<string, unknown>;
@@ -174,7 +207,7 @@ export async function sendResearchTurn(sessionId: string, text: string): Promise
       research: { interactionId, startedAt: Date.now() },
     });
     useStore.getState().persistTranscript(sessionId);
-    await watch(sessionId, assistantId, interactionId);
+    await watch(sessionId, assistantId, interactionId, client);
   } catch (e) {
     useStore.getState().patchMessage(sessionId, assistantId, {
       status: "error",
@@ -189,7 +222,12 @@ export async function sendResearchTurn(sessionId: string, text: string): Promise
 }
 
 /** After a reload: re-adopt an in-flight research run (called when a session mounts). */
-export function resumeResearchIfNeeded(sessionId: string): void {
+export async function resumeResearchIfNeeded(sessionId: string): Promise<void> {
+  await withChatTurnLock(sessionId, true, () => resumeResearchUnlocked(sessionId));
+}
+
+async function resumeResearchUnlocked(sessionId: string): Promise<void> {
+  await useStore.getState().hydrateSession(sessionId);
   const store = useStore.getState();
   const session = store.sessions[sessionId];
   const research = session?.research;
@@ -208,5 +246,21 @@ export function resumeResearchIfNeeded(sessionId: string): void {
     store.appendMessage(sessionId, placeholder);
   }
   store.setStreaming(sessionId, true);
-  void watch(sessionId, placeholder.id, research.interactionId);
+  await watch(sessionId, placeholder.id, research.interactionId);
+}
+
+/** A failed cancellation leaves the stored job and its watcher recoverable. */
+export async function cancelResearchTurn(sessionId: string): Promise<void> {
+  const session = useStore.getState().sessions[sessionId];
+  const id = session?.research?.interactionId;
+  if (!id) { useStore.getState().patchSession(sessionId, { cancelNotice: "Waiting for the server to register research before cancellation is available." }); return; }
+  try {
+    const outcome = blocksFromInteraction(await ai().interactions.cancel(id) as Record<string, unknown>);
+    if (!TERMINAL.has(outcome.status.toLowerCase())) throw new Error("Cancellation is not yet confirmed.");
+    const message = [...(useStore.getState().messages[sessionId] ?? [])].reverse().find(m => m.role === "assistant");
+    watchers.get(sessionId)?.abort();
+    if (message) await finish(sessionId, message.id, outcome);
+  } catch (error) {
+    useStore.getState().patchSession(sessionId, { cancelNotice: `Research cancellation was not confirmed. The saved run is still tracked. ${toFriendly(error).message}` });
+  }
 }

@@ -30,6 +30,7 @@ async function writeBytes(directory: FileSystemDirectoryHandle, name: string, da
 }
 
 async function writeConversationMetadata(root: FileSystemDirectoryHandle, sessionId: string): Promise<boolean> {
+  await useStore.getState().hydrateSession(sessionId);
   const state = useStore.getState();
   const session = state.sessions[sessionId];
   if (!session) return false;
@@ -83,12 +84,13 @@ export async function syncEntriesToProject(
   entries: TarEntry[],
   requestPermission: boolean,
 ): Promise<ProjectSyncResult | null> {
-  const root = await getProjectHandle(sessionId);
+  const record = await idbGet<{ id: string; handle: FileSystemDirectoryHandle; written?: [string, string][] }>("projectHandles", sessionId);
+  const root = record?.handle;
   if (!root) return null;
   const permission = await permissionFor(root, requestPermission);
   if (permission !== "granted") return { name: root.name, written: 0, skipped: entries.length, permission, metadataWritten: false };
 
-  const writtenPaths = writtenBySession.get(sessionId) ?? new Map<string, string>();
+  const writtenPaths = writtenBySession.get(sessionId) ?? new Map<string, string>(record?.written ?? []);
   writtenBySession.set(sessionId, writtenPaths);
   const directories = new Map<string, FileSystemDirectoryHandle>();
   let written = 0;
@@ -121,6 +123,7 @@ export async function syncEntriesToProject(
     writtenPaths.set(relPath, fingerprint);
     written++;
   }
+  await idbPut("projectHandles", { id: sessionId, handle: root, written: [...writtenPaths] });
   const metadataWritten = await writeConversationMetadata(root, sessionId);
   return { name: root.name, written, skipped, permission, metadataWritten };
 }

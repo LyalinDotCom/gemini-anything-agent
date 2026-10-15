@@ -1,7 +1,8 @@
+import { loadResourceUrl } from "./resourceSource";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { isModelFile } from "../utils/modelFiles";
 import type { OutputFileRecord } from "../state/types";
-import { getMediaBase64, getMediaUrl } from "../storage/messages";
+import { getMediaBase64 } from "../storage/messages";
 import { T } from "../tokens";
 import { Icon, IconButton, Spinner } from "./atoms";
 import { buildResourceUrlMap, rewriteHtmlResourceUrls } from "./resourceUrls";
@@ -12,22 +13,23 @@ function fileName(file: OutputFileRecord): string {
   return file.label.split("/").filter(Boolean).pop() || "resource";
 }
 
-function useResourceUrl(file: OutputFileRecord | null): string | null {
+function useResourceUrl(file: OutputFileRecord | null): { url: string | null; error: string | null } {
   const [url, setUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
-    setUrl(null);
+    setUrl(null); setError(null);
     if (!file) return () => {
       alive = false;
     };
-    void getMediaUrl(file.mediaId).then((next) => {
+    void loadResourceUrl(file).then((next) => {
       if (alive) setUrl(next);
-    });
+    }).catch(error => { if (alive) setError(error instanceof Error ? error.message : "Unable to load this resource."); });
     return () => {
       alive = false;
     };
-  }, [file]);
-  return url;
+  }, [file?.mediaId, file?.environmentId, file?.fingerprint]);
+  return { url, error };
 }
 
 function useResourceText(file: OutputFileRecord | null, url: string | null): string | null {
@@ -38,9 +40,9 @@ function useResourceText(file: OutputFileRecord | null, url: string | null): str
     if (!file || file.kind !== "text" || !url) return () => { alive = false; };
     void fetch(url).then((response) => response.text()).then((value) => {
       if (alive) setText(value.length > 2_000_000 ? `${value.slice(0, 2_000_000)}\n\n[Preview truncated at 2 MB]` : value);
-    });
+    }).catch(() => { if (alive) setText("Unable to load this text preview. Check output files and retry."); });
     return () => { alive = false; };
-  }, [file, url]);
+  }, [file?.mediaId, file?.kind, url]);
   return text;
 }
 
@@ -96,7 +98,7 @@ function useHtmlDocument(
 }
 
 export function ResourceLightbox({ file, files, onClose }: { file: OutputFileRecord | null; files: readonly OutputFileRecord[]; onClose: () => void }) {
-  const url = useResourceUrl(file);
+  const { url, error } = useResourceUrl(file);
   const text = useResourceText(file, url);
   const htmlDocument = useHtmlDocument(file, files, url);
   if (!file) return null;
@@ -168,7 +170,8 @@ export function ResourceLightbox({ file, files, onClose }: { file: OutputFileRec
         />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}>
-        {!url && <Spinner size={20} color={T.text} />}
+        {error && <p role="alert" style={{color:T.textDim}}>{error}</p>}
+        {!url && !error && <Spinner size={20} color={T.text} />}
         {url && /deepzoom\.zip$/i.test(file.label || file.path) && <Suspense fallback={<Spinner size={20}/>}><DeepZoomViewer url={url}/></Suspense>}
         {url && isModelFile(file) && <Suspense fallback={<Spinner size={20} />}><ModelViewer url={url} name={fileName(file)} /></Suspense>}
         {url && file.kind === "image" && (
@@ -203,7 +206,7 @@ export function ResourceLightbox({ file, files, onClose }: { file: OutputFileRec
 }
 
 export function AudioDock({ file, onClose }: { file: OutputFileRecord | null; onClose: () => void }) {
-  const url = useResourceUrl(file);
+  const { url, error } = useResourceUrl(file);
   if (!file) return null;
 
   return (
@@ -250,7 +253,7 @@ export function AudioDock({ file, onClose }: { file: OutputFileRecord | null; on
           >
             {file.label}
           </div>
-          {url ? <audio controls autoPlay src={url} style={{ width: "100%", height: 34 }} /> : <Spinner size={14} />}
+          {error ? <p role="alert" style={{fontSize:12,color:T.textDim}}>{error}</p> : url ? <audio controls autoPlay src={url} style={{ width: "100%", height: 34 }} /> : <Spinner size={14} />}
         </div>
         {url && (
           <a href={url} download={fileName(file)} title="Download" style={{ color: T.textDim, display: "inline-flex" }}>

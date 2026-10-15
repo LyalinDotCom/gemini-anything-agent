@@ -1,3 +1,4 @@
+import { contentFingerprint } from "../src/utils/contentFingerprint";
 import { describe, expect, test } from "vitest";
 import { syncEntriesToProject } from "../src/storage/localProjects";
 import { idbDelete, idbPut } from "../src/storage/db";
@@ -68,4 +69,12 @@ describe("local project sync", () => {
     expect(JSON.parse(new TextDecoder().decode(metadata?.files.get("conversation.json"))).session.id).toBe(id);
     useStore.getState().deleteSession(id);
   });
+});
+
+test("saved sync fingerprints preserve local edits when unchanged outputs are synced after reload",async()=>{
+ const id="reload-folder-test";const root=new FakeDirectory("project");const data=new TextEncoder().encode("generated source");
+ root.files.set("app.js",new TextEncoder().encode("my local edits"));
+ await idbPut("projectHandles",{id,handle:root as unknown as FileSystemDirectoryHandle,written:[["app.js",await contentFingerprint("app.js",data)]]});
+ const result=await syncEntriesToProject(id,[{name:"workspace/output/app.js",size:data.length,data}],false);
+ expect(result?.skipped).toBe(1);expect(new TextDecoder().decode(root.files.get("app.js"))).toBe("my local edits");
 });

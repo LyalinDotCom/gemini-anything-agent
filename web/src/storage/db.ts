@@ -100,17 +100,18 @@ export async function idbPut(store: StoreName, value: Record<string, unknown>): 
     tx.objectStore(store).put(value);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error ?? new DOMException("Storage transaction aborted", "AbortError"));
   });
 }
 
 export async function idbGet<T>(store: StoreName, key: string): Promise<T | null> {
   const db = await openDb();
   if (!db) return (memory[store].get(key) as T) ?? null;
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const tx = db.transaction(store, "readonly");
     const req = tx.objectStore(store).get(key);
     req.onsuccess = () => resolve((req.result as T) ?? null);
-    req.onerror = () => resolve(null);
+    req.onerror = () => reject(req.error ?? new Error("Could not read saved data."));
   });
 }
 
@@ -125,6 +126,7 @@ export async function idbDelete(store: StoreName, key: string): Promise<void> {
     tx.objectStore(store).delete(key);
     tx.oncomplete = () => resolve();
     tx.onerror = () => resolve();
+    tx.onabort = () => resolve();
   });
 }
 
@@ -150,6 +152,7 @@ export async function idbDeleteMediaForSession(sessionId: string): Promise<void>
     };
     tx.oncomplete = () => resolve();
     tx.onerror = () => resolve();
+    tx.onabort = () => resolve();
   });
 }
 
@@ -159,6 +162,7 @@ export async function idbWipe(): Promise<void> {
   if (!db) {
     memory.messages.clear();
     memory.media.clear();
+    memory.projectHandles.clear();
     return;
   }
   await new Promise<void>((resolve) => {
@@ -168,5 +172,6 @@ export async function idbWipe(): Promise<void> {
     tx.objectStore("projectHandles").clear();
     tx.oncomplete = () => resolve();
     tx.onerror = () => resolve();
+    tx.onabort = () => resolve();
   });
 }

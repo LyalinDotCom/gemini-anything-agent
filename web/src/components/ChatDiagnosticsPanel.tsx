@@ -45,7 +45,7 @@ export function ChatDiagnosticsPanel({
   onCancelServerTurn: () => void;
 }) {
   const canCancel = Boolean(
-    session.pending?.interactionId || session.lastInteractionId,
+    streaming || session.pending?.interactionId || session.research?.interactionId,
   );
 
   return (

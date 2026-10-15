@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { COMPOSER_MAX_VISIBLE_LINES, resizeComposerTextarea } from "../src/utils/composerTextarea";
 
 const computedStyle = {
@@ -12,6 +12,7 @@ const computedStyle = {
 
 const textarea = (scrollHeight: number, clientHeight = 108) => ({
   scrollHeight,
+  value: "Some text",
   clientHeight,
   scrollTop: -1,
   style: { height: "", overflowY: "" },
@@ -36,6 +37,22 @@ describe("composer textarea sizing", () => {
     resizeComposerTextarea(element, "end");
     expect(element.style.height).toBe("28px");
     expect(element.style.overflowY).toBe("hidden");
+  });
+
+  it("keeps an empty composer at its minimum instead of measuring wrapped placeholder text", () => {
+    const element = textarea(220);
+    element.value = "";
+    resizeComposerTextarea(element, "start");
+    expect(element.style.height).toBe("28px");
+    expect(element.style.overflowY).toBe("hidden");
+  });
+
+  it("honors the shared control height for a one-line composer", () => {
+    vi.spyOn(window, "getComputedStyle").mockReturnValue({ ...computedStyle, minHeight: "38px" } as CSSStyleDeclaration);
+    const element = textarea(24);
+    resizeComposerTextarea(element, "end");
+    expect(element.style.height).toBe("38px");
+    vi.restoreAllMocks();
   });
 
   it("caps at five lines, scrolls pasted content to the start, and typing to the end", () => {

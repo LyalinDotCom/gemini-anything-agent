@@ -3,6 +3,7 @@
 const STORAGE_KEY = "gaa.geminiApiKey.v1";
 
 const listeners = new Set<() => void>();
+let pageKey: string | null = null;
 
 function emit(): void {
   for (const fn of listeners) {
@@ -15,11 +16,12 @@ function emit(): void {
 }
 
 export function getStoredKey(): string | null {
+  if (pageKey !== null) return pageKey || null;
   try {
     const v = localStorage.getItem(STORAGE_KEY);
     return v && v.trim() ? v.trim() : null;
   } catch {
-    return null;
+    return pageKey;
   }
 }
 
@@ -30,17 +32,20 @@ export function hasStoredKey(): boolean {
 export function setStoredKey(key: string): void {
   try {
     localStorage.setItem(STORAGE_KEY, key.trim());
+    pageKey = null;
   } catch {
-    // storage may be unavailable (private mode) — key lives for this page only
+    // Storage may be unavailable (private mode); retain it only for this page.
+    pageKey = key.trim() || null;
   }
   emit();
 }
 
 export function clearStoredKey(): void {
+  pageKey = null;
   try {
     localStorage.removeItem(STORAGE_KEY);
   } catch {
-    // ignore
+    pageKey = "";
   }
   emit();
 }
@@ -53,6 +58,6 @@ export function onKeyChange(fn: () => void): () => void {
 
 if (typeof window !== "undefined") {
   window.addEventListener("storage", (e) => {
-    if (e.key === STORAGE_KEY) emit();
+    if (e.key === STORAGE_KEY || e.key === null) { pageKey = null; emit(); }
   });
 }

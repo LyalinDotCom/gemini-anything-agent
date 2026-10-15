@@ -13,18 +13,25 @@ import { mergeChatState } from "./merge";
 import type { Message, Session, SessionMode } from "./types";
 
 const safePersistStorage = createJSONStorage(() => {
-  try {
-    localStorage.getItem("__probe__");
-    return localStorage;
-  } catch {
-    const mem = new Map<string, string>();
-    return {
-      getItem: (k: string) => mem.get(k) ?? null,
-      setItem: (k: string, v: string) => void mem.set(k, v),
-      removeItem: (k: string) => void mem.delete(k),
-    };
-  }
+  const volatile = new Map<string, string>();
+  return {
+    getItem: (key: string) => {
+      if (volatile.has(key)) return volatile.get(key)!;
+      try { return localStorage.getItem(key); } catch { return null; }
+    },
+    setItem: (key: string, value: string) => {
+      try { localStorage.setItem(key, value); volatile.delete(key); }
+      catch { volatile.set(key, value); }
+    },
+    removeItem: (key: string) => {
+      volatile.delete(key);
+      try { localStorage.removeItem(key); } catch { /* unavailable storage */ }
+    },
+  };
 });
+const hydrationReads = new Map<string, number>();
+const unsavedTranscripts = new Map<string, Message[]>();
+const transcriptWrites = new Map<string, number>();
 
 export interface Settings {
   sendOnEnter: boolean;
@@ -118,6 +125,7 @@ export const useStore = create<AppState>()(
       },
 
       deleteSession(id) {
+        unsavedTranscripts.delete(id); transcriptWrites.delete(id);
         set((s) => {
           const sessions = { ...s.sessions };
           delete sessions[id];
@@ -157,7 +165,7 @@ export const useStore = create<AppState>()(
       setActiveSession(id) {
         if (id && !get().sessions[id]) return;
         set({ activeSessionId: id });
-        if (id) void get().hydrateSession(id);
+        if (id) void get().hydrateSession(id).catch(() => undefined);
       },
 
       patchSession(id, patch) {
@@ -169,10 +177,12 @@ export const useStore = create<AppState>()(
       },
 
       async hydrateSession(id) {
-        if (get().hydrated[id]) return;
-        const loaded = await loadTranscript(id);
+        if (get().hydrated[id] || !get().sessions[id]) return;
+        const generation = (hydrationReads.get(id) ?? 0) + 1;
+        hydrationReads.set(id, generation);
+        const loaded = unsavedTranscripts.get(id) ?? await loadTranscript(id);
         set((s) => {
-          if (s.hydrated[id]) return s;
+          if (s.hydrated[id] || !s.sessions[id] || hydrationReads.get(id) !== generation) return s;
           // MERGE with anything appended while the IDB read was in flight — never
           // clobber live messages with the loaded snapshot.
           const inFlight = s.messages[id] ?? [];
@@ -220,7 +230,22 @@ export const useStore = create<AppState>()(
         // Never write an un-hydrated (partial) view over the stored transcript.
         if (!get().hydrated[sessionId]) return;
         const list = get().messages[sessionId];
-        if (list) { await saveTranscript(sessionId, list); transcriptChannel?.postMessage({ sessionId }); }
+        if (!list) return;
+        const version = (transcriptWrites.get(sessionId) ?? 0) + 1;
+        transcriptWrites.set(sessionId, version);
+        try {
+          await saveTranscript(sessionId, list);
+          if (transcriptWrites.get(sessionId) === version) {
+            unsavedTranscripts.delete(sessionId);
+            if (get().sessions[sessionId]?.historySaveError) get().patchSession(sessionId, { historySaveError: false });
+          }
+          transcriptChannel?.postMessage({ sessionId });
+        } catch {
+          if (get().sessions[sessionId] && transcriptWrites.get(sessionId) === version) {
+            unsavedTranscripts.set(sessionId, get().messages[sessionId] ?? list);
+            get().patchSession(sessionId, { historySaveError: true });
+          }
+        }
       },
 
       setAgent(agent) {
@@ -271,7 +296,7 @@ if (typeof window !== "undefined") {
     if (e.key === "gaa-store") {
       void Promise.resolve(useStore.persist.rehydrate()).then(() => {
         const id = useStore.getState().activeSessionId;
-        if (id) void useStore.getState().hydrateSession(id);
+        if (id) void useStore.getState().hydrateSession(id).catch(() => undefined);
       });
     }
   });
@@ -283,5 +308,5 @@ if (transcriptChannel) transcriptChannel.onmessage = (event: MessageEvent<{ sess
   const state = useStore.getState();
   if (!id || !state.sessions[id] || state.streaming[id]) return;
   useStore.setState(s => ({ hydrated: { ...s.hydrated, [id]: false } }));
-  if (state.activeSessionId === id) void state.hydrateSession(id);
+  if (state.activeSessionId === id) void state.hydrateSession(id).catch(() => undefined);
 };

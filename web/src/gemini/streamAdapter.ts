@@ -169,6 +169,8 @@ function finalizeBlock(block: StreamBlock): void {
 /** No events for this long → the stream is presumed dead (the RUN may be fine —
  *  callers recover by polling the interaction, which is the durable object). */
 const DEFAULT_STALL_MS = 3 * 60 * 1000;
+export const STORED_STREAM_STALL_MS = 30_000;
+const STREAM_TERMINAL = new Set(["completed", "succeeded", "success", "failed", "cancelled", "canceled", "incomplete", "budget_exceeded", "requires_action"]);
 
 /**
  * Drain an interaction event stream. `onUpdate` fires after every event with the
@@ -179,7 +181,7 @@ const DEFAULT_STALL_MS = 3 * 60 * 1000;
 export async function consumeInteractionStream(
   stream: AsyncIterable<SdkEvent>,
   onUpdate?: (blocks: StreamBlock[], meta: StreamMeta) => void,
-  opts?: { stallMs?: number },
+  opts?: { stallMs?: number; acknowledgedStallMs?: number },
 ): Promise<StreamOutcome> {
   const blocks = new Map<number, StreamBlock>();
   const meta: StreamMeta = { interactionId: "", environmentId: "", status: "" };
@@ -215,7 +217,8 @@ export async function consumeInteractionStream(
       result = await Promise.race([
         iterator.next(),
         new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error("Network stream stalled — no events received")), stallMs);
+          const limit = meta.interactionId ? opts?.acknowledgedStallMs ?? stallMs : stallMs;
+          timer = setTimeout(() => reject(new Error("Network stream stalled — no events received")), limit);
         }),
       ]);
     } catch (e) {
@@ -263,6 +266,10 @@ export async function consumeInteractionStream(
     }
 
     onUpdate?.(sorted(), { ...meta });
+    if (/^interaction\.(completed|failed|cancelled|canceled|incomplete|error)$/.test(ev.event_type ?? "") && STREAM_TERMINAL.has(meta.status.toLowerCase())) {
+      void Promise.resolve(iterator.return?.()).catch(() => undefined);
+      break;
+    }
   }
 
   for (const block of blocks.values()) {

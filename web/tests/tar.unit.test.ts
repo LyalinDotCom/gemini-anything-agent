@@ -140,3 +140,21 @@ describe("parseTar", () => {
     await expect(parseTarStream(streamOf(), include, 500)).rejects.toThrow(/included-content limit/);
   });
 });
+
+ test("GNU long link targets resolve in buffered and streamed archives",async()=>{
+  const name="output/"+"x".repeat(120)+".txt";
+  const buffer=tarOf([{name:'long',content:name+"\0",type:'L'},{name:'short',content:'data'},{name:'link',content:name+"\0",type:'K'},{name:'output/copy.txt',content:'',type:'1',linkName:name}]);
+  expect(parseTar(buffer).map(e=>e.name)).toEqual([name,'output/copy.txt']);
+  const result=await parseTarStream(new Blob([buffer]).stream(),()=>true);
+  expect(result.entries.map(e=>e.name)).toEqual([name,'output/copy.txt']);
+  expect(result.unresolvedLinks).toEqual([]);
+});
+ test("a cut-off file is reported instead of silently returning partial output",async()=>{
+  const buffer=tarOf([{name:'output/test.txt',content:'payload'}]).slice(0,514);
+  expect(()=>parseTar(buffer)).toThrow(/ended/);
+  await expect(parseTarStream(new Blob([buffer]).stream(),()=>true)).rejects.toThrow(/cut off/);
+});
+ test("hard-linked output bytes count against the materialized size cap",async()=>{
+  const buffer=tarOf([{name:'output/one',content:'1234'},{name:'output/two',content:'',type:'1',linkName:'output/one'}]);
+  await expect(parseTarStream(new Blob([buffer]).stream(),()=>true,6)).rejects.toThrow(/limit/);
+});
